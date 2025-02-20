@@ -21,15 +21,15 @@ pip install -e . # Live-install the repo as an importable package
 
 **Step 5**: Test that your install works.
 ```
-conda activate ngeegee # if not already activated
-ipython # puts you in an interactive python shell
+conda activate ngeegee 
+ipython
 from ngeegee import e5l_utils
 ```
 If you can import from the `ngeegee` package without error, you're gravy.
 
 **Step 5b**: If you haven't used the GEE API before, you'll need to Authenticate before you can interact with GEE via Python. For more details, or if you get stuck, check out the [official guidance](https://developers.google.com/earth-engine/guides/auth). However, it's likely the following code will work for you:
 ```
-conda activate ngeegeehttps://github.com/NGEE-Arctic/NGEEGEE
+conda activate ngeegee
 ipython
 import ee
 ee.Authenticate() # This should open a browser where you allow access to your GEE account and project
