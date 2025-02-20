@@ -1,0 +1,17 @@
+name: ngeegee
+channels:  
+  - conda-forge
+dependencies:
+  - python=3
+  - geopandas
+  - earthengine-api
+  - geemap
+  - pip
+  - xarray
+  - tqdm
+  - rioxarray
+  - jupyter
+  - pip:
+    - nco
+  
+
