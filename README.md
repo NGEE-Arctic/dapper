@@ -35,7 +35,7 @@ ee.Initialize(project='ee-yourprojectname') # replace ee-yourprojectname with yo
 You will not need to run `ee.Authenticate()` again as it stores your credentials locally. You will, however, have to run `ee.Initialize()` each time you use the GEE Python API.
 
 ## Usage
-Check out the jupyter notebooks (not yet created) for ways to use the tools in this package.
+Check out the [jupyter notebooks](https://github.com/NGEE-Arctic/NGEEGEE/tree/main/notebooks) for ways to use the tools in this package.
 
 ## Contributing
 Feel free to fork the repo and make improvements. Open a pull request and we'll check it out.
