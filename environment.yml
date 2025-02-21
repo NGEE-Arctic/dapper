@@ -2,7 +2,7 @@ name: ngeegee
 channels:  
   - conda-forge
 dependencies:
-  - python=3
+  - python
   - geopandas
   - earthengine-api
   - geemap
