@@ -4,9 +4,9 @@ import pandas as pd
 from datetime import datetime
 from shapely.geometry import Polygon
 
-# Find the data directory
+# Define the ROOT and DATA directories for ease of use later
 from pathlib import Path
-import ngeegee  # Import your package
+import ngeegee 
 _ROOT_DIR = Path(next(iter(ngeegee.__path__))).parent
 _DATA_DIR = _ROOT_DIR / "data"
 
