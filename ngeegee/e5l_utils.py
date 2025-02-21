@@ -7,8 +7,8 @@ from shapely.geometry import Polygon
 # Find the data directory
 from pathlib import Path
 import ngeegee  # Import your package
-ngeegee_path = Path(next(iter(ngeegee.__path__))).parent
-_DATA_DIR = ngeegee_path / "data"
+_ROOT_DIR = Path(next(iter(ngeegee.__path__))).parent
+_DATA_DIR = _ROOT_DIR / "data"
 
 # ee.Initialize(project='ee-jonschwenk')
 
