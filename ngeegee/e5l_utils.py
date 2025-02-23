@@ -2,60 +2,8 @@ import ee
 import geemap
 import pandas as pd
 from datetime import datetime
+from ngeegee import utils
 from shapely.geometry import Polygon
-
-# Define the ROOT and DATA directories for ease of use later
-from pathlib import Path
-import ngeegee 
-_ROOT_DIR = Path(next(iter(ngeegee.__path__))).parent
-_DATA_DIR = _ROOT_DIR / "data"
-
-# ee.Initialize(project='ee-jonschwenk')
-
-# ## Generate a clipping polygon; you can also load in a shapefile and pull out the geometry
-# # Define central point
-# lat, lon = 68.62758, -149.59429
-
-# # Define size of bounding box
-# lon_width = 0.05 # This is the total width
-# lat_height = 0.05 # This is the total height
-
-# # Define the four corners of the polygon (lon, lat order for Shapely)
-# polygon = Polygon([
-#     (lon - lon_width/2, lat - lat_height/2),  # Bottom-left
-#     (lon + lon_width/2, lat - lat_height/2),  # Bottom-right
-#     (lon + lon_width/2, lat + lat_height/2),  # Top-right
-#     (lon - lon_width/2, lat + lat_height/2),  # Top-left
-#     (lon - lon_width/2, lat - lat_height/2)   # Closing the polygon
-# ])
-
-# # 37 minutes for 25 years, 2 bands
-
-
-# params = {
-#     'name' : 'test', # Name the region/sampling
-#     'start_date' : '1950-01-01', # YYYY-MM-DD
-#     'end_date' : '1950-02-01', # YYYY-MM-DD
-#     'geometry' : polygon, # This must be EPSG:4326; we do not check this so get it right
-#     'gee_ic' : 'ECMWF/ERA5_LAND/HOURLY', # Path to GEE Asset to sample; here we choose ERA5-Land Hourly
-#     'gee_bands' : [ 'temperature_2m', # These bands must match the gee_ic ImageCollection
-#                     'u_component_of_wind_10m',
-#                     'v_component_of_wind_10m',
-#                     'surface_pressure',
-#                     'dewpoint_temperature_2m',
-#                     'total_precipitation_hourly',
-#                     'surface_solar_radiation_downwards_hourly',
-#                     'surface_thermal_radiation_downwards_hourly',
-#                     'snow_depth',
-#                     'snow_depth_water_equivalent',
-#                     'snow_density',
-#                     'snow_cover',
-#                     'snowfall_hourly'],
-#     'gee_output_gdrive_folder' : 'test', # Which folder to store on your GDrive; will be created if not exists
-#     'gee_batch_nyears' : 5, # Number of years to batch GEE exports
-#     'gee_scale' : 'native', # scale is in meters; 'native' will use the native resolution 
-#     'out_directory' : r'X:\Research\NGEE Arctic\NGEEGEE\temp_data' 
-# }
 
 def parse_geometry_object(geom, name): # Function to translate gdf geometries to ee geometries
     
@@ -178,6 +126,59 @@ def sample_e5lh_at_point(params):
     return f"Export task started: {params['filename']} (Check Google Drive or Task Status in the Javascript Editor for completion.)"
 
 
+def sample_e5lh_at_points(params):
+    """
+    Exports ERA5-Land hourly time-series data for multiple points to Google Drive.
+    
+    Input is params, a dictionary with the following keys:
+        start_date (str) : YYYY-MM-DD format
+        end_date (str) : YYYY-MM-DD format
+        points (list of dict) : List of dictionaries, each with 'lon', 'lat', and 'pid' keys
+        gee_bands (str OR list of str) : 'all' to select all available bands, or a list of specific bands
+        gdrive_folder (str) : Google Drive folder name for export
+        file_name (str) : Name of the exported CSV file (without extension)
+    """
+    # Validate the requested bands
+    if params['gee_bands'] == 'all':
+        params['gee_bands'] = e5lh_bands()['band_name'].tolist()
+    else:
+        validate_bands(params['gee_bands'])
+
+    params['gee_ic'] = "ECMWF/ERA5_LAND/HOURLY"  # ERA5-Land Hourly imageCollection
+
+    # Load ImageCollection and filter by date
+    ic = ee.ImageCollection(params['gee_ic']).filterDate(params['start_date'], params['end_date'])
+
+    # Convert list of points into a FeatureCollection
+    features = []
+    for pointname in params['points']:
+        geom = ee.Geometry.Point([params['points'][pointname][1], params['points'][pointname][0]])
+        feature = ee.Feature(geom, {'pid': pointname})
+        features.append(feature)
+    point_fc = ee.FeatureCollection(features)
+
+    # Function to extract values for each image and associate with the points
+    def image_to_features(image):
+        date = ee.Date(image.get('system:time_start')).format("YYYY-MM-dd HH:mm")
+        values = image.reduceRegions(collection=point_fc, reducer=ee.Reducer.first(), scale=11132)
+        return values.map(lambda f: f.set("date", date))
+    
+    # Map function over the ImageCollection
+    feature_collection = ic.map(image_to_features).flatten()
+    
+    # Export to Google Drive as CSV
+    task = ee.batch.Export.table.toDrive(
+        collection=feature_collection,
+        description=params['filename'],
+        folder=params['gdrive_folder'],
+        fileFormat="CSV",
+        selectors=['pid', 'date'] + params['gee_bands']
+    )
+    task.start()
+
+    return f"Export task started: {params['filename']} (Check Google Drive or Task Status in the Javascript Editor for completion.)"
+
+
 def e5lh_bands():
-    return pd.read_csv(_DATA_DIR / 'e5lh_band_metadata.csv')
+    return pd.read_csv(utils._DATA_DIR / 'e5lh_band_metadata.csv')
     
