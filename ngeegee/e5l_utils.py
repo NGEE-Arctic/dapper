@@ -1,6 +1,7 @@
 import ee
 import geemap
 import pandas as pd
+import numpy as np
 from datetime import datetime
 from ngeegee import utils
 from shapely.geometry import Polygon
@@ -19,6 +20,7 @@ def parse_geometry_object(geom, name): # Function to translate gdf geometries to
     return ret
 
 def _export_e5lh_images(params):
+    # Doesn't currently work; not sure if I want to finish it because point sampling might make more sense
     """Exports ERA5-Land Hourly images over a requested domain.
     params is a dictionary with the following defined:
         name : str - name the region/sampling
@@ -70,60 +72,6 @@ def validate_bands(bandlist):
         raise NameError("You requested the following bands which are not in ERA5-Land Hourly (perhaps check spelling?): {}. For a list of available bands, run eu.e5lh_bands()['band_name'].".format(not_in))
     
     return
-
-def sample_e5lh_at_point(params):
-    """
-    Exports ERA5-Land hourly time-series data for a single point to Google Drive.
-    
-    Input is params, a dictionary with the following keys:
-        start_date (str) : YYYY-MM-DD format
-        end_date (str) : YYYY-MM-DD format
-        point (tuple) : (longitude, latitude)
-        gee_bands (str OR list of str) : either 'all' to select all available bands, or a list of bands e.g. ['temperature_2m', 'u_component_of_wind_10m']. These bands must be in the ERA5-Land hourly GEE dataset.
-        gdrive_folder (str) : name of Google Drive folder to export results into 
-        file_name (str) : name of the .csv file to export (without extension)
-    """
-    # Validate the requested bands - will error if there's a problem
-    if params['gee_bands'] == 'all':
-        params['gee_bands'] = e5lh_bands()['band_name'].tolist()
-    else:
-        validate_bands(params['gee_bands'])
-
-    params['gee_ic'] = "ECMWF/ERA5_LAND/HOURLY" # Specify ERA5-Land Hourly imageCollection
-
-    # Load ImageCollection and filter by date
-    ic = ee.ImageCollection(params['gee_ic']).filterDate(params['start_date'], params['end_date'])
-
-    # Create a single-point geometry
-    point = ee.Geometry.Point(params['point'])
-
-    # Filter ImageCollection to the given point
-    ic = ic.filterBounds(point).select(params['gee_bands'])
-
-    # Convert images to a FeatureCollection with date as a property
-    def image_to_feature(image):
-        date = ee.Date(image.get('system:time_start')).format("YYYY-MM-dd HH:mm")
-        values = image.reduceRegion(ee.Reducer.first(), point, scale=11132)
-        feature = ee.Feature(None, values).set("date", date)
-        
-        # Remove unwanted properties
-        feature = feature.select(params['gee_bands'] + ["date"])  # Keeps only selected bands + date
-
-        return feature
-
-    feature_collection = ic.map(image_to_feature)
-
-    # Export to Google Drive as CSV
-    task = ee.batch.Export.table.toDrive(
-        collection=feature_collection,
-        description=params['filename'],
-        folder=params['gdrive_folder'],
-        fileFormat="CSV",
-        selectors=params['gee_bands'] + ['date']
-    )
-    task.start()
-
-    return f"Export task started: {params['filename']} (Check Google Drive or Task Status in the Javascript Editor for completion.)"
 
 
 def sample_e5lh_at_points(params):
@@ -182,3 +130,48 @@ def sample_e5lh_at_points(params):
 def e5lh_bands():
     return pd.read_csv(utils._DATA_DIR / 'e5lh_band_metadata.csv')
     
+
+def split_into_dfs(path_csv):
+    """
+    Splits a GEE-exported csv (from sample_e5lh_at_points) into a dictionary of dataframes
+    based on the unique values in the 'pid' column.
+    """
+    df = pd.read_csv(path_csv)
+    return {k : group for k, group in df.groupby('pid')}
+
+
+def rh(temp, dewpoint_temp):
+    """
+    Ported by JPS from code written by Ryan Crumley.
+    temp - (np.array) - array of air temperature values (temperature_2m)
+    dewpoint_temp : (np.array) - array of dewpoint temperature values (dewpoint_temperature_2m); must be same length as temp
+    """
+    # Convert Dewpoint Temp and Temp to RH using Clausius-Clapeyron
+    # The following is taken from Margulis 2017 Textbook, Introduction to Hydrology 
+    # from pages 49 & 50.
+    # More info can be found at: https://margulis-group.github.io/teaching/
+    
+    # Define some constants
+    esat_not = 611 # Constant (Pa)
+    rw = 461.52 # Gas constant for moist air (J/kg)
+    lv = 2453000 # Latent heat of vaporization (J/kg)
+    ls = 2838000 # Latent heat of sublimation (J/kg)
+    tnot = 273.15 # Temp constant (K)
+    
+    # Saturated Vapor Pressure (using Temperature)
+    # NOTE: if temp is above 0(C) or 273.15(K) then use the latent heat of vaporization
+    # and if temp is below 0(C) or 273.15(K) then use the latent heat of sublimation
+    ESATtmp = np.where(temp>=273.15,
+                esat_not*np.exp((lv/rw)*((1/tnot) - (1/temp))),
+                esat_not*np.exp((ls/rw)*((1/tnot) - (1/temp))))
+
+    # Actual Vapor Pressure (using Dewpoint Temperature)
+    Etmp = np.where(temp<=273.15,
+            esat_not*np.exp((lv/rw)*((1/tnot) - (1/dewpoint_temp))),
+            esat_not*np.exp((ls/rw)*((1/tnot) - (1/dewpoint_temp))))
+    
+    # Finally, calculate Relative Humidity using the ratio of the vapor pressures at 
+    # certain temperatures.
+    RHtmp = (Etmp/ESATtmp)*100
+
+    return RHtmp
