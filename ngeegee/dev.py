@@ -26,6 +26,7 @@ def export_e5lh_grid(path_e5lh_file=r'notebooks/data/e5lh_grid_sample.grib', pat
     import numpy as np
     import xarray as xr
     import os
+    
 
     # Load the NetCDF file
     ds = xr.open_dataset(path_e5lh_file, engine='cfgrib')
@@ -107,13 +108,16 @@ def export_e5lh_grid(path_e5lh_file=r'notebooks/data/e5lh_grid_sample.grib', pat
 # is approximately 40.8 GB. 
 # 1 GB for 7 sites (points), full time range
 
-def e5lh_to_elm_preprocess(df):
+def e5lh_to_elm_preprocess(df, remove_leap=True, verbose=False):
     """
     Unit conversions and renaming for "raw" ERA5-Land (hourly) data.
 
     df : (pandas.DataFrame) - the dataframe containing the raw GEE-exported csv.
+    verbose : (bool) - True if you want information about what's being corrected
     """
     from ngeegee.e5l_utils import compute_humidities
+    # from ngeegee.utils import validate_met_vars
+    from ngeegee.utils import elm_data_dicts as edd
 
     # Start with the time dimension
     df['date'] = pd.to_datetime(df['date'])
@@ -134,16 +138,10 @@ def e5lh_to_elm_preprocess(df):
         print("There is not a full year's worth of data. Using the full dataset.")  
 
     # Remove leap days
-    df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
+    if remove_leap is True:
+        df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
 
-    # Add days since Jan 01 of first year
-    # df['DTIME'] = np.arange(0, len(df), 1) 
-
-    # # Reformat date column to string
-    # df['date'] = df['date'].dt.strftime('%Y-%m-%dT00:00:00')
-
-    # Convert units, compute indirect variables (humidities)
-    
+    # Convert units, compute indirect variables (humidities)   
     # Compute wind magnitude
     if 'u_component_of_wind_10m' in df.columns and 'v_component_of_wind_10m' in df.columns:
         df['wind_speed'] = np.sqrt(df['u_component_of_wind_10m'].values**2+df['v_component_of_wind_10m'].values**2)
@@ -158,15 +156,11 @@ def e5lh_to_elm_preprocess(df):
     # Precipitation - convert from meters/hour to mm/second
     if 'total_precipitation_hourly' in df.columns:
         df['total_precipitation_hourly'] = df['total_precipitation_hourly'].values / 3.6
-        df['total_precipitation_hourly'].values[df['total_precipitation_hourly']<0] = 0 # negatives to 0
-
-    # Temperature - convert to Celcius
-    if 'temperature_2m' in df.columns:
-        df['temperature_2m'] = df['temperature_2m'].values - 273.16
 
     # Solar rad downwards - convert from J/hr/m2 to W/m2
     if 'surface_solar_radiation_downwards_hourly' in df.columns:
         df['surface_solar_radiation_downwards_hourly'] = df['surface_solar_radiation_downwards_hourly'].values / 3600
+
 
     # Thermal rad downwards - convert from J/hr/m2 to W/m2
     if 'surface_thermal_radiation_downwards_hourly' in df.columns:
@@ -178,10 +172,23 @@ def e5lh_to_elm_preprocess(df):
                            df['dewpoint_temperature_2m'].values,
                            df['surface_pressure'].values)
 
-    # Add validation (max/min of each variable)
-    # outvars  = ['TBOT','RH','WIND','PSRF','FSDS',    'PRECTmms']
-    # valid_min= [180.00,   0,     0,  8e4,         0,      0]
-    # valid_max= [350.00,100.,    80,1.5e5,      2500,      15]
+    # Enforce non-negativeness for variables for which that is physically impossible
+    nonnegs = edd()['nonneg']
+    for c in df.columns:
+        if c in ['pid', 'date']:
+            continue
+        if c in nonnegs:
+            negs = df[c]<0
+            if sum(negs) > 0:
+                df[c].values[negs] = 0
+                if verbose:
+                    pct_neg = sum(negs) / len(df) * 100
+                    print(f"{pct_neg:.2f}% of the values in {c} were negative and reset to 0.")
+
+
+    for n in nonnegs:
+        if n in df.columns:
+    
 
     return df
 
@@ -197,11 +204,12 @@ import xarray as xr
 import numpy as np
 from datetime import datetime
 from pathlib import Path
-from ngeegee.utils import elm_data_dicts as edd
 
 path = r"X:\Research\NGEE Arctic\1. Baseline PanArctic\data\e5l_7_sites.csv"
 df = pd.read_csv(path)
 df = e5lh_to_elm_preprocess(df)
+
+utils.validate_met_vars(df)
 
 points = {'abisko' : (68.35, 18.78333),
         'tvc' : (68.742, -133.499),
@@ -216,11 +224,12 @@ df_loc = pd.DataFrame({'pid' : points.keys(),
 
 dir_out = Path(r'X:\Research\NGEE Arctic\1. Baseline PanArctic\data\temp_make_netcdfs')
 dformat='CPL_BYPASS'
-def export_for_elm(df, df_loc, dir_out, dformat='CPL_BYPASS'):
+def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
     """
     Export in ELM-ready foramts.
     df has all the data. Sorted by date already.
     df_loc has a list of points (pids) and their locations (lat, lon).
+    zval is the height in meters of the observations - defaults to 1.
     dformat must be CPL_BYPASS for now.
     """
     # except for 'site', other type of cpl_bypass requires zone_mapping.txt file
@@ -233,9 +242,6 @@ def export_for_elm(df, df_loc, dir_out, dformat='CPL_BYPASS'):
     elif dformat == 'DATM_MODE':
         print('DATM_MODE is not yet available. Exiting.')
         return
-
-    zval = 13 # just making this up for now
-
 
     # Split into individual location (based on 'pid') dfs
     dfs = {k : group for k, group in df.groupby('pid')}
@@ -315,6 +321,8 @@ valid_min= [180.00,   0,     0,  8e4,         0,      0]
 valid_max= [350.00,100.,    80,1.5e5,      2500,      15]
 
 dstemp = xr.open_dataset(r"X:\Research\NGEE Arctic\NGEEGEE\data\fengming_data\Daymet_ERA5.1km_FLDS_1980-2023_z01.nc")
+
+
 
 
 
