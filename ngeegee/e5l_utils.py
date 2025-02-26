@@ -69,10 +69,10 @@ def validate_bands(bandlist):
     """
     Ensures that the requested bands are available and errors if not.
     """
-    available_bands = set(e5lh_bands()['band_name'].tolist())
+    available_bands = set(md.e5lh_bands()['band_name'].tolist())
     not_in = [b for b in bandlist if b not in available_bands]
     if len(not_in) > 0:
-        raise NameError("You requested the following bands which are not in ERA5-Land Hourly (perhaps check spelling?): {}. For a list of available bands, run eu.e5lh_bands()['band_name'].".format(not_in))
+        raise NameError("You requested the following bands which are not in ERA5-Land Hourly (perhaps check spelling?): {}. For a list of available bands, run md.e5lh_bands()['band_name'].".format(not_in))
     
     return
 
@@ -89,9 +89,11 @@ def sample_e5lh_at_points(params):
         gdrive_folder (str) : Google Drive folder name for export
         file_name (str) : Name of the exported CSV file (without extension)
     """
-    # Validate the requested bands
+    # Populate and/or validate the requested bands
     if params['gee_bands'] == 'all':
-        params['gee_bands'] = e5lh_bands()['band_name'].tolist()
+        params['gee_bands'] = md.e5lh_bands()['band_name'].tolist()
+    elif params['gee_bands'] == 'elm_required':
+        params['gee_bands'] = md.elm_data_dicts()['elm_required_bands']
     else:
         validate_bands(params['gee_bands'])
 
@@ -128,10 +130,6 @@ def sample_e5lh_at_points(params):
     task.start()
 
     return f"Export task started: {params['filename']} (Check Google Drive or Task Status in the Javascript Editor for completion.)"
-
-
-def e5lh_bands():
-    return pd.read_csv(utils._DATA_DIR / 'e5lh_band_metadata.csv')
     
 
 def split_into_dfs(path_csv):
@@ -217,8 +215,7 @@ def validate_met_vars(df):
 
     # Perform the validation of data ranges and orders of magnitude
     for v in check_vars:
-        dmean = df[v].mean()
-        dmin, dmax = np.percentile(df[v], [1, 99])
+        dmean, dmin, dmax = df[v].mean(), df[v].min(), df[v].max()
 
         this_stats = sdf[namemap[v]]
         vmean, vmin, vmax = this_stats['mean'], this_stats['min'], this_stats['max']
@@ -235,11 +232,11 @@ def validate_met_vars(df):
 
         # OLMT provided the following code as well: see https://github.com/dmricciuto/OLMT/blob/ca01781f4925e4aad32cc697c2d09eb94eddd920/metdata_tools/site/data_to_elmbypass.py#L30
         # Use the OLMT ranges as an additional check
-        olmt_vars = ['TBOT','RH','WIND','PSRF','FSDS',    'PRECTmms']
+        olmt_vars = ['TBOT','RH','WIND','PSRF','FSDS','PRECTmms']
         olmt_mins = [180.00,   0,     0,  8e4,         0,      0]
         olmt_maxs = [350.00,100.,    80,1.5e5,      2500,      15]
         if namemap[v] in olmt_vars:
-             if vmax > olmt_maxs[olmt_vars.index(namemap[v])] or  vmin < olmt_mins[olmt_vars.index(namemap[v])]:
+             if dmax > olmt_maxs[olmt_vars.index(namemap[v])] or  dmin < olmt_mins[olmt_vars.index(namemap[v])]:
                   print('MED CONCERN: the max and/or min values in {} exceed the expected range provided by OLMT (variable name {}).'.format(v, namemap[v]))
 
     if len(nostats) > 0:
@@ -280,7 +277,7 @@ def e5lh_to_elm_preprocess(df, remove_leap=True, verbose=False):
     if not valid_years.empty:
         start_year, end_year = valid_years[0], valid_years[-1]
         df = df[(df["year"] >= start_year) & (df["year"] <= end_year)]
-        df.drop(columns=['year', 'month_day'], inplace=True)
+        df = df.drop(columns=['year', 'month_day'])
     else:
         print("There is not a full year's worth of data. Using the full dataset.")  
 
@@ -344,13 +341,16 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
     # except for 'site', other type of cpl_bypass requires zone_mapping.txt file
 
     # Grab some metadata dictionaries
-    md = edd()
+    mdd = md.elm_data_dicts()
 
     if dformat not in ['DATM_MODE', 'CPL_BYPASS']:
         raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and CPL_BYPASS are available.')
     elif dformat == 'DATM_MODE':
         print('DATM_MODE is not yet available. Exiting.')
         return
+    
+    if os.path.isdir(dir_out) is False:
+        os.mkdir(dir_out)
 
     # Split into individual location (based on 'pid') dfs
     dfs = {k : group for k, group in df.groupby('pid')}
@@ -363,9 +363,9 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
         end_year = str(pd.to_datetime(this_df['date'].values[-1]).year)
 
         if dformat == 'CPL_BYPASS':
-            do_vars = [v for v in md['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
+            do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
         elif dformat == 'DATM_MODE':
-            do_vars = [v for v in md['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
+            do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
         
         # Create site directory if doesn't exist
         this_out_dir = dir_out / this_site
@@ -374,7 +374,7 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
 
             # Create and save netcdf for each variable
             for elm_var in do_vars:
-                era5_var = next((k for k, v in md['namemapper'].items() if v == elm_var), None) # Column name in this_df
+                era5_var = next((k for k, v in mdd['namemapper'].items() if v == elm_var), None) # Column name in this_df
 
                 if era5_var not in this_df.columns:
                     raise KeyError('A required variable was not found in the input dataframe: {}'.format(era5_var))
@@ -388,8 +388,8 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
                                         era5_var: (("n", "DTIME"), this_df[era5_var].values.reshape(1, -1))  # Example random data
                                     },
                                     attrs={"history": "Created using xarray",
-                                           'units' : md['units'][elm_var],
-                                           'description' : md['descriptions'][elm_var],
+                                           'units' : mdd['units'][elm_var],
+                                           'description' : mdd['descriptions'][elm_var],
                                            'calendar' : 'noleap',
                                            'created_on' : datetime.today().strftime('%Y-%m-%d')}
                                 )

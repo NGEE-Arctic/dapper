@@ -1,9 +1,15 @@
 # Various metadata needed for working with ELM, ERA5, etc.
+from ngeegee.utils import _DATA_DIR
+import pandas as pd
 
 def elm_data_dicts():
     """
     Defines some dictionaries for ELM-expected variables.
     """
+    # ERA5-Land Hourly variables (bands) that are needed to create the required ELM forcing data
+    elm_required_bands = ['temperature_2m', 'u_component_of_wind_10m', 'v_component_of_wind_10m',
+                          'surface_solar_radiation_downwards_hourly', 'surface_thermal_radiation_downwards_hourly',
+                          'total_precipitation_hourly', 'surface_pressure', 'dewpoint_temperature_2m']
     
     # E5LH name -> ELM name
     e5_to_elm_short_name = {'u_component_of_wind_10m' : 'UWIND',
@@ -32,7 +38,8 @@ def elm_data_dicts():
             'UWIND' : 'm/s',
             'VWIND' : 'm/s'}
 
-    # For scaling to make "short" netcdf. Taken from https://github.com/fmyuan/elm-pf-tools/blob/db70b67a28969154748f53e2446559ada323a136/pytools/metdata_processing/elm_metdata_write.py#L347C1-L366C1
+    # For scaling to make "short" netcdf. 
+    # Taken from https://github.com/fmyuan/elm-pf-tools/blob/db70b67a28969154748f53e2446559ada323a136/pytools/metdata_processing/elm_metdata_write.py#L347C1-L366C1
     ranges = {'PRECTmms'  : [-0.04, 0.04],
             'FSDS'      : [-20, 2000],
             'TBOT'      : [175, 350],
@@ -57,10 +64,11 @@ def elm_data_dicts():
         'UWIND' : 'u component of wind velocity',
         'VWIND' : 'v component of wind velocity'}
 
-    
+    # ELM output variable name requirements
     required_vars = {'datm' : ['LONGXY','LATIXY','time', 'ZBOT','TBOT', 'PRECTmms', 'RH', 'FSDS', 'FLDS', 'PSRF', 'WIND'],
                      'cbypass' : ['LONGXY','LATIXY','time', 'TBOT', 'PRECTmms', 'QBOT', 'FSDS', 'FLDS', 'PSRF', 'WIND']}
     
+    # Variables that cannot physically be negative
     non_negative_bands = [
             'surface_solar_radiation_downwards_hourly',
             'surface_thermal_radiation_downwards_hourly',
@@ -94,5 +102,9 @@ def elm_data_dicts():
             'ranges' : ranges,
             'descriptions' : short_descriptions,
             'req_vars' : required_vars,
-            'nonneg' : non_negative_bands
+            'nonneg' : non_negative_bands,
+            'elm_required_bands' : elm_required_bands
             }
+
+def e5lh_bands():
+    return pd.read_csv(_DATA_DIR / 'e5lh_band_metadata.csv')
