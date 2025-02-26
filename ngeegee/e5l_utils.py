@@ -140,11 +140,15 @@ def split_into_dfs(path_csv):
     return {k : group for k, group in df.groupby('pid')}
 
 
-def rh(temp, dewpoint_temp):
+def compute_humidities(temp, dewpoint_temp, surf_pressure):
     """
     Ported by JPS from code written by Ryan Crumley.
     temp - (np.array) - array of air temperature values (temperature_2m)
     dewpoint_temp : (np.array) - array of dewpoint temperature values (dewpoint_temperature_2m); must be same length as temp
+
+    Returns:
+        RH - relative humidity (%)
+        Q - specific humidity (kg/kg)
     """
     # Convert Dewpoint Temp and Temp to RH using Clausius-Clapeyron
     # The following is taken from Margulis 2017 Textbook, Introduction to Hydrology 
@@ -154,6 +158,7 @@ def rh(temp, dewpoint_temp):
     # Define some constants
     esat_not = 611 # Constant (Pa)
     rw = 461.52 # Gas constant for moist air (J/kg)
+    rd = 287.053 # Gas constant for dry air (J/kg)
     lv = 2453000 # Latent heat of vaporization (J/kg)
     ls = 2838000 # Latent heat of sublimation (J/kg)
     tnot = 273.15 # Temp constant (K)
@@ -161,17 +166,23 @@ def rh(temp, dewpoint_temp):
     # Saturated Vapor Pressure (using Temperature)
     # NOTE: if temp is above 0(C) or 273.15(K) then use the latent heat of vaporization
     # and if temp is below 0(C) or 273.15(K) then use the latent heat of sublimation
-    ESATtmp = np.where(temp>=273.15,
+    eSAT = np.where(temp>=273.15,
                 esat_not*np.exp((lv/rw)*((1/tnot) - (1/temp))),
                 esat_not*np.exp((ls/rw)*((1/tnot) - (1/temp))))
 
     # Actual Vapor Pressure (using Dewpoint Temperature)
-    Etmp = np.where(temp<=273.15,
+    e = np.where(temp<=273.15,
             esat_not*np.exp((lv/rw)*((1/tnot) - (1/dewpoint_temp))),
             esat_not*np.exp((ls/rw)*((1/tnot) - (1/dewpoint_temp))))
     
     # Finally, calculate Relative Humidity using the ratio of the vapor pressures at 
     # certain temperatures.
-    RHtmp = (Etmp/ESATtmp)*100
+    RH = (e/eSAT)*100
 
-    return RHtmp
+    # Mixing ratio - check units of surf_pressure
+    w = (e*rd)/(rw*(surf_pressure-e))
+
+    # Specific Humidity (kg/kg)
+    Q = (w/(w+1))
+
+    return RH, Q

@@ -4,3 +4,5 @@ e5lh_grid.*
 e5lh_centerpoints.*
 *.pyc
 __pycache__
+tl/
+fengming_data/
