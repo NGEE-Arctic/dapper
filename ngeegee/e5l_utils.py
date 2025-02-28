@@ -402,3 +402,87 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
                     os.remove(this_out_file)
 
                 ds.to_netcdf(this_out_file)
+
+
+def sample_e5lh_at_points_multijob(params):
+    """
+    Exports ERA5-Land hourly time-series data for multiple points to Google Drive in 2-year chunks.
+
+    Input is params, a dictionary with the following keys:
+        start_date (str) : YYYY-MM-DD format
+        end_date (str) : YYYY-MM-DD format
+        points (list of dict) : List of dictionaries, each with 'lon', 'lat', and 'pid' keys
+        gee_bands (str OR list of str) : 'all' to select all available bands, 'elm' to select ELM-required, or a list of specific bands
+        gdrive_folder (str) : Google Drive folder name for export
+        file_name (str) : Base name of the exported CSV file (without extension)
+    """
+    # Populate and/or validate the requested bands
+    if params['gee_bands'] == 'all':
+        params['gee_bands'] = md.e5lh_bands()['band_name'].tolist()
+    elif params['gee_bands'] == 'elm':
+        params['gee_bands'] = md.elm_data_dicts()['elm_required_bands']
+    else:
+        validate_bands(params['gee_bands'])
+
+    # Prepare for batching
+    if 'gee_years_per_task' not in params:
+        params['gee_years_per_task'] = 5
+
+    # Set the imageCollection
+    params['gee_ic'] = "ECMWF/ERA5_LAND/HOURLY"  # ERA5-Land Hourly imageCollection
+    ic = ee.ImageCollection(params['gee_ic'])
+
+    # Convert start and end dates to datetime objects
+    start_date = datetime.strptime(params['start_date'], "%Y-%m-%d")
+    end_date = datetime.strptime(params['end_date'], "%Y-%m-%d")
+
+    # Find the latest available image in the imageCollection
+    max_timestamp = ic.aggregate_max("system:time_start").getInfo()
+    max_date = datetime.fromtimestamp(max_timestamp / 1000)
+
+    # Approximate number of images to determine number of batches
+    batches = utils.determine_gee_batches(start_date, end_date, max_date, years_per_task=params['gee_years_per_task'])
+
+    # Convert list of points into a FeatureCollection
+    features = []
+    for pointname in params['points']:
+        geom = ee.Geometry.Point([params['points'][pointname][1], params['points'][pointname][0]])
+        feature = ee.Feature(geom, {'pid': pointname})
+        features.append(feature)
+    point_fc = ee.FeatureCollection(features)
+
+    # Function to extract values for each image and associate with the points
+    def image_to_features(image):
+        date = ee.Date(image.get('system:time_start')).format("YYYY-MM-dd HH:mm")
+        values = image.reduceRegions(collection=point_fc, reducer=ee.Reducer.first(), scale=11132)
+        return values.map(lambda f: f.set("date", date))
+
+    # Fire off the Tasks
+    for batch_id, bdf in batches.iterrows():
+        
+        # Filter this Task by date range
+        ic = ic.filterDate(
+            bdf['task_start'].strftime("%Y-%m-%d"), 
+            bdf['task_end'].strftime("%Y-%m-%d")
+        )
+
+        # Map function over the ImageCollection
+        feature_collection = ic.map(image_to_features).flatten()
+
+        # Create a unique filename for each chunk
+        file_suffix = f"{bdf['task_start'].strftime('%Y-%m-%d')}_{bdf['task_end'].strftime('%Y-%m-%d')}"
+        export_filename = f"{params['file_name']}_{file_suffix}"
+
+        # Export to Google Drive as CSV
+        task = ee.batch.Export.table.toDrive(
+            collection=feature_collection,
+            description=export_filename,
+            folder=params['gdrive_folder'],
+            fileFormat="CSV",
+            selectors=['pid', 'date'] + params['gee_bands']
+        )
+        task.start()
+
+        print(f"Export task submitted: {export_filename}")
+
+    return "All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion."

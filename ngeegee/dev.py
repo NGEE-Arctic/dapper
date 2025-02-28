@@ -1,6 +1,30 @@
 # Functions either in development or used for one-off data stuff. Created by JPS.
 # Note that there may be imports here that aren't included in environment.yml file.
-# Define the ROOT and DATA directories for ease of use later
+
+from ngeegee import e5l_utils as eu
+import ee
+ee.Initialize(project='ee-jonschwenk')
+
+points = {'abisko' : (68.35, 18.78333),
+        'tvc' : (68.742, -133.499),
+        'toolik' : (68.62758, -149.59429),
+        'chars' :  (69.1300, -105.0415),
+        'qhi' : (69.5795, -139.0762),
+        'sam' : (72.22, 126.3),
+        'sjb' : (78.92163, 11.83109)}
+
+params = {
+    'start_date' : '1950-01-01', # YYYY-MM-DD
+    'end_date' : '1957-01-01', # YYYY-MM-DD
+    'points' : points, # Dictionary of {'name' : (lat, lon)} for all points to sample
+    'gee_bands' : 'elm', # Select ELM-required bands
+    'gee_years_per_task' : 2, # Optional parameter; default is 5. For lots of points, you may want to reduce this for smaller GEE Tasks (but more of them)
+    'gdrive_folder' : 'ngee_testing', # Which folder to store on your GDrive; will be created if not exists
+    'file_name' : 'multipoint_test_batching' 
+}
+eu.sample_e5lh_at_points_multijob(params)
+
+
 
 
 
