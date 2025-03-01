@@ -13,6 +13,11 @@ points = {'abisko' : (68.35, 18.78333),
         'sam' : (72.22, 126.3),
         'sjb' : (78.92163, 11.83109)}
 
+df_loc = pd.DataFrame({'pid' : points.keys(),
+                       'lat' : [points[p][0] for p in points],
+                       'lon' : [points[p][1] for p in points]}) # sorry, this is awkward to do but it will make things scalable as this repo develops
+
+
 params = {
     'start_date' : '1950-01-01', # YYYY-MM-DD
     'end_date' : '1957-01-01', # YYYY-MM-DD
@@ -168,3 +173,47 @@ metdata={}
 # # Send the job to GEE!
 # eu.sample_e5lh_at_points(params)
 
+
+
+# def _export_e5lh_images(params):
+#     # Doesn't currently work; not sure if I want to finish it because point sampling might make more sense
+#     """Exports ERA5-Land Hourly images over a requested domain.
+#     params is a dictionary with the following defined:
+#         name : str - name the region/sampling
+#         start_date : str - YYYY-MM-DD format
+#         end_date : str - YYYY-MM-DD format
+#         geometry : shapely.Polygon - defines the region of interest
+#         gee_ic : str - should be 'ECMWF/ERA5_LAND/HOURLY'
+#         gee_bands : list of str - e.g. ['temperature_2m', 'u_component_of_wind_10m']. These bands must be in the ERA5-Land hourly GEE dataset.
+#         gee_output_gdrive_folder : str - folder name to export files
+#         gee_batch_nyears : int - number of years to batch the downloading
+#         gee_scale : str or int - scale in meters exported pixels should be. Use 'native' to select the native ERA5-Land Hourly resolution of 0.1 degree.
+#         out_directory : str - directory to store stuff on your local machine  
+#     """
+
+#     # load imagecollection
+#     ic = ee.ImageCollection(params['gee_ic'])
+#     # filter by datei
+#     ic = ic.filterDate(params['start_date'], params['end_date'])
+#     # filter by geometry
+#     gee_geometry = parse_geometry_object(params['geometry'], params['name'])
+#     ic = ic.filterBounds(gee_geometry)
+#     # select bands (variables from ERA5-Land hourly)
+#     ic = ic.select(params['gee_bands'])
+
+#     # Start jobs on GEE
+#     max_date = ic.aggregate_max('system:time_start')
+#     last_image = ic.filter(ee.Filter.eq('system:time_start', max_date)).first()
+#     last_date = ee.Date(max_date).format("YYYY-MM-dd").getInfo()
+#     total_images = (datetime.strptime(last_date, '%Y-%m-%d') - datetime.strptime(params['start_date'], '%Y-%m-%d')).days * 24
+
+#     if params['gee_scale'] == 'native':
+#         scale = 11132
+#     else:
+#         scale = params['gee_scale']
+
+#     geemap.ee_export_image_collection(ic,
+#                                       out_dir = params['out_directory'],
+#                                       region = ee.Geometry.Polygon(list(params['geometry'].exterior.coords)),
+#                                       scale=scale,
+#                                       crs='EPSG:4326')

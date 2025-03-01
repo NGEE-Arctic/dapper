@@ -1,5 +1,4 @@
 # Various metadata needed for working with ELM, ERA5, etc.
-from ngeegee.utils import _DATA_DIR
 import pandas as pd
 
 def elm_data_dicts():
@@ -107,4 +106,5 @@ def elm_data_dicts():
             }
 
 def e5lh_bands():
+    from ngeegee.utils import _DATA_DIR
     return pd.read_csv(_DATA_DIR / 'e5lh_band_metadata.csv')
