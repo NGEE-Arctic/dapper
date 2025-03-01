@@ -1,4 +1,6 @@
 # Generic functions JPS
+import os
+import shutil
 from pathlib import Path
 from math import ceil
 import pandas as pd
@@ -42,4 +44,19 @@ def determine_gee_batches(start_date, end_date, max_date, years_per_task=5, verb
     return df
 
 
+def make_directory(path, delete_all_contents=False):
 
+    if os.path.isdir(path) is False:
+        os.mkdir(path)
+    elif delete_all_contents:
+        remove_directory_contents(path)
+    return
+
+
+def remove_directory_contents(path):
+    if any(path.glob("*")):  # Check if directory contains any files
+        for item in path.glob("*"):
+            if item.is_file():
+                item.unlink()  # Delete file
+            elif item.is_dir():
+                shutil.rmtree(item)  # Delete folder and its contents 

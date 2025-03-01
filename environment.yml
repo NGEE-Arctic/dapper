@@ -11,6 +11,7 @@ dependencies:
   - tqdm
   - rioxarray
   - jupyter
+  - fastparquet
   - pip:
     - nco
   

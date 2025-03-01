@@ -252,6 +252,35 @@ def validate_met_vars(df):
 
     return
 
+def e5lh_to_elm_unit_conversions(df):
+    """
+    Converts ERA5-Land hourly bands to units expected by ELM.
+
+    This is not a comprehensive function for all E5LH variables; 
+    only ELM variables are handled here.
+    """
+    # Compute wind magnitude (speed) and direction
+    if 'u_component_of_wind_10m' in df.columns and 'v_component_of_wind_10m' in df.columns:
+        df['wind_speed'] = np.sqrt(df['u_component_of_wind_10m'].values**2+df['v_component_of_wind_10m'].values**2)
+        wind_dir = np.degrees(np.arctan2(df['u_component_of_wind_10m'].values,df['v_component_of_wind_10m'].values))
+        wind_dir[np.where(wind_dir>=180)] = wind_dir[np.where(wind_dir>=180)] - 180
+        wind_dir[np.where(wind_dir<180)] = wind_dir[np.where(wind_dir<180)] + 180
+        df['wind_direction'] = wind_dir
+
+    # Precipitation - convert from meters/hour to mm/second
+    if 'total_precipitation_hourly' in df.columns:
+        df['total_precipitation_hourly'] = df['total_precipitation_hourly'].values / 3.6
+
+    # Solar rad downwards - convert from J/hr/m2 to W/m2
+    if 'surface_solar_radiation_downwards_hourly' in df.columns:
+        df['surface_solar_radiation_downwards_hourly'] = df['surface_solar_radiation_downwards_hourly'].values / 3600
+
+    # Thermal rad downwards - convert from J/hr/m2 to W/m2
+    if 'surface_thermal_radiation_downwards_hourly' in df.columns:
+        df['surface_thermal_radiation_downwards_hourly'] = df['surface_thermal_radiation_downwards_hourly'].values / 3600
+
+    return df
+
 
 def e5lh_to_elm_preprocess(df, remove_leap=True, verbose=False):
     """
@@ -286,32 +315,9 @@ def e5lh_to_elm_preprocess(df, remove_leap=True, verbose=False):
         df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
 
     # Convert units, compute indirect variables (humidities)   
-    # Compute wind magnitude
-    if 'u_component_of_wind_10m' in df.columns and 'v_component_of_wind_10m' in df.columns:
-        df['wind_speed'] = np.sqrt(df['u_component_of_wind_10m'].values**2+df['v_component_of_wind_10m'].values**2)
+    df = e5lh_to_elm_unit_conversions(df)
 
-    # Compute wind direction; 0 is true North, 90 is east, etc.
-    if 'u_component_of_wind_10m' in df.columns and 'v_component_of_wind_10m' in df.columns:
-        wind_dir = np.degrees(np.arctan2(df['u_component_of_wind_10m'].values,df['v_component_of_wind_10m'].values))
-        wind_dir[np.where(wind_dir>=180)] = wind_dir[np.where(wind_dir>=180)] - 180
-        wind_dir[np.where(wind_dir<180)] = wind_dir[np.where(wind_dir<180)] + 180
-        df['wind_direction'] = wind_dir
-
-    # Precipitation - convert from meters/hour to mm/second
-    if 'total_precipitation_hourly' in df.columns:
-        df['total_precipitation_hourly'] = df['total_precipitation_hourly'].values / 3.6
-
-    # Solar rad downwards - convert from J/hr/m2 to W/m2
-    if 'surface_solar_radiation_downwards_hourly' in df.columns:
-        df['surface_solar_radiation_downwards_hourly'] = df['surface_solar_radiation_downwards_hourly'].values / 3600
-
-
-    # Thermal rad downwards - convert from J/hr/m2 to W/m2
-    if 'surface_thermal_radiation_downwards_hourly' in df.columns:
-        df['surface_thermal_radiation_downwards_hourly'] = df['surface_thermal_radiation_downwards_hourly'].values / 3600
-
-    # Compute humidities 
-    if 'temperature_2m' in df.columns and 'dewpoint_temperature_2m' in df.columns and 'surface_pressure' in df.columns:
+    if all(col in df.columns for col in ['temperature_2m', 'dewpoint_temperature_2m', 'surface_pressure']):
         df['relative_humidity'], df['specific_humidity'] = compute_humidities(df['temperature_2m'].values, 
                            df['dewpoint_temperature_2m'].values,
                            df['surface_pressure'].values)
@@ -355,10 +361,10 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
     # Split into individual location (based on 'pid') dfs
     dfs = {k : group for k, group in df.groupby('pid')}
 
-    for this_site in dfs:
+    for site in dfs:
         
         # Do for each site
-        this_df = dfs[this_site]    
+        this_df = dfs[site]    
         start_year = str(pd.to_datetime(this_df['date'].values[0]).year)
         end_year = str(pd.to_datetime(this_df['date'].values[-1]).year)
 
@@ -368,7 +374,7 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
             do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
         
         # Create site directory if doesn't exist
-        this_out_dir = dir_out / this_site
+        this_out_dir = dir_out / site
         if os.path.isdir(this_out_dir) is False:
             os.mkdir(this_out_dir)
 
@@ -383,8 +389,8 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
                 ds = xr.Dataset(
                                     coords={"DTIME": ("DTIME", this_df['date'])},  # Set DTIME as a coordinate
                                     data_vars={
-                                        "LONGXY": (("n",), np.array([df_loc['lon'].values[df_loc['pid']==this_site][0]], dtype=np.float32)),  # Example data
-                                        "LATIXY": (("n",), np.array([df_loc['lat'].values[df_loc['pid']==this_site][0]], dtype=np.float32)),
+                                        "LONGXY": (("n",), np.array([df_loc['lon'].values[df_loc['pid']==site][0]], dtype=np.float32)),  # Example data
+                                        "LATIXY": (("n",), np.array([df_loc['lat'].values[df_loc['pid']==site][0]], dtype=np.float32)),
                                         era5_var: (("n", "DTIME"), this_df[era5_var].values.reshape(1, -1))  # Example random data
                                     },
                                     attrs={"history": "Created using xarray",
@@ -461,7 +467,7 @@ def sample_e5lh_at_points_multijob(params):
     for batch_id, bdf in batches.iterrows():
         
         # Filter this Task by date range
-        ic = ic.filterDate(
+        ic = ee.ImageCollection(params['gee_ic']).filterDate(
             bdf['task_start'].strftime("%Y-%m-%d"), 
             bdf['task_end'].strftime("%Y-%m-%d")
         )
@@ -486,3 +492,191 @@ def sample_e5lh_at_points_multijob(params):
         print(f"Export task submitted: {export_filename}")
 
     return "All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion."
+
+
+def _preprocess_e5hl_to_elm_file(file_path, start_year, end_year, remove_leap):
+    """
+    Unit conversions, computing indirect variables, and removing negative 
+    values for "raw" ERA5-Land (hourly) data. Generalized to handle 
+    GEE batching (multiple Tasks instead of just one).
+
+    df : (pandas.DataFrame) - the dataframe containing the raw GEE-exported csv.
+    remove_leap : (bool) - True if you want to know how many negative values were replaced for each variable
+    verbose : (bool) - True if you want information about what's being corrected
+    """
+    df = pd.read_csv(file_path)
+
+    # Start with the time dimension
+    df['date'] = pd.to_datetime(df['date'])
+    df.sort_values(by='date', inplace=True)
+
+    # Clip time so that only full years exist
+    df = df[(df["date"].dt.year >= start_year) & (df["date"].dt.year <= end_year)]
+
+    # Remove leap days
+    if remove_leap is True:
+        df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
+
+    # Convert units   
+    df = e5lh_to_elm_unit_conversions(df)
+
+    # Compute indirect variables (humidities)
+    if all(col in df.columns for col in ['temperature_2m', 'dewpoint_temperature_2m', 'surface_pressure']):
+        df['relative_humidity'], df['specific_humidity'] = compute_humidities(df['temperature_2m'].values, 
+                           df['dewpoint_temperature_2m'].values,
+                           df['surface_pressure'].values)
+
+    # Enforce non-negativeness for variables for which that is physically impossible
+    nonnegs = md.elm_data_dicts()['nonneg']
+    for c in df.columns:
+        if c in nonnegs:
+            negs = df[c]<0
+            if sum(negs) > 0:
+                df[c].values[negs] = 0
+                # if verbose:
+                #     pct_neg = sum(negs) / len(df) * 100
+                #     print(f"{pct_neg:.2f}% of the values in {c} were negative and reset to 0.")    
+
+    return df
+
+
+def preprocess_e5hl_to_elm(csv_directory, write_directory, loc_df, remove_leap=True):
+    """
+    blahblahblah
+    """
+    import os
+    from pathlib import Path
+    import glob
+    import shutil
+    from fastparquet import ParquetFile, write
+
+    csv_directory = Path(r'X:\Research\NGEE Arctic\NGEEGEE\data\batchtesting')
+    write_directory = Path(r'X:\Research\NGEE Arctic\NGEEGEE\data\batchtesting\elm_formatted')
+    remove_leap = True
+
+    points = {'abisko' : (68.35, 18.78333),
+        'tvc' : (68.742, -133.499),
+        'toolik' : (68.62758, -149.59429),
+        'chars' :  (69.1300, -105.0415),
+        'qhi' : (69.5795, -139.0762),
+        'sam' : (72.22, 126.3),
+        'sjb' : (78.92163, 11.83109)}
+    
+    df_loc = pd.DataFrame({'pid' : points.keys(),
+                        'lat' : [points[p][0] for p in points],
+                        'lon' : [points[p][1] for p in points]}) # sorry, this is awkward to do but it will make things scalable as this repo develops
+
+
+    # Determine our date range to make sure we provide only complete years of data
+    files = [f for f in os.listdir(csv_directory) if os.path.splitext(f)[1] == '.csv']
+    dates = [pd.read_csv(csv_directory / file, usecols=["date"]) for  file in files]
+    dates = pd.concat(dates, ignore_index=True)
+    dates['date'] = pd.to_datetime(dates['date'])
+    dates.sort_values(by='date', inplace=True)
+
+    # Create temporary folder for storing intermediate results
+    temp_path = csv_directory / 'ngeegee_temp'
+    if os.path.isdir(temp_path) is False:
+        os.mkdir(temp_path)
+    else:
+        # Delete any existing files if directory already exists
+        for file in temp_path.glob("*"):
+            file.unlink()
+
+    # Clip to first available Jan 01 year and last available Dec. 31 year.
+    dates['year'] = dates['date'].dt.year
+    dates['month_day'] = dates['date'].dt.month * 100 + dates['date'].dt.day  # Converts to integer format (e.g., 101 for Jan 1)
+    # Group by year and check if both January 1 and December 31 exist
+    valid_years = dates.groupby("year")["month_day"].agg(lambda x: {101, 1231}.issubset(set(x)))
+    # Get the first and last valid years
+    valid_years = valid_years[valid_years].index
+    if not valid_years.empty:
+        start_year, end_year = valid_years[0], valid_years[-1]
+    else:
+        start_year, end_year = dates['year'].values[0], dates['year'].values[0]
+        print("There is not a full year's worth of data. Using the full dataset.")
+
+    # Preprocess each file, save to intermediate parquet file
+    for i, f in enumerate(files):
+        file_path = csv_directory / f
+        ppdf = _preprocess_e5hl_to_elm_file(file_path, start_year, end_year, remove_leap)
+
+        # Split by location and save to parquet
+        ppdfg = ppdf.groupby(by='pid')
+        for pid, this_df in ppdfg:
+            parquet_path = temp_path / f"{pid}.parquet" 
+            if os.path.isfile(parquet_path):
+                write(parquet_path, this_df, append=True)  
+            else:
+                write(parquet_path, this_df)  
+
+    # Export ELM netCDFs for each variable for each site parquet file
+    utils.make_directory(write_directory, delete_all_contents=True)
+
+    parquet_files = temp_path.glob('*.parquet')
+    for pf in parquet_files:
+        site = pf.stem
+        site_write_directory = write_directory / site
+        this_df = pd.read_parquet(pf)
+        coords = df_loc[df_loc['pid']==site]
+        export_for_elm_batch(this_df, coords['lon'].values[0], coords['lat'].values[0], site_write_directory)
+
+
+def export_for_elm_batch(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS'):
+    """
+    Export in ELM-ready foramts.
+    df has all the data. Sorted by date already.
+    df_loc has a list of points (pids) and their locations (lat, lon).
+    zval is the height in meters of the observations - defaults to 1.
+    dformat must be CPL_BYPASS for now.
+    """
+    # except for 'site', other type of cpl_bypass requires zone_mapping.txt file
+
+    # Grab some metadata dictionaries
+    mdd = md.elm_data_dicts()
+
+    if dformat not in ['DATM_MODE', 'CPL_BYPASS']:
+        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and CPL_BYPASS are available.')
+    elif dformat == 'DATM_MODE':
+        print('DATM_MODE is not yet available. Exiting.')
+        return
+    
+    # Make sure directory exists and is empty for each location
+    utils.make_directory(elm_write_dir, delete_all_contents=True)
+
+    start_year = str(pd.to_datetime(df['date'].values[0]).year)
+    end_year = str(pd.to_datetime(df['date'].values[-1]).year)
+
+    if dformat == 'CPL_BYPASS':
+        do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
+    elif dformat == 'DATM_MODE':
+        do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
+    
+    # Create and save netcdf for each variable
+    for elm_var in do_vars:
+        era5_var = next((k for k, v in mdd['namemapper'].items() if v == elm_var), None) # Column name in df
+
+        if era5_var not in df.columns:
+            raise KeyError('A required variable was not found in the input dataframe: {}'.format(era5_var))
+        
+        # Create dataset
+        ds = xr.Dataset(
+                            coords={"DTIME": ("DTIME", df['date'])},  # Set DTIME as a coordinate
+                            data_vars={
+                                "LONGXY": (("n",), np.array([lon], dtype=np.float32)),  
+                                "LATIXY": (("n",), np.array([lat], dtype=np.float32)),
+                                era5_var: (("n", "DTIME"), df[era5_var].values.reshape(1, -1))  
+                            },
+                            attrs={"history": "Created using xarray",
+                                    'units' : mdd['units'][elm_var],
+                                    'description' : mdd['descriptions'][elm_var],
+                                    'calendar' : 'noleap',
+                                    'created_on' : datetime.today().strftime('%Y-%m-%d')}
+                        )
+
+        # Save file
+        filename = 'ERA5_' + elm_var + '_' + start_year + '-' + end_year + '_z' + str(zval) + '.nc'
+        this_out_file = elm_write_dir / filename
+        ds.to_netcdf(this_out_file)
+
+    return
