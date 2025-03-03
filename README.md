@@ -1,5 +1,5 @@
 # NGEEGEE
-Tools for using Google Earth Engine to fetch and format data
+Tools for using Google Earth Engine to fetch and format data for ELM
 
 
 ## Setup and Installation
@@ -44,4 +44,4 @@ Check out the [jupyter notebooks](https://github.com/NGEE-Arctic/NGEEGEE/tree/ma
 Feel free to fork the repo and make improvements. Open a pull request and we'll check it out.
 
 ## Contact
-Repo maintained by jschwenk@lanl.gov. Tools were ported from work by Ryan Crumley and Cade Trotter at Los Alamos National Laboratory.
+Repo maintained by jschwenk@lanl.gov. Some tools were ported from work by Ryan Crumley and Cade Trotter at Los Alamos National Laboratory.
