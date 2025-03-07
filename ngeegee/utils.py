@@ -127,3 +127,26 @@ def validate_met_vars(df):
                  print({'Negative values detected in variable {}'.format(c)})
 
     return
+
+
+def elm_var_compression_params(elm_var):
+    """
+    Computes the offset and scale for CPL_BYPASS compression.
+    See https://github.com/fmyuan/elm-pf-tools/blob/a581c104f7a20238e144daa8418e334d5d966e55/pytools/metdata_merge.py#L1309C1-L1325C1
+    """
+    
+    ranges = {'PRECTmms' : [-0.04, 0.04],
+              'FSDS' : [-20.0, 2000.0],
+              'TBOT' : [175.0, 350.0],
+              'RH' : [0.0, 100.0],
+              'QBOT' : [0.0, 0.10],
+              'FLDS' : [0.0, 1000.0],
+              'PSRF' : [20000.0, 120000.0],
+              'WIND' : [-1.0, 100.0]
+    }
+
+    add_offset = (ranges[elm_var][1]+ranges[elm_var][0])/2.0
+    scale_factor = (ranges[elm_var][1]-ranges[elm_var][0])*1.1/(2**15)
+
+    return add_offset, scale_factor
+

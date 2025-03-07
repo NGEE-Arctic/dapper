@@ -4,6 +4,62 @@
 from ngeegee import e5l_utils as eu
 import ee
 ee.Initialize(project='ee-jonschwenk')
+from shapely import Polygon
+import geopandas as gpd
+
+
+from ngeegee import utils
+from ngeegee import e5l_utils as eu
+from pathlib import Path
+
+# Load Kuparuk gage watershed polygon; convert to ee object
+kup = gpd.read_file(utils._DATA_DIR / 'Kuparuk_gageshed.shp')
+kup = kup.buffer(0) # A hack to "fix" invalid geometries--not needed here but just demonstrating
+kup_pgon = ee.Geometry.Polygon(list(kup.geometry.values[0].exterior.coords))
+
+# Point to the ERA5-Land hourly polygon grid
+e5lh_grid = ee.FeatureCollection('projects/ee-jonschwenk/assets/E3SM/e5lh_grid')
+
+# Intersect and return the e5lh ids
+intersecting_e5l_grids = e5lh_grid.filter(ee.Filter.intersects('.geo', kup_pgon))
+# intersecting_e5l_grids = e5lh_grid.filterBounds(kup_pgon)
+pids = intersecting_e5l_grids.aggregate_array('pids').getInfo()
+
+# Now we select the E5LH grid cells we want to sample
+sample_these_cells = e5lh_grid.filter(ee.Filter.inList('pids', pids))
+
+params = {
+    'start_date' : '1950-01-01', # YYYY-MM-DD
+    'end_date' : '1957-01-01', # YYYY-MM-DD
+    'geometries' : sample_these_cells, # Dictionary of {'name' : (lat, lon)} for all points to sample
+    'geometry_id_field' : 'pids', # The e5lh_grid Asset calls this field "pids", so we must specify that
+    'gee_bands' : 'elm', # Select ELM-required bands
+    'gee_years_per_task' : 1, # Optional parameter; default is 5. For lots of points, you may want to reduce this for smaller GEE Tasks (but more of them)
+    'gee_scale' : 'native',
+    'gdrive_folder' : 'ngee_test_cells', # Which folder to store on your GDrive; will be created if not exists
+    'job_name' : 'cell_test',
+}
+eu.sample_e5lh(params)
+
+# Create coordinate DataFrame
+df_loc = pd.DataFrame({'pids' : pids,
+          'lat' : [float(p.split(',')[0]) for p in pids],
+          'lon' : [float(p.split(',')[0]) for p in pids]})
+
+csv_directory = r'X:\Research\NGEE Arctic\NGEEGEE\data\celltesting'
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 points = {'abisko' : (68.35, 18.78333),
         'tvc' : (68.742, -133.499),
@@ -12,6 +68,27 @@ points = {'abisko' : (68.35, 18.78333),
         'qhi' : (69.5795, -139.0762),
         'sam' : (72.22, 126.3),
         'sjb' : (78.92163, 11.83109)}
+
+# Create 1x1 degree box geometries
+geometries = []
+pids = []
+
+for pid, (lat, lon) in points.items():
+    # Create a 1x1 degree box centered on (lat, lon)
+    half_size = 0.5  # Half-degree to make a 1x1 box
+    box = Polygon([
+        (lon - half_size, lat - half_size),  # Bottom-left
+        (lon + half_size, lat - half_size),  # Bottom-right
+        (lon + half_size, lat + half_size),  # Top-right
+        (lon - half_size, lat + half_size),  # Top-left
+        (lon - half_size, lat - half_size)   # Closing point
+    ])
+    geometries.append(box)
+    pids.append(pid)
+
+# Create a GeoDataFrame
+gdf = gpd.GeoDataFrame({'pid': pids, 'geometry': geometries}, crs="EPSG:4326")
+
 
 df_loc = pd.DataFrame({'pid' : points.keys(),
                        'lat' : [points[p][0] for p in points],

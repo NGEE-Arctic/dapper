@@ -1,18 +1,16 @@
 import ee
 import os
 import glob
-import shutil
-import geemap
-import glob
 import json
-import pandas as pd
 import numpy as np
+import pandas as pd
 import xarray as xr
+from nco import Nco
 import geopandas as gpd
 from pathlib import Path
 from datetime import datetime
 from shapely.geometry import Polygon
-from fastparquet import ParquetFile, write
+from fastparquet import write
 
 from ngeegee import utils
 from ngeegee import metadata as md
@@ -53,6 +51,7 @@ def sample_e5lh(params):
         end_date (str) : YYYY-MM-DD format
         geometries (list of dict OR ee.FeatureCollection) : geopandas.GeoDataFrame with 'geometry' and 'pid' columns,  
                                                             OR a pre-loaded GEE FeatureCollection.
+        geometry_id_field (str) : the ID field associated with the geometries; is 'gid' by default
         gee_bands (str OR list of str) : 'all' for all bands, 'elm' for ELM-required bands, or a list of specific bands.
         gdrive_folder (str) : Google Drive folder name for export.
         file_name (str) : Base name of the exported CSV file (without extension).
@@ -93,12 +92,18 @@ def sample_e5lh(params):
     # Determine number of batches
     batches = utils.determine_gee_batches(start_date, end_date, max_date, years_per_task=params['gee_years_per_task'])
 
+    # Default to 'gid' if no field provided
+    if 'geometry_id_field' not in params:
+        params['geometry_id_field'] = 'gid'
+
     # Convert geometries to GEE FeatureCollection (supports dict input OR pre-loaded FeatureCollection)
     if isinstance(params['geometries'], str):
         geometries_fc = ee.FeatureCollection(params['geometries'])  # Directly use pre-loaded GEE asset
+    elif isinstance(params['geometries'], ee.FeatureCollection):
+        geometries_fc = ee.FeatureCollection(params['geometries']) # re-casting; should already be correct type but this fixes weird errors
     elif isinstance(params['geometries'], gpd.GeoDataFrame):
         gdf_reduced = params['geometries'].copy()
-        gdf_reduced = gdf_reduced[['gid', 'geometry']]
+        gdf_reduced = gdf_reduced[[params['geometry_id_field'], 'geometry']]
         geojson_str = gdf_reduced.to_json()    
         geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
 
@@ -137,7 +142,7 @@ def sample_e5lh(params):
             description=export_filename,
             folder=params['gdrive_folder'],
             fileFormat="CSV",
-            selectors=['gid', 'date'] + params['gee_bands']
+            selectors=[params['geometry_id_field'], 'date'] + params['gee_bands']
         )
         task.start()
 
@@ -419,7 +424,7 @@ def _preprocess_e5hl_to_elm_file(file_path, start_year, end_year, remove_leap):
     return df
 
 
-def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True):
+def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col=None):
     """
     Batched version.
 
@@ -427,6 +432,11 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True):
 
     Next is handling polygon(s)
     """
+    if type(csv_directory) is str:
+        csv_directory = Path(csv_directory)
+    if type(write_directory) is str:
+        write_directory = Path(write_directory)
+
 
     # Determine our date range to make sure we provide only complete years of data
     files = [f for f in os.listdir(csv_directory) if os.path.splitext(f)[1] == '.csv']
@@ -437,12 +447,7 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True):
 
     # Create temporary folder for storing intermediate results
     temp_path = csv_directory / 'ngeegee_temp'
-    if os.path.isdir(temp_path) is False:
-        os.mkdir(temp_path)
-    else:
-        # Delete any existing files if directory already exists
-        for file in temp_path.glob("*"):
-            file.unlink()
+    utils.make_directory(temp_path, delete_all_contents=True)
 
     # Clip to first available Jan 01 year and last available Dec. 31 year.
     dates['year'] = dates['date'].dt.year
@@ -457,13 +462,27 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True):
         start_year, end_year = dates['year'].values[0], dates['year'].values[0]
         print("There is not a full year's worth of data. Using the full dataset.")
 
+
     # Preprocess each file, save to intermediate parquet file
     for i, f in enumerate(files):
         file_path = csv_directory / f
         ppdf = _preprocess_e5hl_to_elm_file(file_path, start_year, end_year, remove_leap)
 
+        # Infer id field name if not specified
+        # Just uses the shortest field name that has "id" in it
+        if i == 0:
+            if id_col is None:
+                poss_id = [c for c in ppdf.columns if 'id' in c]
+                if len(poss_id_lens) == 0:
+                    raise NameError("Could not infer id column. Specify it with 'id_col' kwarg when calling e5hl_to_elm().")
+                else:
+                    poss_id_lens = [len(pi) for pi in poss_id]
+                    id_col = poss_id[poss_id_lens.index(min(poss_id_lens))]
+                    print(f"Inferred '{id_col}' as id column. If this is not correct, re-run this function and specify 'id_col' kwarg.")
+
+
         # Split by location and save to parquet
-        ppdfg = ppdf.groupby(by="gid")
+        ppdfg = ppdf.groupby(by=id_col)
         for pid, this_df in ppdfg:
             parquet_path = temp_path / f"{pid}.parquet" 
             if os.path.isfile(parquet_path):
@@ -479,7 +498,7 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True):
         site = pf.stem
         site_write_directory = write_directory / site
         this_df = pd.read_parquet(pf)
-        coords = df_loc[df_loc["gid"]==site]
+        coords = df_loc[df_loc[id_col]==site]
         export_for_elm_site(this_df, coords['lon'].values[0], coords['lat'].values[0], site_write_directory)
 
     # Remove temporary files
@@ -525,25 +544,38 @@ def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS
         if era5_var not in df.columns:
             raise KeyError('A required variable was not found in the input dataframe: {}'.format(era5_var))
         
+        # Packing params (like compression but not quite)
+        add_offset, scale_factor = utils.elm_var_compression_params(elm_var)
+
         # Create dataset
         ds = xr.Dataset(
                             coords={"DTIME": ("DTIME", df['date'])},  # Set DTIME as a coordinate
                             data_vars={
                                 "LONGXY": (("n",), np.array([lon], dtype=np.float32)),  
                                 "LATIXY": (("n",), np.array([lat], dtype=np.float32)),
-                                era5_var: (("n", "DTIME"), df[era5_var].values.reshape(1, -1))  
+                                elm_var: (("n", "DTIME"), df[era5_var].values.reshape(1, -1))  
                             },
                             attrs={"history": "Created using xarray",
                                     'units' : mdd['units'][elm_var],
                                     'description' : mdd['descriptions'][elm_var],
                                     'calendar' : 'noleap',
-                                    'created_on' : datetime.today().strftime('%Y-%m-%d')}
+                                    'created_on' : datetime.today().strftime('%Y-%m-%d'),
+                                    'add_offset' : add_offset,
+                                    'scale_factor' : scale_factor}
                         )
 
         # Save file
         filename = 'ERA5_' + elm_var + '_' + start_year + '-' + end_year + '_z' + str(zval) + '.nc'
         this_out_file = elm_write_dir / filename
-        ds.to_netcdf(this_out_file)
+        ds.to_netcdf(this_out_file, 
+                     encoding = { elm_var: {
+                                    "dtype": "int16",
+                                    "scale_factor": scale_factor,
+                                    "add_offset": add_offset,
+                                    "_FillValue": -32767
+                                        }
+                                }
+                     )
 
     return
 

@@ -12,7 +12,4 @@ dependencies:
   - rioxarray
   - jupyter
   - fastparquet
-  - pip:
-    - nco
-  
-
+  - pynco
