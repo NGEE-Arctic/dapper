@@ -5,7 +5,7 @@ import json
 import numpy as np
 import pandas as pd
 import xarray as xr
-from nco import Nco
+from math import floor
 import geopandas as gpd
 from pathlib import Path
 from datetime import datetime
@@ -409,6 +409,8 @@ def _preprocess_e5hl_to_elm_file(file_path, start_year, end_year, remove_leap):
         df['relative_humidity'], df['specific_humidity'] = compute_humidities(df['temperature_2m'].values, 
                                                                               df['dewpoint_temperature_2m'].values,
                                                                               df['surface_pressure'].values)
+    else:
+        print('Missing the required variables to compute humidities.')
 
     # Enforce non-negativeness for variables for which that is physically impossible
     nonnegs = md.elm_data_dicts()['nonneg']
@@ -419,7 +421,7 @@ def _preprocess_e5hl_to_elm_file(file_path, start_year, end_year, remove_leap):
                 df[c].values[negs] = 0
                 # if verbose:
                 #     pct_neg = sum(negs) / len(df) * 100
-                #     print(f"{pct_neg:.2f}% of the values in {c} were negative and reset to 0.")    
+                #     print(f"{pct_neg:.2f}% of the values in {c} were negative and reset to 0.")
 
     return df
 
@@ -479,10 +481,11 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
                     poss_id_lens = [len(pi) for pi in poss_id]
                     id_col = poss_id[poss_id_lens.index(min(poss_id_lens))]
                     print(f"Inferred '{id_col}' as id column. If this is not correct, re-run this function and specify 'id_col' kwarg.")
-
+            df_loc.rename(columns={id_col : 'pid'}, inplace=True) # Set id_col to something consistent
+        ppdf.rename(columns={id_col : 'pid'}, inplace=True)
 
         # Split by location and save to parquet
-        ppdfg = ppdf.groupby(by=id_col)
+        ppdfg = ppdf.groupby(by='pid')
         for pid, this_df in ppdfg:
             parquet_path = temp_path / f"{pid}.parquet" 
             if os.path.isfile(parquet_path):
@@ -507,7 +510,7 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
     return
 
 
-def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS'):
+def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS', compress=True, compress_level=4):
     """
     Export in ELM-ready foramts.
     df has all the data. Sorted by date already.
@@ -574,10 +577,248 @@ def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS
                                     "add_offset": add_offset,
                                     "_FillValue": -32767
                                         }
-                                }
+                                },
+                     zlib=compress,
+                     complevel=compress_level
                      )
 
     return
+
+
+def export_for_elm_gridded(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS', compress=True, compress_level=4):
+    """
+    Export in ELM-ready foramts.
+    df has all the data. Sorted by date already.
+    df_loc has a list of points (pids) and their locations (lat, lon).
+    zval is the height in meters of the observations - defaults to 1.
+    dformat must be CPL_BYPASS for now.
+    """
+    # except for 'site', other type of cpl_bypass requires zone_mapping.txt file
+
+    # Grab some metadata dictionaries
+    mdd = md.elm_data_dicts()
+
+    if dformat not in ['DATM_MODE', 'CPL_BYPASS']:
+        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and CPL_BYPASS are available.')
+    elif dformat == 'DATM_MODE':
+        print('DATM_MODE is not yet available. Exiting.')
+        return
+    
+    # Make sure directory exists and is empty for each location
+    utils.make_directory(elm_write_dir, delete_all_contents=True)
+
+    start_year = str(pd.to_datetime(df['date'].values[0]).year)
+    end_year = str(pd.to_datetime(df['date'].values[-1]).year)
+
+    if dformat == 'CPL_BYPASS':
+        do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
+    elif dformat == 'DATM_MODE':
+        do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
+    
+    # Create and save netcdf for each variable
+    for elm_var in do_vars:
+        era5_var = next((k for k, v in mdd['namemapper'].items() if v == elm_var), None) # Column name in df
+
+        if era5_var not in df.columns:
+            raise KeyError('A required variable was not found in the input dataframe: {}'.format(era5_var))
+        
+        # Packing params (like compression but not quite)
+        add_offset, scale_factor = utils.elm_var_compression_params(elm_var)
+
+        # Create dataset
+        ds = xr.Dataset(
+                            coords={"DTIME": ("DTIME", df['date'])},  # Set DTIME as a coordinate
+                            data_vars={
+                                "LONGXY": (("n",), np.array([lon], dtype=np.float32)),  
+                                "LATIXY": (("n",), np.array([lat], dtype=np.float32)),
+                                elm_var: (("n", "DTIME"), df[era5_var].values.reshape(1, -1))  
+                            },
+                            attrs={"history": "Created using xarray",
+                                    'units' : mdd['units'][elm_var],
+                                    'description' : mdd['descriptions'][elm_var],
+                                    'calendar' : 'noleap',
+                                    'created_on' : datetime.today().strftime('%Y-%m-%d'),
+                                    'add_offset' : add_offset,
+                                    'scale_factor' : scale_factor}
+                        )
+
+        # Save file
+        filename = 'ERA5_' + elm_var + '_' + start_year + '-' + end_year + '_z' + str(zval) + '.nc'
+        this_out_file = elm_write_dir / filename
+        ds.to_netcdf(this_out_file, 
+                     encoding = { elm_var: {
+                                    "dtype": "int16",
+                                    "scale_factor": scale_factor,
+                                    "add_offset": add_offset,
+                                    "_FillValue": -32767
+                                        }
+                                },
+                     zlib=compress,
+                     complevel=compress_level
+                     )
+
+    return
+
+
+def _preprocess_e5hl_to_elm_file_grid(df, start_year, end_year, remove_leap, dformat):
+    """
+    Unit conversions, computing indirect variables, and removing negative 
+    values for "raw" ERA5-Land (hourly) data. Generalized to handle 
+    GEE batching (multiple Tasks instead of just one).
+
+    df : (pandas.DataFrame) - the dataframe containing the raw GEE-exported csv.
+    remove_leap : (bool) - True if you want to know how many negative values were replaced for each variable
+    verbose : (bool) - True if you want information about what's being corrected
+    """
+    # Start with the time dimension
+    df['date'] = pd.to_datetime(df['date'])
+    df.sort_values(by='date', inplace=True)
+
+    # Clip time so that only full years exist
+    df = df[(df["date"].dt.year >= start_year) & (df["date"].dt.year <= end_year)]
+
+    # Remove leap days
+    if remove_leap is True:
+        df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
+
+    # Convert units   
+    df = e5lh_to_elm_unit_conversions(df)
+
+    # Compute indirect variables (humidities)
+    if all(col in df.columns for col in ['temperature_2m', 'dewpoint_temperature_2m', 'surface_pressure']):
+        df['relative_humidity'], df['specific_humidity'] = compute_humidities(df['temperature_2m'].values, 
+                                                                              df['dewpoint_temperature_2m'].values,
+                                                                              df['surface_pressure'].values)
+    else:
+        print('Missing the required variables to compute humidities.')
+
+    # Enforce non-negativeness for variables for which that is physically impossible
+    nonnegs = md.elm_data_dicts()['nonneg']
+    for c in df.columns:
+        if c in nonnegs:
+            negs = df[c]<0
+            if sum(negs) > 0:
+                df[c].values[negs] = 0
+
+    # Rename columns
+    mdd = md.elm_data_dicts()
+    if dformat == 'CPL_BYPASS':
+        do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
+    elif dformat == 'DATM_MODE':
+        do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
+    renamer = {k: v for k, v in mdd['short_names'].items() if v in do_vars}
+    renamer.update({'date' : 'time', 'lon' : 'LONGXY', 'lat' : 'LATIXY'})
+    df.rename(columns=renamer, inplace=True)
+
+    # Drop unnecessary columns
+    do_vars.extend(['LONGXY', 'LATIXY', 'time', 'gid', 'zone'])
+    df = df[do_vars]
+
+    return df
+
+
+def e5hl_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap=True, id_col=None, nzones=1, dformat='CPL_BYPASS', compress=True, compress_level=4):
+    """
+    Batched version for grids.
+
+    compress_level - higher will compress more but take longer to write
+
+    """
+    if dformat not in ['DATM_MODE', 'CPL_BYPASS']:
+        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and CPL_BYPASS are available.')
+    elif dformat == 'DATM_MODE':
+        print('DATM_MODE is not yet available. Exiting.')
+        return
+    
+    if type(csv_directory) is str:
+        csv_directory = Path(csv_directory)
+    if type(write_directory) is str:
+        write_directory = Path(write_directory)
+
+    mdd = md.elm_data_dicts()
+    
+    # Determine our date range to make sure we provide only complete years of data
+    files = [f for f in os.listdir(csv_directory) if os.path.splitext(f)[1] == '.csv']
+    dates = [pd.read_csv(csv_directory / file, usecols=["date"]) for  file in files]
+    dates = pd.concat(dates, ignore_index=True)
+    dates['date'] = pd.to_datetime(dates['date'])
+    dates.sort_values(by='date', inplace=True)
+
+    # Clip to first available Jan 01 year and last available Dec. 31 year.
+    dates['year'] = dates['date'].dt.year
+    dates['month_day'] = dates['date'].dt.month * 100 + dates['date'].dt.day  # Converts to integer format (e.g., 101 for Jan 1)
+    # Group by year and check if both January 1 and December 31 exist
+    valid_years = dates.groupby("year")["month_day"].agg(lambda x: {101, 1231}.issubset(set(x)))
+    # Get the first and last valid years
+    valid_years = valid_years[valid_years].index
+    if not valid_years.empty:
+        start_year, end_year = valid_years[0], valid_years[-1]
+    else:
+        start_year, end_year = dates['year'].values[0], dates['year'].values[0]
+        print("There is not a full year's worth of data. Using the full dataset.")
+
+    # Create temporary folder for storing intermediate results
+    utils.make_directory(write_directory, delete_all_contents=True)
+
+    # Rename id field for consistency to 'gid'
+    if id_col is None:
+        id_col = utils.infer_id_field(df_loc)
+    df_loc.rename(columns={id_col:'gid'}, inplace=True)
+
+    # Prepare the netCDF grid
+    df_loc = df_loc.sort_values(by=['lat', 'lon']).reset_index(drop=True)
+    df_loc['gid'] = df_loc['gid'].astype(str)
+
+    # Account for zones if not already provided in df_loc
+    if 'zone' not in df_loc.columns:
+        df_loc['zone'] = np.tile(np.arange(1, nzones + 1), (len(df_loc) // nzones) + 1)[:len(df_loc)]
+    unique_zones = list(set(df_loc['zone']))
+
+    # Save each file to netCDF
+    for i, f in enumerate(files):
+        print(f"Processing file {i+1} of {len(files)}: {f}")
+        file_path = csv_directory / f
+        this_df = pd.read_csv(file_path)
+
+        # Rename id columns for consistency to 'gid'
+        if i == 0:
+            if id_col is None:
+                id_col = utils.infer_id_field(ppdf.columns)
+        this_df.rename(columns={id_col:'gid'}, inplace=True)
+
+        # Add lat/lon data to preprocessed dataframe and sort
+        this_df = this_df.merge(df_loc[['gid', 'lat', 'lon', 'zone']], on='gid', how='inner')
+
+        ppdf = _preprocess_e5hl_to_elm_file_grid(this_df, start_year, end_year, remove_leap, dformat)
+        ppdf = ppdf.sort_values(['time', 'LATIXY', 'LONGXY']).reset_index(drop=True)
+         
+        for elm_var in ppdf.columns:
+            if elm_var in ['gid', 'time', 'LONGXY', 'LATIXY', 'zone']:
+                continue
+            for zone in unique_zones:
+
+                filename = 'ERA5_' + elm_var + '_' + str(start_year) + '-' + str(end_year) + '_z' + str(zone) + '.nc'
+                write_path = write_directory / filename
+
+                # Initialize netCDF file
+                if i == 0:
+                    this_df_loc = df_loc[df_loc['zone']==zone]
+                    utils.create_netcdf(this_df_loc, elm_var, write_path, dformat, compress, compress_level)                
+
+                # Select required vars and zone
+                save_df = ppdf[['time', 'LONGXY', 'LATIXY', 'gid', 'zone', elm_var]]
+                save_df = save_df[save_df['zone']==zone]
+                # Write to netCDF
+                utils.append_netcdf(save_df, elm_var, write_path, dformat, compress, compress_level)
+
+    # Generate zone_mappings file
+    zm_write_path = write_directory / 'zone_mappings.txt'
+    zms = df_loc[['lon', 'lat', 'zone']]
+    zms['id'] = np.arange(1, len(zms)+1) # This might not be right, might need to repeat by zone?
+    zms.to_csv(zm_write_path, index=False, header=False, sep='\t')
+
+    return
+
 
 
 def e5lh_to_elm_preprocess(df, remove_leap=True, verbose=False):

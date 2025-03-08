@@ -21,7 +21,7 @@ def elm_data_dicts():
                             'surface_pressure' : 'PSRF',
                             'temperature_2m' : 'TBOT',
                             'dewpoint_temperature_2m' : 'DTBOT',
-                            'rel_hum' : 'RH'}
+                            'relative_humidity' : 'RH'}
 
     # Output units
     units = {'TBOT' : 'K',
@@ -102,8 +102,10 @@ def elm_data_dicts():
             'descriptions' : short_descriptions,
             'req_vars' : required_vars,
             'nonneg' : non_negative_bands,
-            'elm_required_bands' : elm_required_bands
+            'elm_required_bands' : elm_required_bands,
+            'short_names' : e5_to_elm_short_name
             }
+
 
 def e5lh_bands():
     from ngeegee.utils import _DATA_DIR

@@ -5,6 +5,8 @@ from pathlib import Path
 from math import ceil
 import pandas as pd
 import numpy as np
+import xarray as xr
+import netCDF4 as nc
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import ngeegee.metadata as md
@@ -149,4 +151,116 @@ def elm_var_compression_params(elm_var):
     scale_factor = (ranges[elm_var][1]-ranges[elm_var][0])*1.1/(2**15)
 
     return add_offset, scale_factor
+
+
+def infer_id_field(columns):
+    """
+    Tries to discern the id field from a list of columns.
+    Used when id_col is not specified.
+    """
+    poss_id = [c for c in columns if 'id' in c]
+    if len(poss_id) == 0:
+        raise NameError("Could not infer id column. Specify it with 'id_col' kwarg when calling e5hl_to_elm().")
+    else:
+        poss_id_lens = [len(pi) for pi in poss_id]
+        id_col = poss_id[poss_id_lens.index(min(poss_id_lens))]
+        print(f"Inferred '{id_col}' as id column. If this is not correct, re-run this function and specify 'id_col' kwarg.")
+
+    return id_col
+
+
+def create_netcdf(df_loc, elm_var, write_path, dformat='CPL_BYPASS', compress=False, compress_level=0):
+    if os.path.exists(write_path):
+        print(f"NetCDF file '{write_path}' already exists.")
+        return
+
+    if dformat == 'CPL_BYPASS':
+        mdd = md.elm_data_dicts()
+        add_offset, scale_factor = elm_var_compression_params(elm_var)
+
+        # Ensure df_loc is sorted by LATIXY, LONGXY for consistent ordering
+        df_loc = df_loc.sort_values(['lat', 'lon']).reset_index(drop=True)
+
+        with nc.Dataset(write_path, mode='w', format='NETCDF4') as ds:
+            ds.createDimension('n', len(df_loc))
+            ds.createDimension('DTIME', None)
+
+            # Define coordinate variables with correct names and types
+            lat = ds.createVariable('LATIXY', 'f4', ('n',))
+            lon = ds.createVariable('LONGXY', 'f4', ('n',))
+            gid = ds.createVariable('gid', str, ('n',))
+            
+            # Define DTIME as datetime64[ns]
+            dtime = ds.createVariable('DTIME', 'f8', ('DTIME',))
+            dtime.setncattr('units', 'seconds since 1970-01-01 00:00:00')
+            dtime.setncattr('calendar', 'standard')
+
+            # Define data variable with (DTIME, n) order
+            var = ds.createVariable(elm_var, 'f4', ('DTIME', 'n'), zlib=compress, complevel=compress_level, fill_value=-32767)
+
+            # Populate lat, lon, and gid in sorted order
+            lat[:] = df_loc['lat'].values
+            lon[:] = df_loc['lon'].values
+            gid[:] = df_loc['gid'].values
+
+            # Set attributes for coordinates
+            lat.setncattr('units', 'degrees_north')
+            lon.setncattr('units', 'degrees_east')
+
+            # Set attributes for data variable
+            var.setncattr('add_offset', add_offset)
+            var.setncattr('scale_factor', scale_factor)
+            var.setncattr('units', mdd['units'][elm_var])
+            var.setncattr('description', mdd['descriptions'][elm_var])
+
+            ds.setncattr('history', "Created using netCDF4")
+            ds.setncattr('calendar', 'noleap')
+            ds.setncattr('created_on', datetime.today().strftime('%Y-%m-%d'))
+
+    return
+
+
+def append_netcdf(this_df, elm_var, write_path, dformat='CPL_BYPASS', compress=False, compress_level=0):
+    if not os.path.exists(write_path):
+        print(f"NetCDF file '{write_path}' does not exist and cannot be appended.")
+        return
+
+    if dformat == 'CPL_BYPASS':
+        with nc.Dataset(write_path, mode='a') as ds:
+            if elm_var not in ds.variables:
+                print(f"{elm_var} is missing in {write_path}. Cannot append data.")
+                return
+
+            add_offset = ds.variables[elm_var].getncattr('add_offset')
+            scale_factor = ds.variables[elm_var].getncattr('scale_factor')
+
+            # Convert times to datetime64[ns] and then to seconds since 1970-01-01
+            times = pd.to_datetime(this_df['time']).values.astype('datetime64[ns]')
+            unique_times = np.unique(times)
+            int64_times = (unique_times.astype('datetime64[ns]').astype('int64') // 10**9).astype('f8')
+
+            # Get existing size of DTIME and GID dimensions
+            current_time_size = ds.dimensions['DTIME'].size
+            current_gid_size = ds.dimensions['n'].size
+
+            # Append new times directly in one go as float64 (seconds since 1970-01-01)
+            ds['DTIME'][current_time_size:current_time_size + len(int64_times)] = int64_times
+
+            # Sort this_df by LATIXY, LONGXY to match NetCDF order
+            this_df = this_df.sort_values(['LATIXY', 'LONGXY']).reset_index(drop=True)
+
+            # Pack data to float32 and apply offset/scale
+            packed_data_column = np.round((this_df[elm_var].values - add_offset) / scale_factor).astype(np.float32)
+
+            # Efficiently reshape data: (DTIME, n) order
+            num_times = len(unique_times)
+            reshaped_data = packed_data_column.reshape(num_times, current_gid_size)
+
+            # Append reshaped data as float32 in (DTIME, n) order
+            ds[elm_var][current_time_size:current_time_size + num_times, :] = reshaped_data
+
+            # Force writing data to disk
+            ds.sync()
+
+        print(f"Successfully appended data for {elm_var} to {write_path}.")
 

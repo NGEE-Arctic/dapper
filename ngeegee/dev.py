@@ -44,14 +44,29 @@ eu.sample_e5lh(params)
 # Create coordinate DataFrame
 df_loc = pd.DataFrame({'pids' : pids,
           'lat' : [float(p.split(',')[0]) for p in pids],
-          'lon' : [float(p.split(',')[0]) for p in pids]})
+          'lon' : [float(p.split(',')[1]) for p in pids]})
 
 csv_directory = r'X:\Research\NGEE Arctic\NGEEGEE\data\celltesting'
+write_directory = r'X:\Research\NGEE Arctic\NGEEGEE\data\celltesting\elm_formatted'
+remove_leap = True
+id_col = 'pids'
+compress=True
+compress_level=4
+dformat='CPL_BYPASS'
 
+import ngeegee.e5l_utils as eu
+import importlib
+importlib.reload(eu)
+eu.e5hl_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap, id_col, nzones=1, compress_level=9)
 
-
-
-
+import xarray as xr
+path = r"X:\Research\NGEE Arctic\NGEEGEE\data\fengming_data\gridded\clmforc.GSWP3.c2011.0.5x0.5.Prec.1901-01.nc"
+path = r"X:\Research\NGEE Arctic\NGEEGEE\data\fengming_data\era5\Daymet_ERA5.1km_QBOT_1980-2023_z01.nc"
+path = r"X:\Research\NGEE Arctic\NGEEGEE\data\fengming_data\gridded\GSWP3_FLDS_1901-2014_z14.nc"
+pathf = r"X:\Research\NGEE Arctic\NGEEGEE\data\fengming_data\gridded\GSWP3_daymet4_FLDS_1980-2014_z01_gridded.nc"
+pathm = r"X:\Research\NGEE Arctic\NGEEGEE\data\celltesting\elm_formatted\ERA5_QBOT_1950-1956_z1.nc"
+dsm = xr.open_dataset(pathm)
+dsf = xr.open_dataset(pathf)
 
 
 
