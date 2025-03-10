@@ -262,5 +262,30 @@ def append_netcdf(this_df, elm_var, write_path, dformat='CPL_BYPASS', compress=F
             # Force writing data to disk
             ds.sync()
 
-        print(f"Successfully appended data for {elm_var} to {write_path}.")
+        # print(f"Successfully appended data for {elm_var} to {write_path}.")
+
+
+def display_image_gh_notebook(image_file):
+    """
+    This creates an image to embed into Jupyter notebooks as live links
+    are not displaying on Github, presumably due to the fact that the repo
+    is private. Since it will remain private (forever?), I imagine this function
+    will get plenty of use.
+    
+    Provide the image name as it appears in the notebooks/notebook_data/images directory.
+    """
+    import base64
+    from ngeegee.utils import _ROOT_DIR
+
+    image_path = _ROOT_DIR / 'notebooks' / 'notebook_data' / 'images' / image_file
+    # Read the image and convert it to Base64
+    with open(image_path, 'rb') as f:
+        img_data = f.read()
+        img_base64 = base64.b64encode(img_data).decode('utf-8')
+
+    html_img = f'<img src="data:image/jpeg;base64,{img_base64}" alt="kuparak_gageshed" />'
+
+    return html_img
+
+
 
