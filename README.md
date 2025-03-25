@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/dapper_logo.JPG" width="7%" alt="Dapper Logo">
+  <img src="docs/images/dapper_logo.jpg" width="7%" alt="Dapper Logo">
 </p>
 
 
