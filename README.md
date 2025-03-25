@@ -1,5 +1,7 @@
-# dapper
-Data PreParation for ELM Runs
+<p align="center">
+  <img src="docs/images/dapper_logo.JPG" width="7%" alt="Dapper Logo">
+</p>
+
 
 
 ## Setup and Installation
