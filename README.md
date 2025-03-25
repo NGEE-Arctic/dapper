@@ -1,7 +1,4 @@
-<p align="center">
-  <img src="docs/images/dapper_logo_2.jpg" width="50%" alt="dapper">
-</p>
-
+<img src="docs/images/dapper_logo_2.jpg" style="float: left; width: 50%;" alt="dapper">
 
 
 ## Setup and Installation
