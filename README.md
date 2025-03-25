@@ -1,5 +1,5 @@
-# NGEEGEE
-Tools for using Google Earth Engine to fetch and format data for ELM
+# dapper
+Data PreParation for ELM Runs
 
 
 ## Setup and Installation
@@ -9,27 +9,27 @@ Tools for using Google Earth Engine to fetch and format data for ELM
 
 **Step 3**: Use the environment.yml file (it will be on your local machine after you clone the repo) to create a virtual Python environment. You can use whatever package manager your prefer, but instructions here are for conda. I recommend installing [mamba](https://anaconda.org/conda-forge/mamba) into your base environment to make package solving faster, but it's not necessary. If you do install it, you can just replace `conda` with `mamba` in the following commands.
 ```
-conda env create -f environment.yml # This should automatically name your new environment "ngeegee"
+conda env create -f environment.yml # This should automatically name your new environment "dapper"
 ```
 
-**Step 4**: Perform a "live install" of the NGEEGEE repo using `pip`. This is useful as it allows you to update your local NGEEGEE repo (via a `Fetch origin` in Github Desktop), and any new changes will be reflected immediately in the code that you're running. No need to recompile a package and reinstall it--very simple.
+**Step 4**: Perform a "live install" of the dapper repo using `pip`. This is useful as it allows you to update your local dapper repo (via a `Fetch origin` in Github Desktop), and any new changes will be reflected immediately in the code that you're running. No need to recompile a package and reinstall it--very simple.
 ```
-cd /path/to/cloned/NGEEGEE # Navigate to where you cloned the repo
-conda activate ngeegee # Activate your ngeegee environment
+cd /path/to/cloned/dapper # Navigate to where you cloned the repo
+conda activate dapper # Activate your dapper environment
 pip install -e . # Live-install the repo as an importable package
 ```
 
 **Step 5**: Test that your install works.
 ```
-conda activate ngeegee 
+conda activate dapper 
 ipython
-from ngeegee import e5l_utils
+from dapper import e5l_utils
 ```
-If you can import from the `ngeegee` package without error, you're gravy.
+If you can import from the `dapper` package without error, you're gravy.
 
 **Step 5b**: If you haven't used the GEE API before, you'll need to Authenticate before you can interact with GEE via Python. For more details, or if you get stuck, check out the [official guidance](https://developers.google.com/earth-engine/guides/auth). However, it's likely the following code will work for you:
 ```
-conda activate ngeegee
+conda activate dapper
 ipython
 import ee
 ee.Authenticate() # This should open a browser where you allow access to your GEE account and project
@@ -38,7 +38,7 @@ ee.Initialize(project='ee-yourprojectname') # replace ee-yourprojectname with yo
 You will not need to run `ee.Authenticate()` again as it stores your credentials locally. You will, however, have to run `ee.Initialize()` each time you use the GEE Python API.
 
 ## Usage
-Check out the [jupyter notebooks](https://github.com/NGEE-Arctic/NGEEGEE/tree/main/notebooks) for ways to use the tools in this package.
+Check out the [jupyter notebooks](https://github.com/NGEE-Arctic/dapper/tree/main/notebooks) for ways to use the tools in this package.
 
 ## Contributing
 Feel free to fork the repo and make improvements. Open a pull request and we'll check it out.

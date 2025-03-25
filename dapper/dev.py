@@ -1,15 +1,15 @@
 # Functions either in development or used for one-off data stuff. Created by JPS.
 # Note that there may be imports here that aren't included in environment.yml file.
 
-from ngeegee import e5l_utils as eu
+from dapper import e5l_utils as eu
 import ee
 ee.Initialize(project='ee-jonschwenk')
 from shapely import Polygon
 import geopandas as gpd
 
 
-from ngeegee import utils
-from ngeegee import e5l_utils as eu
+from dapper import utils
+from dapper import e5l_utils as eu
 from pathlib import Path
 
 # Load Kuparuk gage watershed polygon; convert to ee object
@@ -46,25 +46,25 @@ df_loc = pd.DataFrame({'pids' : pids,
           'lat' : [float(p.split(',')[0]) for p in pids],
           'lon' : [float(p.split(',')[1]) for p in pids]})
 
-csv_directory = r'X:\Research\NGEE Arctic\NGEEGEE\data\celltesting'
-write_directory = r'X:\Research\NGEE Arctic\NGEEGEE\data\celltesting\elm_formatted'
+csv_directory = r'X:\Research\NGEE Arctic\dapper\data\celltesting'
+write_directory = r'X:\Research\NGEE Arctic\dapper\data\celltesting\elm_formatted'
 remove_leap = True
 id_col = 'pids'
 compress=True
 compress_level=4
 dformat='CPL_BYPASS'
 
-import ngeegee.e5l_utils as eu
+import dapper.e5l_utils as eu
 import importlib
 importlib.reload(eu)
 eu.e5hl_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap, id_col, nzones=1, compress_level=9)
 
 import xarray as xr
-path = r"X:\Research\NGEE Arctic\NGEEGEE\data\fengming_data\gridded\clmforc.GSWP3.c2011.0.5x0.5.Prec.1901-01.nc"
-path = r"X:\Research\NGEE Arctic\NGEEGEE\data\fengming_data\era5\Daymet_ERA5.1km_QBOT_1980-2023_z01.nc"
-path = r"X:\Research\NGEE Arctic\NGEEGEE\data\fengming_data\gridded\GSWP3_FLDS_1901-2014_z14.nc"
-pathf = r"X:\Research\NGEE Arctic\NGEEGEE\data\fengming_data\gridded\GSWP3_daymet4_FLDS_1980-2014_z01_gridded.nc"
-pathm = r"X:\Research\NGEE Arctic\NGEEGEE\data\celltesting\elm_formatted\ERA5_QBOT_1950-1956_z1.nc"
+path = r"X:\Research\NGEE Arctic\dapper\data\fengming_data\gridded\clmforc.GSWP3.c2011.0.5x0.5.Prec.1901-01.nc"
+path = r"X:\Research\NGEE Arctic\dapper\data\fengming_data\era5\Daymet_ERA5.1km_QBOT_1980-2023_z01.nc"
+path = r"X:\Research\NGEE Arctic\dapper\data\fengming_data\gridded\GSWP3_FLDS_1901-2014_z14.nc"
+pathf = r"X:\Research\NGEE Arctic\dapper\data\fengming_data\gridded\GSWP3_daymet4_FLDS_1980-2014_z01_gridded.nc"
+pathm = r"X:\Research\NGEE Arctic\dapper\data\celltesting\elm_formatted\ERA5_QBOT_1950-1956_z1.nc"
 dsm = xr.open_dataset(pathm)
 dsf = xr.open_dataset(pathf)
 
@@ -127,7 +127,7 @@ eu.sample_e5lh_at_points_multijob(params)
 
 
 
-# from ngeegee import e5l_utils as eu
+# from dapper import e5l_utils as eu
 # import ee
 # ee.Initialize(project='ee-jonschwenk')
 
@@ -157,8 +157,8 @@ eu.sample_e5lh_at_points_multijob(params)
 
 import pandas as pd
 from pathlib import Path
-import ngeegee.e5l_utils as eu
-from ngeegee.utils import _ROOT_DIR
+import dapper.e5l_utils as eu
+from dapper.utils import _ROOT_DIR
 
 # Build our points dictionary (same as in 1a notebook)
 points = {'abisko' : (68.35, 18.78333),
@@ -200,7 +200,7 @@ dformat='CPL_BYPASS'
 
 import os
 import xarray as xr
-path_samples = r'X:\Research\NGEE Arctic\NGEEGEE\data\tl'
+path_samples = r'X:\Research\NGEE Arctic\dapper\data\tl'
 files = os.listdir(path_samples)
 
 ds = xr.open_dataset(os.path.join(path_samples, files[0]))
@@ -222,8 +222,8 @@ metdata={}
 # # Spin up a run
 # import ee
 # import pandas as pd
-# from ngeegee import e5l_utils as eu
-# from ngeegee import utils
+# from dapper import e5l_utils as eu
+# from dapper import utils
 # from pathlib import Path
 
 # # Make sure to Initialize with the correct project name (do not use mine--it won't work for you)

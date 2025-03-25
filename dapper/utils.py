@@ -9,11 +9,11 @@ import xarray as xr
 import netCDF4 as nc
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-import ngeegee.metadata as md
+import dapper.metadata as md
 
 # Pathing for convenience
-import ngeegee
-_ROOT_DIR = Path(next(iter(ngeegee.__path__))).parent
+import dapper
+_ROOT_DIR = Path(next(iter(dapper.__path__))).parent
 _DATA_DIR = _ROOT_DIR / "data"
 
 def determine_gee_batches(start_date, end_date, max_date, years_per_task=5, verbose=True):
@@ -275,7 +275,7 @@ def display_image_gh_notebook(image_file):
     Provide the image name as it appears in the notebooks/notebook_data/images directory.
     """
     import base64
-    from ngeegee.utils import _ROOT_DIR
+    from dapper.utils import _ROOT_DIR
 
     image_path = _ROOT_DIR / 'notebooks' / 'notebook_data' / 'images' / image_file
     # Read the image and convert it to Base64

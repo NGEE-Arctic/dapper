@@ -12,8 +12,8 @@ from datetime import datetime
 from shapely.geometry import Polygon
 from fastparquet import write
 
-from ngeegee import utils
-from ngeegee import metadata as md
+from dapper import utils
+from dapper import metadata as md
 
 
 def parse_geometry_object(geom, name): # Function to translate gdf geometries to ee geometries
@@ -448,7 +448,7 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
     dates.sort_values(by='date', inplace=True)
 
     # Create temporary folder for storing intermediate results
-    temp_path = csv_directory / 'ngeegee_temp'
+    temp_path = csv_directory / 'dapper_temp'
     utils.make_directory(temp_path, delete_all_contents=True)
 
     # Clip to first available Jan 01 year and last available Dec. 31 year.

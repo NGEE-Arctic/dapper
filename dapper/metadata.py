@@ -108,5 +108,5 @@ def elm_data_dicts():
 
 
 def e5lh_bands():
-    from ngeegee.utils import _DATA_DIR
+    from dapper.utils import _DATA_DIR
     return pd.read_csv(_DATA_DIR / 'e5lh_band_metadata.csv')

@@ -1,4 +1,4 @@
-name: ngeegee
+name: dapper
 channels:  
   - conda-forge
 dependencies:

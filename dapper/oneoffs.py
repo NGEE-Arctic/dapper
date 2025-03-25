@@ -14,10 +14,10 @@ def compute_elm_met_stats():
     """
     import os
     import xarray as xr
-    from ngeegee import utils
+    from dapper import utils
     import pandas as pd
 
-    path_sample_files = r'X:\Research\NGEE Arctic\NGEEGEE\data\fengming_data'
+    path_sample_files = r'X:\Research\NGEE Arctic\dapper\data\fengming_data'
     files = os.listdir(path_sample_files)
     stats = {}
     for f in files:
