@@ -1,8 +1,0 @@
-README.md
-pyproject.toml
-ngeegee/e5l_utils.py
-ngeegee/init.py
-ngeegee.egg-info/PKG-INFO
-ngeegee.egg-info/SOURCES.txt
-ngeegee.egg-info/dependency_links.txt
-ngeegee.egg-info/top_level.txt
