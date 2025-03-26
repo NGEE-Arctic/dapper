@@ -7,7 +7,7 @@ def compute_elm_met_stats():
     unit conversions. 
     
     The sample files were taken from Trail Valley Creek from this repo:
-    https://github.com/fmyuan/pt-e3sm-inputdata/tree/master/atm/datm7/Daymet_ERA5/cpl_bypass_TVC
+    https://github.com/fmyuan/pt-e3sm-inputdata/tree/master/atm/datm7/Daymet_ERA5/BYPASS_TVC
 
     Validation should only consider order of magnitude, or other broad metrics, as TVC
     is obviously not representative of all potential sites.

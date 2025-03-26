@@ -10,11 +10,10 @@ import xarray as xr
 import netCDF4 as nc
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-import dapper.gee.metadata as md
 
 # Pathing for convenience
 import dapper
-_ROOT_DIR = Path(next(iter(dapper.__path__))).parent
+_ROOT_DIR = Path(next(iter(dapper.__path__))).parent.parent
 _DATA_DIR = _ROOT_DIR / "data"
 
 
@@ -51,7 +50,7 @@ def display_image_gh_notebook(image_file, alt='default'):
     import base64
     from dapper.utils import _ROOT_DIR
 
-    image_path = _ROOT_DIR / 'notebooks' / 'notebook_data' / 'images' / image_file
+    image_path = _ROOT_DIR / 'docs' / 'notebooks' / 'notebook_data' / 'images' / image_file
     # Read the image and convert it to Base64
     with open(image_path, 'rb') as f:
         img_data = f.read()

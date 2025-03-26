@@ -52,7 +52,7 @@ remove_leap = True
 id_col = 'pids'
 compress=True
 compress_level=4
-dformat='CPL_BYPASS'
+dformat='BYPASS'
 
 import dapper.e5l_utils as eu
 import importlib
@@ -193,7 +193,7 @@ df_loc = pd.DataFrame({'pid' : points.keys(),
                        'lon' : [points[p][1] for p in points]})
 
 dir_out = Path(r'X:\Research\NGEE Arctic\1. Baseline PanArctic\data\temp_make_netcdfs')
-dformat='CPL_BYPASS'
+dformat='BYPASS'
 
 
 

@@ -13,3 +13,4 @@ dependencies:
   - jupyter
   - fastparquet
   - pynco
+  - netcdf4

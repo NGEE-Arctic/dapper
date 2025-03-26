@@ -1,3 +1,4 @@
+# Functions specific to ERA5-Land Hourly GEE ImageCollection
 import ee
 import os
 import glob
@@ -5,7 +6,6 @@ import json
 import numpy as np
 import pandas as pd
 import xarray as xr
-from math import floor
 import geopandas as gpd
 from pathlib import Path
 from datetime import datetime
@@ -13,39 +13,12 @@ from shapely.geometry import Polygon
 from fastparquet import write
 
 from dapper import utils
-from dapper import metadata as md
+from dapper.gee import gee_utils as gutils
+from dapper.elm import elm_utils as eutils
 
-
-def parse_geometry_object(geom, name): # Function to translate gdf geometries to ee geometries
-    
-    if type(geom) is str: # GEE Asset
-        ret = geom
-    elif type(geom) in [Polygon]:
-        eegeom = ee.Geometry.Polygon(list(geom.exterior.coords))
-        eefeature = ee.Feature(eegeom, {'name': name})
-        ret = ee.FeatureCollection(eefeature)
-    else:
-        raise TypeError(f"Unsupported geometry type: {type(geom)}")
-    
-    return ret
-
-
-def validate_bands(bandlist, gee_ic="ECMWF/ERA5_LAND/HOURLY"):
-    """
-    Ensures that the requested bands are available and errors if not.
-    """
-    if gee_ic == "ECMWF/ERA5_LAND/HOURLY":
-        available_bands = set(md.e5lh_bands()['band_name'].tolist())
-    else:
-        collection = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY")
-        sample_image = collection.first()
-        band_names = set(sample_image.bandNames().getInfo())
-
-    not_in = [b for b in bandlist if b not in available_bands]
-    if len(not_in) > 0:
-        raise NameError("You requested the following bands which are not in ERA5-Land Hourly (perhaps check spelling?): {}. For a list of available bands, run md.e5lh_bands()['band_name'].".format(not_in))
-    
-    return
+def e5lh_bands():
+    from dapper.utils import _DATA_DIR
+    return pd.read_csv(_DATA_DIR / 'e5lh_band_metadata.csv')
 
 
 def sample_e5lh(params):
@@ -65,11 +38,11 @@ def sample_e5lh(params):
     
     # Populate and validate requested bands
     if params['gee_bands'] == 'all':
-        params['gee_bands'] = md.e5lh_bands()['band_name'].tolist()
+        params['gee_bands'] = e5lh_bands()['band_name'].tolist()
     elif params['gee_bands'] == 'elm':
-        params['gee_bands'] = md.elm_data_dicts()['elm_required_bands']
+        params['gee_bands'] = eutils.elm_data_dicts()['elm_required_bands']
     else:
-        validate_bands(params['gee_bands'])
+        gutils.validate_bands(params['gee_bands'])
 
     # Handle scale
     if params['gee_scale'] == 'native':
@@ -96,7 +69,7 @@ def sample_e5lh(params):
     max_date = datetime.fromtimestamp(max_timestamp / 1000)
 
     # Determine number of batches
-    batches = utils.determine_gee_batches(start_date, end_date, max_date, years_per_task=params['gee_years_per_task'])
+    batches = gutils.determine_gee_batches(start_date, end_date, max_date, years_per_task=params['gee_years_per_task'])
 
     # Default to 'gid' if no field provided
     if 'geometry_id_field' not in params:
@@ -172,11 +145,11 @@ def sample_e5lh_at_points(params):
     """
     # Populate and/or validate the requested bands
     if params['gee_bands'] == 'all':
-        params['gee_bands'] = md.e5lh_bands()['band_name'].tolist()
+        params['gee_bands'] = e5lh_bands()['band_name'].tolist()
     elif params['gee_bands'] == 'elm_required':
-        params['gee_bands'] = md.elm_data_dicts()['elm_required_bands']
+        params['gee_bands'] = eutils.elm_data_dicts()['elm_required_bands']
     else:
-        validate_bands(params['gee_bands'])
+        gutils.validate_bands(params['gee_bands'])
 
     params['gee_ic'] = "ECMWF/ERA5_LAND/HOURLY"  # ERA5-Land Hourly imageCollection
 
@@ -212,63 +185,6 @@ def sample_e5lh_at_points(params):
 
     return f"Export task started: {params['filename']} (Check Google Drive or Task Status in the Javascript Editor for completion.)"
     
-
-def split_into_dfs(path_csv):
-    """
-    Splits a GEE-exported csv (from sample_e5lh_at_points) into a dictionary of dataframes
-    based on the unique values in the 'pid' column.
-    """
-    df = pd.read_csv(path_csv)
-    return {k : group for k, group in df.groupby('pid')}
-
-
-def compute_humidities(temp, dewpoint_temp, surf_pressure):
-    """
-    Ported by JPS from code written by Ryan Crumley.
-    temp - (np.array) - array of air temperature values (temperature_2m)
-    dewpoint_temp : (np.array) - array of dewpoint temperature values (dewpoint_temperature_2m); must be same length as temp
-
-    Returns:
-        RH - relative humidity (%)
-        Q - specific humidity (kg/kg)
-    """
-    # Convert Dewpoint Temp and Temp to RH using Clausius-Clapeyron
-    # The following is taken from Margulis 2017 Textbook, Introduction to Hydrology 
-    # from pages 49 & 50.
-    # More info can be found at: https://margulis-group.github.io/teaching/
-    
-    # Define some constants
-    esat_not = 611 # Constant (Pa)
-    rw = 461.52 # Gas constant for moist air (J/kg)
-    rd = 287.053 # Gas constant for dry air (J/kg)
-    lv = 2453000 # Latent heat of vaporization (J/kg)
-    ls = 2838000 # Latent heat of sublimation (J/kg)
-    tnot = 273.15 # Temp constant (K)
-    
-    # Saturated Vapor Pressure (using Temperature)
-    # NOTE: if temp is above 0(C) or 273.15(K) then use the latent heat of vaporization
-    # and if temp is below 0(C) or 273.15(K) then use the latent heat of sublimation
-    eSAT = np.where(temp>=273.15,
-                esat_not*np.exp((lv/rw)*((1/tnot) - (1/temp))),
-                esat_not*np.exp((ls/rw)*((1/tnot) - (1/temp))))
-
-    # Actual Vapor Pressure (using Dewpoint Temperature)
-    e = np.where(temp<=273.15,
-            esat_not*np.exp((lv/rw)*((1/tnot) - (1/dewpoint_temp))),
-            esat_not*np.exp((ls/rw)*((1/tnot) - (1/dewpoint_temp))))
-    
-    # Finally, calculate Relative Humidity using the ratio of the vapor pressures at 
-    # certain temperatures.
-    RH = (e/eSAT)*100
-
-    # Mixing ratio - check units of surf_pressure
-    w = (e*rd)/(rw*(surf_pressure-e))
-
-    # Specific Humidity (kg/kg)
-    Q = (w/(w+1))
-
-    return RH, Q
-
 
 def e5lh_to_elm_unit_conversions(df):
     """
@@ -314,11 +230,11 @@ def sample_e5lh_at_points_batch(params):
     """
     # Populate and/or validate the requested bands
     if params['gee_bands'] == 'all':
-        params['gee_bands'] = md.e5lh_bands()['band_name'].tolist()
+        params['gee_bands'] = e5lh_bands()['band_name'].tolist()
     elif params['gee_bands'] == 'elm':
-        params['gee_bands'] = md.elm_data_dicts()['elm_required_bands']
+        params['gee_bands'] = eutils.elm_data_dicts()['elm_required_bands']
     else:
-        validate_bands(params['gee_bands'])
+        gutils.validate_bands(params['gee_bands'])
 
     # Prepare for batching
     if 'gee_years_per_task' not in params:
@@ -337,7 +253,7 @@ def sample_e5lh_at_points_batch(params):
     max_date = datetime.fromtimestamp(max_timestamp / 1000)
 
     # Approximate number of images to determine number of batches
-    batches = utils.determine_gee_batches(start_date, end_date, max_date, years_per_task=params['gee_years_per_task'])
+    batches = gutils.determine_gee_batches(start_date, end_date, max_date, years_per_task=params['gee_years_per_task'])
 
     # Convert list of points into a FeatureCollection
     features = []
@@ -412,14 +328,14 @@ def _preprocess_e5hl_to_elm_file(file_path, start_year, end_year, remove_leap):
 
     # Compute indirect variables (humidities)
     if all(col in df.columns for col in ['temperature_2m', 'dewpoint_temperature_2m', 'surface_pressure']):
-        df['relative_humidity'], df['specific_humidity'] = compute_humidities(df['temperature_2m'].values, 
+        df['relative_humidity'], df['specific_humidity'] = eutils.compute_humidities(df['temperature_2m'].values, 
                                                                               df['dewpoint_temperature_2m'].values,
                                                                               df['surface_pressure'].values)
     else:
         print('Missing the required variables to compute humidities.')
 
     # Enforce non-negativeness for variables for which that is physically impossible
-    nonnegs = md.elm_data_dicts()['nonneg']
+    nonnegs = eutils.elm_data_dicts()['nonneg']
     for c in df.columns:
         if c in nonnegs:
             negs = df[c]<0
@@ -481,7 +397,7 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
         if i == 0:
             if id_col is None:
                 poss_id = [c for c in ppdf.columns if 'id' in c]
-                if len(poss_id_lens) == 0:
+                if len(poss_id) == 0:
                     raise NameError("Could not infer id column. Specify it with 'id_col' kwarg when calling e5hl_to_elm().")
                 else:
                     poss_id_lens = [len(pi) for pi in poss_id]
@@ -489,6 +405,7 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
                     print(f"Inferred '{id_col}' as id column. If this is not correct, re-run this function and specify 'id_col' kwarg.")
             df_loc.rename(columns={id_col : 'pid'}, inplace=True) # Set id_col to something consistent
         ppdf.rename(columns={id_col : 'pid'}, inplace=True)
+        df_loc.rename(columns={id_col : 'pid'}, inplace=True)
 
         # Split by location and save to parquet
         ppdfg = ppdf.groupby(by='pid')
@@ -507,7 +424,7 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
         site = pf.stem
         site_write_directory = write_directory / site
         this_df = pd.read_parquet(pf)
-        coords = df_loc[df_loc[id_col]==site]
+        coords = df_loc[df_loc['pid']==site]
         export_for_elm_site(this_df, coords['lon'].values[0], coords['lat'].values[0], site_write_directory)
 
     # Remove temporary files
@@ -516,21 +433,21 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
     return
 
 
-def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS', compress=True, compress_level=4):
+def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='BYPASS', compress=True, compress_level=4):
     """
     Export in ELM-ready foramts.
     df has all the data. Sorted by date already.
     df_loc has a list of points (pids) and their locations (lat, lon).
     zval is the height in meters of the observations - defaults to 1.
-    dformat must be CPL_BYPASS for now.
+    dformat must be BYPASS for now.
     """
-    # except for 'site', other type of cpl_bypass requires zone_mapping.txt file
+    # except for 'site', other type of BYPASS requires zone_mapping.txt file
 
     # Grab some metadata dictionaries
-    mdd = md.elm_data_dicts()
+    mdd = eutils.elm_data_dicts()
 
-    if dformat not in ['DATM_MODE', 'CPL_BYPASS']:
-        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and CPL_BYPASS are available.')
+    if dformat not in ['DATM_MODE', 'BYPASS']:
+        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and BYPASS are available.')
     elif dformat == 'DATM_MODE':
         print('DATM_MODE is not yet available. Exiting.')
         return
@@ -541,7 +458,7 @@ def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS
     start_year = str(pd.to_datetime(df['date'].values[0]).year)
     end_year = str(pd.to_datetime(df['date'].values[-1]).year)
 
-    if dformat == 'CPL_BYPASS':
+    if dformat == 'BYPASS':
         do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
     elif dformat == 'DATM_MODE':
         do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
@@ -554,7 +471,7 @@ def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS
             raise KeyError('A required variable was not found in the input dataframe: {}'.format(era5_var))
         
         # Packing params (like compression but not quite)
-        add_offset, scale_factor = utils.elm_var_compression_params(elm_var)
+        add_offset, scale_factor = eutils.elm_var_compression_params(elm_var)
 
         # Create dataset
         ds = xr.Dataset(
@@ -581,31 +498,31 @@ def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS
                                     "dtype": "int16",
                                     "scale_factor": scale_factor,
                                     "add_offset": add_offset,
-                                    "_FillValue": -32767
+                                    "_FillValue": -32767,
+                                    'zlib' : compress,
+                                    'complevel' : compress_level
                                         }
                                 },
-                     zlib=compress,
-                     complevel=compress_level
                      )
 
     return
 
 
-def export_for_elm_gridded(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYPASS', compress=True, compress_level=4):
+def export_for_elm_gridded(df, lon, lat, elm_write_dir, zval=1, dformat='BYPASS', compress=True, compress_level=4):
     """
     Export in ELM-ready foramts.
     df has all the data. Sorted by date already.
     df_loc has a list of points (pids) and their locations (lat, lon).
     zval is the height in meters of the observations - defaults to 1.
-    dformat must be CPL_BYPASS for now.
+    dformat must be BYPASS for now.
     """
-    # except for 'site', other type of cpl_bypass requires zone_mapping.txt file
+    # except for 'site', other type of BYPASS requires zone_mapping.txt file
 
     # Grab some metadata dictionaries
-    mdd = md.elm_data_dicts()
+    mdd = eutils.elm_data_dicts()
 
-    if dformat not in ['DATM_MODE', 'CPL_BYPASS']:
-        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and CPL_BYPASS are available.')
+    if dformat not in ['DATM_MODE', 'BYPASS']:
+        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and BYPASS are available.')
     elif dformat == 'DATM_MODE':
         print('DATM_MODE is not yet available. Exiting.')
         return
@@ -616,7 +533,7 @@ def export_for_elm_gridded(df, lon, lat, elm_write_dir, zval=1, dformat='CPL_BYP
     start_year = str(pd.to_datetime(df['date'].values[0]).year)
     end_year = str(pd.to_datetime(df['date'].values[-1]).year)
 
-    if dformat == 'CPL_BYPASS':
+    if dformat == 'BYPASS':
         do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
     elif dformat == 'DATM_MODE':
         do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
@@ -692,14 +609,14 @@ def _preprocess_e5hl_to_elm_file_grid(df, start_year, end_year, remove_leap, dfo
 
     # Compute indirect variables (humidities)
     if all(col in df.columns for col in ['temperature_2m', 'dewpoint_temperature_2m', 'surface_pressure']):
-        df['relative_humidity'], df['specific_humidity'] = compute_humidities(df['temperature_2m'].values, 
+        df['relative_humidity'], df['specific_humidity'] = eutils.compute_humidities(df['temperature_2m'].values, 
                                                                               df['dewpoint_temperature_2m'].values,
                                                                               df['surface_pressure'].values)
     else:
         print('Missing the required variables to compute humidities.')
 
     # Enforce non-negativeness for variables for which that is physically impossible
-    nonnegs = md.elm_data_dicts()['nonneg']
+    nonnegs = eutils.elm_data_dicts()['nonneg']
     for c in df.columns:
         if c in nonnegs:
             negs = df[c]<0
@@ -707,8 +624,8 @@ def _preprocess_e5hl_to_elm_file_grid(df, start_year, end_year, remove_leap, dfo
                 df[c].values[negs] = 0
 
     # Rename columns
-    mdd = md.elm_data_dicts()
-    if dformat == 'CPL_BYPASS':
+    mdd = eutils.elm_data_dicts()
+    if dformat == 'BYPASS':
         do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
     elif dformat == 'DATM_MODE':
         do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
@@ -723,15 +640,15 @@ def _preprocess_e5hl_to_elm_file_grid(df, start_year, end_year, remove_leap, dfo
     return df
 
 
-def e5hl_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap=True, id_col=None, nzones=1, dformat='CPL_BYPASS', compress=True, compress_level=4):
+def e5hl_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap=True, id_col=None, nzones=1, dformat='BYPASS', compress=True, compress_level=4):
     """
     Batched version for grids.
 
     compress_level - higher will compress more but take longer to write
 
     """
-    if dformat not in ['DATM_MODE', 'CPL_BYPASS']:
-        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and CPL_BYPASS are available.')
+    if dformat not in ['DATM_MODE', 'BYPASS']:
+        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and BYPASS are available.')
     elif dformat == 'DATM_MODE':
         print('DATM_MODE is not yet available. Exiting.')
         return
@@ -741,7 +658,7 @@ def e5hl_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap=True
     if type(write_directory) is str:
         write_directory = Path(write_directory)
 
-    mdd = md.elm_data_dicts()
+    mdd = eutils.elm_data_dicts()
     
     # Determine our date range to make sure we provide only complete years of data
     files = [f for f in os.listdir(csv_directory) if os.path.splitext(f)[1] == '.csv']
@@ -809,13 +726,13 @@ def e5hl_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap=True
                 # Initialize netCDF file
                 if i == 0:
                     this_df_loc = df_loc[df_loc['zone']==zone]
-                    utils.create_netcdf(this_df_loc, elm_var, write_path, dformat, compress, compress_level)                
+                    eutils.create_met_netcdf(this_df_loc, elm_var, write_path, dformat, compress, compress_level)                
 
                 # Select required vars and zone
                 save_df = ppdf[['time', 'LONGXY', 'LATIXY', 'gid', 'zone', elm_var]]
                 save_df = save_df[save_df['zone']==zone]
                 # Write to netCDF
-                utils.append_netcdf(save_df, elm_var, write_path, dformat, compress, compress_level)
+                eutils.append_met_netcdf(save_df, elm_var, write_path, dformat, compress, compress_level)
 
     # Generate zone_mappings file
     zm_write_path = write_directory / 'zone_mappings.txt'
@@ -863,12 +780,12 @@ def e5lh_to_elm_preprocess(df, remove_leap=True, verbose=False):
     df = e5lh_to_elm_unit_conversions(df)
 
     if all(col in df.columns for col in ['temperature_2m', 'dewpoint_temperature_2m', 'surface_pressure']):
-        df['relative_humidity'], df['specific_humidity'] = compute_humidities(df['temperature_2m'].values, 
+        df['relative_humidity'], df['specific_humidity'] = eutils.compute_humidities(df['temperature_2m'].values, 
                            df['dewpoint_temperature_2m'].values,
                            df['surface_pressure'].values)
 
     # Enforce non-negativeness for variables for which that is physically impossible
-    nonnegs = md.elm_data_dicts()['nonneg']
+    nonnegs = eutils.elm_data_dicts()['nonneg']
     for c in df.columns:
         if c in nonnegs:
             negs = df[c]<0
@@ -881,7 +798,7 @@ def e5lh_to_elm_preprocess(df, remove_leap=True, verbose=False):
     return df
 
 
-def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
+def export_for_elm(df, df_loc, dir_out, zval=1, dformat='BYPASS'):
     """
     For a single dataframe (one CSV exported from GEE) only! New 'batch' version is available.
 
@@ -889,15 +806,15 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
     df has all the data. Sorted by date already.
     df_loc has a list of points (pids) and their locations (lat, lon).
     zval is the height in meters of the observations - defaults to 1.
-    dformat must be CPL_BYPASS for now.
+    dformat must be BYPASS for now.
     """
-    # except for 'site', other type of cpl_bypass requires zone_mapping.txt file
+    # except for 'site', other type of BYPASS requires zone_mapping.txt file
 
     # Grab some metadata dictionaries
-    mdd = md.elm_data_dicts()
+    mdd = eutils.elm_data_dicts()
 
-    if dformat not in ['DATM_MODE', 'CPL_BYPASS']:
-        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and CPL_BYPASS are available.')
+    if dformat not in ['DATM_MODE', 'BYPASS']:
+        raise KeyError('You provided an unsupported dformat value. Currently only DATM_MODE and BYPASS are available.')
     elif dformat == 'DATM_MODE':
         print('DATM_MODE is not yet available. Exiting.')
         return
@@ -915,7 +832,7 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='CPL_BYPASS'):
         start_year = str(pd.to_datetime(this_df['date'].values[0]).year)
         end_year = str(pd.to_datetime(this_df['date'].values[-1]).year)
 
-        if dformat == 'CPL_BYPASS':
+        if dformat == 'BYPASS':
             do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
         elif dformat == 'DATM_MODE':
             do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
