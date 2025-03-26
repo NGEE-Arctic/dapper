@@ -30,11 +30,17 @@ def parse_geometry_object(geom, name): # Function to translate gdf geometries to
     return ret
 
 
-def validate_bands(bandlist):
+def validate_bands(bandlist, gee_ic="ECMWF/ERA5_LAND/HOURLY"):
     """
     Ensures that the requested bands are available and errors if not.
     """
-    available_bands = set(md.e5lh_bands()['band_name'].tolist())
+    if gee_ic == "ECMWF/ERA5_LAND/HOURLY":
+        available_bands = set(md.e5lh_bands()['band_name'].tolist())
+    else:
+        collection = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY")
+        sample_image = collection.first()
+        band_names = set(sample_image.bandNames().getInfo())
+
     not_in = [b for b in bandlist if b not in available_bands]
     if len(not_in) > 0:
         raise NameError("You requested the following bands which are not in ERA5-Land Hourly (perhaps check spelling?): {}. For a list of available bands, run md.e5lh_bands()['band_name'].".format(not_in))

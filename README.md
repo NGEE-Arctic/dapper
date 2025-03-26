@@ -2,6 +2,15 @@
   <img src="docs/images/dapper_logo_2.jpg" width="50%" alt="dapper">
 </p>
 
+## About
+The E3SM Land Model (ELM) has become useful for a wide range of investigations across a broad array of scales--from point-based to global. Each ELM run requires a hefty set of data formatted in a particular way. Two of the required "types" of data are meteorological data (time series of "met forcings") and parameter files (customizable "surface file"). As ELM capability grows, the complexity of, for example, the surface files grows to accomodate new options and parameters. Additionally, met data is usually sampled at high temporal frequency (daily/subdaily). These data requirements place a large startup burden on (particularly new) users of ELM. 
+
+DaPPER provides tools to alleviate these burdens to some degree. DaPPER relies on Google Earth Engine and other APIs to make sampling met data and surface file data fast, scalable to very large domains, and flexible to different "types" of grid cells (e.g. arbitrary polygons like watersheds instead of rectangular grids). DaPPER is being developed with the goals of NGEE-Arctic Crosscut 3 in mind, which focuses on scaling and resolution experiments. However, the broader vision is to develop a toolkit that is useful across the E3SM project, not just NGEE. We also hope that DaPPER can provide some documentation and clarity regarding the creation and use of these input data, which to-date seems to be lacking.
+
+DaPPER is under development, which means that you should consider everything *beta* and subject to change daily. We try to alleviate this instability by maintaining a `dev` branch of the repo that can be very dynamic. The `main` branch is intended to be more stable. If you're not sure, just stick to the `main` repo.
+
+DaPPER is developed by Jon Schwenk at LANL, with code contributions from Ryan Crumley (LANL), Cade Trotter (LANL), Rich Fiorella (LANL), and Fengming Yuan (ORNL).
+
 
 ## Setup and Installation
 **Step 1**: Create a free account with [Google Earth Engine](https://code.earthengine.google.com/register) if you don't have one.
