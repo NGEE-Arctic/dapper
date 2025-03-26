@@ -22,7 +22,7 @@ DaPPER is developed by Jon Schwenk at LANL, with code contributions from Ryan Cr
 conda env create -f environment.yml # This should automatically name your new environment "dapper"
 ```
 
-**Step 4**: Perform a "live install" of the dapper repo using `pip`. This is useful as it allows you to update your local dapper repo (via a `Fetch origin` in Github Desktop), and any new changes will be reflected immediately in the code that you're running. No need to recompile a package and reinstall it--very simple.
+**Step 4**: Perform a "live install" of the dapper repo using `pip`. This is useful as it allows you to update your local `dapper` repo (via a `Fetch origin` in Github Desktop), and any new changes will be reflected immediately in the code that you're running. No need to recompile a package and reinstall it--very simple.
 ```
 cd /path/to/cloned/dapper # Navigate to where you cloned the repo
 conda activate dapper # Activate your dapper environment
@@ -48,7 +48,7 @@ ee.Initialize(project='ee-yourprojectname') # replace ee-yourprojectname with yo
 You will not need to run `ee.Authenticate()` again as it stores your credentials locally. You will, however, have to run `ee.Initialize()` each time you use the GEE Python API.
 
 ## Usage
-Check out the [jupyter notebooks](https://github.com/NGEE-Arctic/dapper/tree/main/notebooks) for ways to use the tools in this package.
+Check out the [jupyter notebooks](https://github.com/NGEE-Arctic/dapper/tree/main/docs/notebooks) for ways to use the tools in this package.
 
 ## Contributing
 Feel free to fork the repo and make improvements. Open a pull request and we'll check it out.
