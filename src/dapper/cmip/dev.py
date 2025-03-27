@@ -5,47 +5,53 @@ import fsspec
 import pandas as pd
 from pathlib import Path
 
-# Define CMIP6 parameters
-variables = ['ps', 'pr', 'rsds', 'huss', 'tas', 'uas', 'vas']
-experiments = ['ssp126', 'ssp245', 'ssp585']  # SSP1-2.6, SSP2-4.5, SSP4-8.5
-experiment = "ssp245"  # Change if needed
-table = "Amon"         # Monthly atmospheric variables
-ensemble = "r1i1p1f1"  # First model run
-lat, lon = 64.7503, -165.9508 # Example: Teller
+params = {
+    'models' : ['BCC-CSM2-MR', 'CanESM5', 'CESM2', 'E3SM-1-0', 'E3SM-1-1', 'EC-Earth3', 'GFDL-ESM4', 'IPSL-CM6A-LR', 'MIROC6', 'MPI-ESM1-2-HR', 'MRI-ESM2-0', 'NorESM2-LM'],
+    'variables' : ['pr', 'tas'],
+    'experiment' : 'historical',
+    'table' : ['Amon'],
+    'ensemble' : 'r1i1p1f1',
+    'start_date' : '1850-01-01',
+    'end_date' : '2014-12-31'
+}
+path_out = Path(r'X:\Research\NGEE Arctic\CMIP output\Katrinas\Kurts_Paper')
 
 
-start_date = '2015-01-01'
-end_date = '2101-01-01'
-path_out = Path(r'X:\Research\NGEE Arctic\CMIP output\Kirstens\Toolik')
+# lat, lon = 64.7503, -165.9508 # Example: Teller
+
+
 
 # Load the Pangeo CMIP6 ESM Collection
+print('Loading Pangeo CMIP6 catalog...')
 col = intake.open_esm_datastore("https://storage.googleapis.com/cmip6/pangeo-cmip6.json")
+print('Done.')
 
 time_coder = xr.coding.times.CFDatetimeCoder(use_cftime=True)
 
-for experiment in experiments:
+for experiment in params['experiment']:
     print(experiment)
     
     # Step 1: Find models that contain ALL required variables
     query = col.search(
-        experiment_id=experiment,
-        table_id=table,
-        variable_id=variables,
-        member_id=ensemble
+        experiment_id = experiment,
+        table_id = params['table'],
+        variable_id = params['variables'],
+        member_id = params['ensemble'],
+        source_id = params['models']
     )
 
     # Group results by model and check if all variables are available
     matching_models = query.df.groupby("source_id")["variable_id"].apply(set)
-    valid_models = matching_models[matching_models.apply(lambda x: set(variables).issubset(x))]
+    valid_models = matching_models[matching_models.apply(lambda x: set(params['variables']).issubset(x))]
 
     # Step 2: Loop over valid models and extract point-based data
     for model in valid_models.index:
+
         print(f"Processing model: {model}")
 
         # Get dataset URLs for this model
         model_datasets = query.df[query.df["source_id"] == model]
 
-        # Open and align datasets for all variables
         datasets = {}
         for var in variables:
             # Find the correct dataset URL for this variable
@@ -81,6 +87,32 @@ for experiment in experiments:
         df.to_csv(path_out / filename, index=False)
         print(f"Saved: {filename}")
 
+    for _, row in query.df.iterrows():
+        download_pangeo_cmip_file(row['zstore'])
+
+import gcsfs
+import xarray as xr
+import os
+from dapper import utils 
+# Create a GCS file system object (anonymous for public buckets)
+fs = gcsfs.GCSFileSystem(token='anon')
+
+file_urls = query.df['zstore'].unique()  # or include duplicates if needed
+dir_out = utils._DATA_DIR / 'CMIP_Downloads'
+utils.make_directory(dir_out, delete_all_contents=True)
+# Download the files
+for i, row in query.df.iterrows():
+    filename = f"{row.variable_id}_{row.source_id}_{row.experiment_id}_{row.member_id}.nc"
+    try:
+        ds = xr.open_zarr(fsspec.get_mapper(row.zstore), consolidated=True, decode_times=time_coder)
+        this_file_out = dir_out / filename
+        ds.to_netcdf(this_file_out)
+        print(f"Saved: {filename}")
+    except Exception as e:
+        print(f"Failed to load {filename}: {e}")
+
+
+ds = xr.open_dataset(r"X:\Research\NGEE Arctic\dapper\data\CMIP_Downloads\pr_BCC-CSM2-MR_historical_r1i1p1f1.nc")
 
 # pyesgf is problematic because of the different nodes you have to search, the fact that
 # not all datasets are not opendap compliant (no sampling without downloading the full dataset)

@@ -1,15 +1,9 @@
 # Generic dapper functions JPS
-import ee
 import os
 import shutil
+import requests
 from pathlib import Path
-from math import ceil
-import pandas as pd
-import numpy as np
-import xarray as xr
-import netCDF4 as nc
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
 
 # Pathing for convenience
 import dapper
@@ -61,4 +55,23 @@ def display_image_gh_notebook(image_file, alt='default'):
     return html_img
 
 
+# def download_pangeo_cmip_catalog():
+#     """
+#     Downloads the Pangeo CMIP6 catalog. Run if you want to make sure you're working
+#     with the latest version.
+#     """
+#     url = "https://storage.googleapis.com/cmip6/pangeo-cmip6.json"
 
+#     # Format today's date as YYYYMMDD
+#     today = datetime.now().strftime("%Y%m%d")
+#     path_out = _DATA_DIR / f"pangeo-cmip6-{today}.json"
+
+#     # Download the file
+#     response = requests.get(url)
+#     response.raise_for_status()
+
+#     # Save the file
+#     with open(path_out, "wb") as f:
+#         f.write(response.content)
+
+#     print(f'Pangeo file saved at {path_out}.')

@@ -12,5 +12,6 @@ dependencies:
   - rioxarray
   - jupyter
   - fastparquet
-  - pynco
   - netcdf4
+  - intake-esm # for Pangeo CMIP access
+  - gcsfs # for Pangeo CMIP downloading
