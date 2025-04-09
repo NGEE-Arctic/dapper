@@ -459,13 +459,13 @@ def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='BYPASS', c
     end_year = str(pd.to_datetime(df['date'].values[-1]).year)
 
     if dformat == 'BYPASS':
-        do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
+        do_vars = [v for v in mdd['elm_req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
     elif dformat == 'DATM_MODE':
-        do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
+        do_vars = [v for v in mdd['elm_req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
     
     # Create and save netcdf for each variable
     for elm_var in do_vars:
-        era5_var = next((k for k, v in mdd['namemapper'].items() if v == elm_var), None) # Column name in df
+        era5_var = next((k for k, v in mdd['e5namemap'].items() if v == elm_var), None) # Column name in df
 
         if era5_var not in df.columns:
             raise KeyError('A required variable was not found in the input dataframe: {}'.format(era5_var))
@@ -534,13 +534,13 @@ def export_for_elm_gridded(df, lon, lat, elm_write_dir, zval=1, dformat='BYPASS'
     end_year = str(pd.to_datetime(df['date'].values[-1]).year)
 
     if dformat == 'BYPASS':
-        do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
+        do_vars = [v for v in mdd['elm_req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
     elif dformat == 'DATM_MODE':
-        do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
+        do_vars = [v for v in mdd['elm_req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
     
     # Create and save netcdf for each variable
     for elm_var in do_vars:
-        era5_var = next((k for k, v in mdd['namemapper'].items() if v == elm_var), None) # Column name in df
+        era5_var = next((k for k, v in mdd['e5namemap'].items() if v == elm_var), None) # Column name in df
 
         if era5_var not in df.columns:
             raise KeyError('A required variable was not found in the input dataframe: {}'.format(era5_var))
@@ -626,9 +626,9 @@ def _preprocess_e5hl_to_elm_file_grid(df, start_year, end_year, remove_leap, dfo
     # Rename columns
     mdd = eutils.elm_data_dicts()
     if dformat == 'BYPASS':
-        do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
+        do_vars = [v for v in mdd['elm_req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
     elif dformat == 'DATM_MODE':
-        do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
+        do_vars = [v for v in mdd['elm_req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
     renamer = {k: v for k, v in mdd['short_names'].items() if v in do_vars}
     renamer.update({'date' : 'time', 'lon' : 'LONGXY', 'lat' : 'LATIXY'})
     df.rename(columns=renamer, inplace=True)
@@ -833,9 +833,9 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='BYPASS'):
         end_year = str(pd.to_datetime(this_df['date'].values[-1]).year)
 
         if dformat == 'BYPASS':
-            do_vars = [v for v in mdd['req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
+            do_vars = [v for v in mdd['elm_req_vars']['cbypass'] if v not in ['LONGXY', 'LATIXY', 'time']]
         elif dformat == 'DATM_MODE':
-            do_vars = [v for v in mdd['req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
+            do_vars = [v for v in mdd['elm_req_vars']['datm'] if v not in ['LONGXY', 'LATIXY', 'time']]
         
         # Create site directory if doesn't exist
         this_out_dir = dir_out / site
@@ -844,7 +844,7 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='BYPASS'):
 
             # Create and save netcdf for each variable
             for elm_var in do_vars:
-                era5_var = next((k for k, v in mdd['namemapper'].items() if v == elm_var), None) # Column name in this_df
+                era5_var = next((k for k, v in mdd['e5namemap'].items() if v == elm_var), None) # Column name in this_df
 
                 if era5_var not in this_df.columns:
                     raise KeyError('A required variable was not found in the input dataframe: {}'.format(era5_var))

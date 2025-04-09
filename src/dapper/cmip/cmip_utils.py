@@ -8,11 +8,10 @@ import gcsfs
 import xarray as xr
 import os
 from dapper import utils 
+from dapper.elm import elm_utils as euts
+
 
 col = intake.open_esm_datastore("https://storage.googleapis.com/cmip6/pangeo-cmip6.json")
-
-
-
 
 
 # params = {
@@ -26,17 +25,20 @@ col = intake.open_esm_datastore("https://storage.googleapis.com/cmip6/pangeo-cmi
 # }
 # path_out = Path(r'X:\Research\NGEE Arctic\CMIP output\Katrinas\Kurts_Paper')
 
+# The problem is that ps is not provided daily.
 
-# params = {
-#     'variables' : ['pr', 'tas'],
-#     'experiment' : 'historical',
-#     'table' : ['Amon'],
-#     'ensemble' : 'r1i1p1f1',
-#     'start_date' : '1850-01-01',
-#     'end_date' : '2014-12-31'
-# }
+params = {
+    'variables' : 'elm',
+    'experiment' : 'historical',
+    'table' : ['day', '3hr', '6hrLev'],
+    'ensemble' : 'r1i1p1f1',
+}
 
 def find_available_data(params):
+
+    params['variables'] = 'ps'
+    if 'variables' in params and params['variables'] == 'elm':
+        params['variables'] = euts.elm_data_dicts()['cmip_req_vars']
     
     param_mapping = {
         'experiment': 'experiment_id',
@@ -55,6 +57,20 @@ def find_available_data(params):
 
     # Perform the search
     matches = col.search(**search_args)
+
+
+    df = matches.df.copy()
+    # Step 1: Find models that have both 'pr' and 'tas'
+    grouped = df.groupby('source_id')
+    keep = []
+    for model, g in grouped:
+        print(len(g))
+        if len(g) > 7:
+            break
+        if all(x in g['variable_id'] for x in params['variables']):
+            keep.extend(g.index.tolist())
+    df_export = df.iloc[keep]
+    print(df_export) # Now we have 10 models
 
     return matches
 

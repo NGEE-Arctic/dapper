@@ -112,7 +112,7 @@ def validate_met_vars(df):
     sdf = pd.read_csv(path_stats, index_col=0)
 
     # Determine which variables can/can't be validated
-    namemap = elm_data_dicts()['namemapper']
+    namemap = elm_data_dicts()['e5namemap']
     nostats = []
     for c in df.columns:
         if c in ['pid', 'date']:
@@ -240,23 +240,40 @@ def elm_data_dicts():
     """
     Defines some dictionaries for ELM-expected variables.
     """
-    # ERA5-Land Hourly variables (bands) that are needed to create the required ELM forcing data
-    elm_required_bands = ['temperature_2m', 'u_component_of_wind_10m', 'v_component_of_wind_10m',
+    # Required bands/vars are the minimum needed to generate a full suite of ELM data
+    e5_required_bands = ['temperature_2m', 'u_component_of_wind_10m', 'v_component_of_wind_10m',
                           'surface_solar_radiation_downwards_hourly', 'surface_thermal_radiation_downwards_hourly',
                           'total_precipitation_hourly', 'surface_pressure', 'dewpoint_temperature_2m']
     
-    # E5LH name -> ELM name
-    e5_to_elm_short_name = {'u_component_of_wind_10m' : 'UWIND',
-                            'v_component_of_wind_10m' : 'VWIND',
-                            'wind_speed' : 'WIND',
-                            'surface_solar_radiation_downwards_hourly' : 'FSDS',
-                            'surface_thermal_radiation_downwards_hourly' : 'FLDS',
-                            'specific_humidity' : 'QBOT',
-                            'total_precipitation_hourly' : 'PRECTmms',
-                            'surface_pressure' : 'PSRF',
-                            'temperature_2m' : 'TBOT',
-                            'dewpoint_temperature_2m' : 'DTBOT',
-                            'relative_humidity' : 'RH'}
+    cmip_required_vars = ['sfcWind', 'rsds', 'rlds', 'huss', 'pr', 'tas', 'hur', 'ps'] #  dewpoint temperature 'tdps' is derivable so not included
+        
+    elm_required_vars = {'datm' : ['LONGXY','LATIXY','time', 'ZBOT','TBOT', 'PRECTmms', 'RH', 'FSDS', 'FLDS', 'PSRF', 'WIND'],
+                      'cbypass' : ['LONGXY','LATIXY','time', 'TBOT', 'PRECTmms', 'QBOT', 'FSDS', 'FLDS', 'PSRF', 'WIND']}
+
+    # Name mappings to ELM
+    cmip_to_elm_short_name = {  'uas' : 'UWIND',
+                                'vas' : 'VWIND',
+                                'sfcWind' : 'WIND',
+                                'rsds' : 'FSDS',
+                                'rlds' : 'FLDS',
+                                'huss' : 'QBOT',
+                                'pr' : 'PRECTmms',
+                                'ps' : 'PSRF',
+                                'tas' : 'TBOT',
+                                'tdps' : 'DTBOT',
+                                'hur' : 'RH'}
+    
+    e5_to_elm_short_name = {  'u_component_of_wind_10m' : 'UWIND',
+                                'v_component_of_wind_10m' : 'VWIND',
+                                'wind_speed' : 'WIND',
+                                'surface_solar_radiation_downwards_hourly' : 'FSDS',
+                                'surface_thermal_radiation_downwards_hourly' : 'FLDS',
+                                'specific_humidity' : 'QBOT',
+                                'total_precipitation_hourly' : 'PRECTmms',
+                                'surface_pressure' : 'PSRF',
+                                'temperature_2m' : 'TBOT',
+                                'dewpoint_temperature_2m' : 'DTBOT',
+                                'relative_humidity' : 'RH'}
 
     # Output units
     units = {'TBOT' : 'K',
@@ -297,10 +314,6 @@ def elm_data_dicts():
         'ZBOT' : 'observational height (ZBOT)',
         'UWIND' : 'u component of wind velocity',
         'VWIND' : 'v component of wind velocity'}
-
-    # ELM output variable name requirements
-    required_vars = {'datm' : ['LONGXY','LATIXY','time', 'ZBOT','TBOT', 'PRECTmms', 'RH', 'FSDS', 'FLDS', 'PSRF', 'WIND'],
-                     'cbypass' : ['LONGXY','LATIXY','time', 'TBOT', 'PRECTmms', 'QBOT', 'FSDS', 'FLDS', 'PSRF', 'WIND']}
     
     # Variables that cannot physically be negative
     non_negative_bands = [
@@ -331,13 +344,15 @@ def elm_data_dicts():
         ]
 
     
-    return {'namemapper' : e5_to_elm_short_name,
+    return {'e5namemap' : e5_to_elm_short_name,
+            'cmipnamemap' : cmip_to_elm_short_name,
             'units' : units,
             'ranges' : ranges,
             'descriptions' : short_descriptions,
-            'req_vars' : required_vars,
+            'cmip_req_vars' : cmip_required_vars, 
+            'elm_req_vars' : elm_required_vars,
             'nonneg' : non_negative_bands,
-            'elm_required_bands' : elm_required_bands,
+            'elm_required_bands' : e5_required_bands,
             'short_names' : e5_to_elm_short_name
             }
 
