@@ -23,7 +23,7 @@ def e5lh_bands():
 
 def sample_e5lh(params):
     """
-    Exports ERA5-Land hourly time-series data for multiple polygons to Google Drive in N-year chunks.
+    Exports ERA5-Land hourly time-series data for multiple geometries (polygons or points) to Google Drive in N-year chunks.
 
     Input is params, a dictionary with the following keys:
         start_date (str) : YYYY-MM-DD format
@@ -85,6 +85,14 @@ def sample_e5lh(params):
         gdf_reduced = gdf_reduced[[params['geometry_id_field'], 'geometry']]
         geojson_str = gdf_reduced.to_json()    
         geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
+
+    # If the provided polygons do not overlap a pixel center of the native image (ER5L) resolution,
+    # no data will be sampled. Here, we ensure that at least one pixel center is included.
+    # If not, we convert the polygon to a point, as points do return data even if they're not
+    # perfectly aligned with pixel centers.
+        # Use a single ERA5 image (you can pick a specific time)
+    sample_img = ic.filterDate("2020-01-01T00:00", "2020-01-01T01:00").first().select("temperature_2m")
+    geometries_fc = gutils.ensure_pixel_centers_within_geometries(geometries_fc, sample_img, scale)
 
     # Function to extract spatially averaged values over each polygon
     def image_to_features(image):
@@ -361,7 +369,6 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
     if type(write_directory) is str:
         write_directory = Path(write_directory)
 
-
     # Determine our date range to make sure we provide only complete years of data
     files = [f for f in os.listdir(csv_directory) if os.path.splitext(f)[1] == '.csv']
     dates = [pd.read_csv(csv_directory / file, usecols=["date"]) for  file in files]
@@ -425,6 +432,8 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
         site_write_directory = write_directory / site
         this_df = pd.read_parquet(pf)
         coords = df_loc[df_loc['pid']==site]
+        # import pdb
+        # pdb.set_trace()
         export_for_elm_site(this_df, coords['lon'].values[0], coords['lat'].values[0], site_write_directory)
 
     # Remove temporary files
@@ -481,7 +490,7 @@ def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='BYPASS', c
                                 "LATIXY": (("n",), np.array([lat], dtype=np.float32)),
                                 elm_var: (("n", "DTIME"), df[era5_var].values.reshape(1, -1))  
                             },
-                            attrs={"history": "Created using xarray",
+                            attrs={"history": "Created using xarray via dapper",
                                     'units' : mdd['units'][elm_var],
                                     'description' : mdd['descriptions'][elm_var],
                                     'calendar' : 'noleap',
@@ -556,7 +565,7 @@ def export_for_elm_gridded(df, lon, lat, elm_write_dir, zval=1, dformat='BYPASS'
                                 "LATIXY": (("n",), np.array([lat], dtype=np.float32)),
                                 elm_var: (("n", "DTIME"), df[era5_var].values.reshape(1, -1))  
                             },
-                            attrs={"history": "Created using xarray",
+                            attrs={"history": "Created using xarray via dapper",
                                     'units' : mdd['units'][elm_var],
                                     'description' : mdd['descriptions'][elm_var],
                                     'calendar' : 'noleap',
@@ -857,7 +866,7 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='BYPASS'):
                                         "LATIXY": (("n",), np.array([df_loc['lat'].values[df_loc['pid']==site][0]], dtype=np.float32)),
                                         era5_var: (("n", "DTIME"), this_df[era5_var].values.reshape(1, -1))  # Example random data
                                     },
-                                    attrs={"history": "Created using xarray",
+                                    attrs={"history": "Created using xarray via dapper",
                                            'units' : mdd['units'][elm_var],
                                            'description' : mdd['descriptions'][elm_var],
                                            'calendar' : 'noleap',

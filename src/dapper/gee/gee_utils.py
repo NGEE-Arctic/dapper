@@ -115,3 +115,44 @@ def kill_all_tasks(verbose=True):
             if verbose:
                 print(f"Cancelled task: {task_id}")
 
+
+def ensure_pixel_centers_within_geometries(fc, sample_img, scale):
+    """
+    This function takes a featureCollection and ensures that each feature in the collection
+    samples valid data for an underlying image (that ideally should be representative of
+    an imageCollection). Point geometries are guaranteed to sample from any image regardless
+    of resolution, so if a polygon or multipolygon in the featureCollection doesn't contain
+    any pixel centers, it is replaced by its centroid as a Point geometry.
+    """    
+
+    # Function to process each feature
+    def check_pixels_and_maybe_centroid(feature):
+        geom = feature.geometry()
+        geom_type = geom.type()
+
+        # Only act on polygons or multipolygons
+        is_poly = ee.Algorithms.If(
+            ee.List(["Polygon", "MultiPolygon"]).contains(geom_type),
+            True, False
+        )
+
+        def process_polygon():
+            # Reduce region to count valid pixels inside the geometry
+            count = sample_img.reduceRegion(
+                reducer=ee.Reducer.count(),
+                geometry=geom,
+                scale=scale,
+                maxPixels=1e9
+            ).values().get(0)
+
+            # If no pixels (count == 0), replace geometry with centroid
+            return ee.Algorithms.If(
+                ee.Number(count).gt(0),
+                feature,
+                feature.setGeometry(geom.centroid())
+            )
+
+        return ee.Feature(ee.Algorithms.If(is_poly, process_polygon(), feature))
+    
+    fc_ensured = fc.map(check_pixels_and_maybe_centroid)
+    return fc_ensured
