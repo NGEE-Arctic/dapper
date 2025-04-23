@@ -135,8 +135,8 @@ def sample_e5lh(params):
 
         print(f"Export task submitted: {export_filename}")
 
-    return "All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion."
-
+    print("All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion.")
+    return 
 
 
 def sample_e5lh_at_points(params):
@@ -361,8 +361,6 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
     Batched version.
 
     Need to test that it works for a single csv.
-
-    Next is handling polygon(s)
     """
     if type(csv_directory) is str:
         csv_directory = Path(csv_directory)
@@ -439,6 +437,14 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
     # Remove temporary files
     utils.remove_directory_contents(temp_path, remove_directory=True)
 
+    # Apparently OLMT requires a zone mapping even for site runs - this seems trivial as zone and id will always be 1
+    zm_write_path = write_directory / 'zone_mappings.txt'
+    zms = df_loc[['lon', 'lat']]
+    zms['zone'] = np.arange(1, len(zms)+1) 
+    zms['id'] = np.arange(1, len(zms)+1) 
+    zms.to_csv(zm_write_path, index=False, header=False, sep='\t')
+
+
     return
 
 
@@ -490,13 +496,14 @@ def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='BYPASS', c
                                 "LATIXY": (("n",), np.array([lat], dtype=np.float32)),
                                 elm_var: (("n", "DTIME"), df[era5_var].values.reshape(1, -1))  
                             },
-                            attrs={"history": "Created using xarray via dapper",
+                            attrs={"history": "Created using xarray via dapper; contact jschwenk@lanl.gov for more information",
                                     'units' : mdd['units'][elm_var],
                                     'description' : mdd['descriptions'][elm_var],
                                     'calendar' : 'noleap',
                                     'created_on' : datetime.today().strftime('%Y-%m-%d'),
                                     'add_offset' : add_offset,
-                                    'scale_factor' : scale_factor}
+                                    'scale_factor' : scale_factor,
+                                    'metadata' : 'Variables sampled via Google Earth Engine; see https://developers.google.com/earth-engine/datasets/catalog/ECMWF_ERA5_LAND_HOURLY#description'}
                         )
 
         # Save file
@@ -866,11 +873,13 @@ def export_for_elm(df, df_loc, dir_out, zval=1, dformat='BYPASS'):
                                         "LATIXY": (("n",), np.array([df_loc['lat'].values[df_loc['pid']==site][0]], dtype=np.float32)),
                                         era5_var: (("n", "DTIME"), this_df[era5_var].values.reshape(1, -1))  # Example random data
                                     },
-                                    attrs={"history": "Created using xarray via dapper",
+                                    attrs={"history": "Created using xarray via dapper; contact jschwenk@lanl.gov for more information.",
                                            'units' : mdd['units'][elm_var],
                                            'description' : mdd['descriptions'][elm_var],
                                            'calendar' : 'noleap',
-                                           'created_on' : datetime.today().strftime('%Y-%m-%d')}
+                                           'created_on' : datetime.today().strftime('%Y-%m-%d'),
+                                           'metadata' : 'Variables sampled via Google Earth Engine; see https://developers.google.com/earth-engine/datasets/catalog/ECMWF_ERA5_LAND_HOURLY#description'
+                                    }
                                 )
 
                 # Save file

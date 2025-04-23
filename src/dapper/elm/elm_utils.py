@@ -283,7 +283,7 @@ def elm_data_dicts():
             'FSDS' : 'W/m2',
             'FLDS' : 'W/m2',
             'PSRF' : 'Pa',
-            'PRECTmms' : 'kg/m2/s',
+            'PRECTmms' : 'mm/s',
             'QBOT' : 'kg/kg',
             'ZBOT' : 'm',
             'UWIND' : 'm/s',
