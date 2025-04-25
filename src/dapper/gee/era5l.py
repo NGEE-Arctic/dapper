@@ -656,7 +656,7 @@ def _preprocess_e5hl_to_elm_file_grid(df, start_year, end_year, remove_leap, dfo
     return df
 
 
-def e5hl_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap=True, id_col=None, nzones=1, dformat='BYPASS', compress=True, compress_level=4):
+def e5lh_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap=True, id_col=None, nzones=1, dformat='BYPASS', compress=True, compress_level=4):
     """
     Batched version for grids.
 

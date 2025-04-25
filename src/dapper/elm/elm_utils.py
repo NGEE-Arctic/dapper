@@ -90,7 +90,7 @@ def append_met_netcdf(this_df, elm_var, write_path, dformat='BYPASS', compress=F
             # Pack data to float32 and apply offset/scale
             packed_data_column = np.round((this_df[elm_var].values - add_offset) / scale_factor).astype(np.float32)
 
-            # Efficiently reshape data: (DTIME, n) order
+            # Reshape data: (DTIME, n) order
             num_times = len(unique_times)
             reshaped_data = packed_data_column.reshape(num_times, current_gid_size)
 
@@ -283,7 +283,7 @@ def elm_data_dicts():
             'FSDS' : 'W/m2',
             'FLDS' : 'W/m2',
             'PSRF' : 'Pa',
-            'PRECTmms' : 'mm/s',
+            'PRECTmms' : 'mm/s', # equivalent to kg/m2/s
             'QBOT' : 'kg/kg',
             'ZBOT' : 'm',
             'UWIND' : 'm/s',
