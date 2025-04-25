@@ -438,12 +438,10 @@ def e5hl_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
     utils.remove_directory_contents(temp_path, remove_directory=True)
 
     # Apparently OLMT requires a zone mapping even for site runs - this seems trivial as zone and id will always be 1
+    df_loc['zone'] = np.arange(1, len(df_loc)+1) # need to define zones even though there's only one
+    zms = eutils.gen_zone_mappings(df_loc)
     zm_write_path = write_directory / 'zone_mappings.txt'
-    zms = df_loc[['lon', 'lat']]
-    zms['zone'] = np.arange(1, len(zms)+1) 
-    zms['id'] = np.arange(1, len(zms)+1) 
     zms.to_csv(zm_write_path, index=False, header=False, sep='\t')
-
 
     return
 
@@ -507,7 +505,7 @@ def export_for_elm_site(df, lon, lat, elm_write_dir, zval=1, dformat='BYPASS', c
                         )
 
         # Save file
-        filename = 'ERA5_' + elm_var + '_' + start_year + '-' + end_year + '_z' + str(zval) + '.nc'
+        filename = 'ERA5_' + elm_var + '_' + start_year + '-' + end_year + '_z' + str(zval).zfill(2) + '.nc'
         this_out_file = elm_write_dir / filename
         ds.to_netcdf(this_out_file, 
                      encoding = { elm_var: {
@@ -582,7 +580,7 @@ def export_for_elm_gridded(df, lon, lat, elm_write_dir, zval=1, dformat='BYPASS'
                         )
 
         # Save file
-        filename = 'ERA5_' + elm_var + '_' + start_year + '-' + end_year + '_z' + str(zval) + '.nc'
+        filename = 'ERA5_' + elm_var + '_' + start_year + '-' + end_year + '_z' + str(zval).zfill(2)+ '.nc'
         this_out_file = elm_write_dir / filename
         ds.to_netcdf(this_out_file, 
                      encoding = { elm_var: {
@@ -675,6 +673,8 @@ def e5lh_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap=True
         write_directory = Path(write_directory)
 
     mdd = eutils.elm_data_dicts()
+
+    # ELM/E3SM operate on a longitudinal range of 0-360
     
     # Determine our date range to make sure we provide only complete years of data
     files = [f for f in os.listdir(csv_directory) if os.path.splitext(f)[1] == '.csv']
@@ -751,13 +751,11 @@ def e5lh_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap=True
                 eutils.append_met_netcdf(save_df, elm_var, write_path, dformat, compress, compress_level)
 
     # Generate zone_mappings file
+    zms = eutils.gen_zone_mappings(df_loc)
     zm_write_path = write_directory / 'zone_mappings.txt'
-    zms = df_loc[['lon', 'lat', 'zone']]
-    zms['id'] = np.arange(1, len(zms)+1) # This might not be right, might need to repeat by zone?
     zms.to_csv(zm_write_path, index=False, header=False, sep='\t')
 
     return
-
 
 
 def e5lh_to_elm_preprocess(df, remove_leap=True, verbose=False):

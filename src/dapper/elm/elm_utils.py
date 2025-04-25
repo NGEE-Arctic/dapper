@@ -356,3 +356,16 @@ def elm_data_dicts():
             'short_names' : e5_to_elm_short_name
             }
 
+
+def gen_zone_mappings(df_loc):
+    """
+    Creates a dataframe of zone mappings.
+    Note that ELM operates on a 0-360 longitudinal range.
+    zone mappings must be two digits (e.g. 01, not 1)
+    """
+    zone_mapping = df_loc[['lon', 'lat', 'zone']]
+    zone_mapping.loc[:, 'lon'] = zone_mapping['lon'].values % 360 # convert to ELM-expected range
+    zone_mapping['id'] = np.arange(1, len(zone_mapping)+1) # Not quite sure what id column means, but seems to just increment by 1 in examples
+    zone_mapping['zone'] = zone_mapping['zone'].astype(int).astype(str).str.zfill(2)
+
+    return zone_mapping
