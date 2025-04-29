@@ -96,7 +96,7 @@ def infer_id_field(columns):
     """
     poss_id = [c for c in columns if 'id' in c]
     if len(poss_id) == 0:
-        raise NameError("Could not infer id column. Specify it with 'id_col' kwarg when calling e5hl_to_elm().")
+        raise NameError("Could not infer id column. Specify it with 'id_col' kwarg when calling e5lh_to_elm().")
     else:
         poss_id_lens = [len(pi) for pi in poss_id]
         id_col = poss_id[poss_id_lens.index(min(poss_id_lens))]

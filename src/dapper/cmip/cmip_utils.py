@@ -14,16 +14,17 @@ from dapper.elm import elm_utils as euts
 col = intake.open_esm_datastore("https://storage.googleapis.com/cmip6/pangeo-cmip6.json")
 
 
-# params = {
-#     'models' : ['BCC-CSM2-MR', 'CanESM5', 'CESM2', 'E3SM-1-0', 'E3SM-1-1', 'EC-Earth3', 'GFDL-ESM4', 'IPSL-CM6A-LR', 'MIROC6', 'MPI-ESM1-2-HR', 'MRI-ESM2-0', 'NorESM2-LM'],
-#     'variables' : ['pr', 'tas'],
-#     'experiment' : 'historical',
-#     'table' : ['Amon'],
-#     'ensemble' : 'r1i1p1f1',
-#     'start_date' : '1850-01-01',
-#     'end_date' : '2014-12-31'
-# }
-# path_out = Path(r'X:\Research\NGEE Arctic\CMIP output\Katrinas\Kurts_Paper')
+params = {
+    # 'models' : ['BCC-CSM2-MR', 'CanESM5', 'CESM2', 'E3SM-1-0', 'E3SM-1-1', 'EC-Earth3', 'GFDL-ESM4', 'IPSL-CM6A-LR', 'MIROC6', 'MPI-ESM1-2-HR', 'MRI-ESM2-0', 'NorESM2-LM'],
+    'models' : ['NorESM2-LM'],
+    'variables' : ['pr', 'tas'],
+    'experiment' : 'historical',
+    'table' : ['Amon'],
+    'ensemble' : 'r2i1p1f1',
+    'start_date' : '1850-01-01',
+    'end_date' : '2015-12-31'
+}
+path_out = Path(r'X:\Research\NGEE Arctic\CMIP output\Katrinas\Kurts_Paper')
 
 # The problem is that ps is not provided daily.
 
@@ -36,7 +37,7 @@ params = {
 
 def find_available_data(params):
 
-    params['variables'] = 'ps'
+    # params['variables'] = 'ps'
     if 'variables' in params and params['variables'] == 'elm':
         params['variables'] = euts.elm_data_dicts()['cmip_req_vars']
     
@@ -58,21 +59,20 @@ def find_available_data(params):
     # Perform the search
     matches = col.search(**search_args)
 
-
     df = matches.df.copy()
     # Step 1: Find models that have both 'pr' and 'tas'
     grouped = df.groupby('source_id')
     keep = []
     for model, g in grouped:
-        print(len(g))
-        if len(g) > 7:
-            break
-        if all(x in g['variable_id'] for x in params['variables']):
+        # print(len(g))
+        # if len(g) > 7:
+        #     break
+        if all(x in g['variable_id'].values for x in params['variables']):
             keep.extend(g.index.tolist())
     df_export = df.iloc[keep]
-    print(df_export) # Now we have 10 models
+    # print(df_export) # Now we have 10 models
 
-    return matches
+    return df_export
 
 def download_pangeo(df, dir_out):
     """
