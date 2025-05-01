@@ -1,9 +1,9 @@
 # Generic functions JPS
 import ee
-import os
-import shutil
+import json
 from pathlib import Path
 import pandas as pd
+import geopandas as gpd
 from shapely.geometry import Polygon
 from dateutil.relativedelta import relativedelta
 
@@ -31,6 +31,31 @@ def parse_geometry_object(geom, name):
     return ret
 
 
+def parse_geometry_objects(geom, geometry_id_field=None): 
+    """
+    Translates gdf geometries to ee geometries.
+    If geom is a string, it's interpreted as a path to an available GEE asset.
+    If geom is a GeoDataFrame, the geometries for each are interpreted.
+    geometry_id_field is the column that contains the unique identifier for each geometry/row in the GeoDataFrame.
+    Returns a FeatureCollection, even if a single feature is present. 
+    """
+    # Convert geometries to GEE FeatureCollection (supports dict input OR pre-loaded FeatureCollection)
+    if isinstance(geom, str):
+        geometries_fc = ee.FeatureCollection(geom)  # Directly use pre-loaded GEE asset
+    elif isinstance(geom, ee.FeatureCollection):
+        geometries_fc = ee.FeatureCollection(geom) # re-casting; should already be correct type but this fixes weird errors
+    elif isinstance(geom, gpd.GeoDataFrame):
+        gdf_reduced = geom.copy()
+        if geometry_id_field is None:
+            raise KeyError('No geometry id field was provided, but it is required. Ensure your GeoDataFrame has a unique identifier column.')
+        geom_field = gdf_reduced.geometry.name
+        gdf_reduced = gdf_reduced[geometry_id_field, geom_field]
+        geojson_str = gdf_reduced.to_json()    
+        geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
+
+    return geometries_fc
+
+    
 def validate_bands(bandlist, gee_ic="ECMWF/ERA5_LAND/HOURLY"):
     """
     Ensures that the requested bands are available and errors if not.

@@ -90,19 +90,19 @@ def sample_e5lh(params):
     # no data will be sampled. Here, we ensure that at least one pixel center is included.
     # If not, we convert the polygon to a point, as points do return data even if they're not
     # perfectly aligned with pixel centers.
-        # Use a single ERA5 image (you can pick a specific time)
+    # Use a single ERA5 image
     sample_img = ic.filterDate("2020-01-01T00:00", "2020-01-01T01:00").first().select("temperature_2m")
     geometries_fc = gutils.ensure_pixel_centers_within_geometries(geometries_fc, sample_img, scale)
 
-    # Function to extract spatially averaged values over each polygon
+    # Function to extract spatially averaged values over each feature (polygon or point)
     def image_to_features(image):
         date = ee.Date(image.get('system:time_start')).format("YYYY-MM-dd HH:mm")
 
-        # Reduce regions (spatial average for each polygon)
+        # Reduce regions (spatial average for each feature)
         values = image.reduceRegions(
             collection=geometries_fc, 
-            reducer=ee.Reducer.mean(),  # Compute spatial mean over polygon
-            scale=scale,  # ERA5 spatial resolution ~11.1km
+            reducer=ee.Reducer.mean(),  # Compute spatial mean over feature
+            scale=scale,
         )
 
         return values.map(lambda f: f.set("date", date))  # Attach date to results
@@ -116,7 +116,7 @@ def sample_e5lh(params):
             bdf['task_end'].strftime("%Y-%m-%d")
         )
 
-        # Apply function over the ImageCollection
+        # Compute averages for each feature
         feature_collection = ic_filtered.map(image_to_features).flatten()
 
         # Create a unique filename for each chunk
@@ -500,7 +500,7 @@ def _preprocess_e5lh_to_elm_file_grid(df, start_year, end_year, remove_leap, dfo
     df['date'] = pd.to_datetime(df['date'])
     df.sort_values(by='date', inplace=True)
 
-    # Clip time so that only full years exist
+    # Clip time so that only full years exist 
     df = df[(df["date"].dt.year >= start_year) & (df["date"].dt.year <= end_year)]
 
     # Remove leap days
