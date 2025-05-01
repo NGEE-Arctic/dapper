@@ -32,32 +32,32 @@ def compute_sampling_scale(feature, n, target_pixels_per_topounit=500):
     return scale.getInfo()
 
 
-def make_topounits(feature, n, method='epercentiles', dem='arcticdem', ret='geodataframe'):
+def make_topounits(feature, n, method='epercentiles', dem_source='arcticdem', ftype='gdf', export_scale='native'):
     """
     Creates topounits based on a provided set of geometries (polygons or multipolygons)
-    already cast as an ee.Feature. 
-    n represents the number of topounits wanted.
-    method refers to how topounits should be computed; right now only epercentiles is available.
-    Currently only ArcticDEM coverage although other DEMs are available for use.
-    Can return an imageCollection ('imagecollection') of masks or a GeoDataFrame ('geodataframe') of vectorized polygons outlining the Topounits.
+    already cast as an ee.Feature.
+    
+    n represents the number of topounits wanted (in elevation percentiles or elev x aspect).
+    method: 'epercentiles' for elevation-only, or 'elevaspect' for elevation + aspect.
+    dem_source: currently only 'arcticdem' is supported.
+    ftype: 'geodataframe' or 'imagecollection' (not fully implemented here).
+    export_scale: can be 'native' or numeric value.
     """
 
-    if dem == 'arcticdem':
+    # Load DEM
+    if dem_source == 'arcticdem':
         dem = ee.Image("UMN/PGC/ArcticDEM/V3/2m_mosaic")
-        scale_binning = compute_sampling_scale(feature, n) # use 5 meter scale, adjustable based on size of geometry though
-        scale_binning = max(scale_thresholding, 5)
+        scale_binning = compute_sampling_scale(feature, n)
+        scale_binning = max(scale_binning, 5)  # enforce max resolution to avoid memory issues
     else:
         raise KeyError('Your selection for dem in Topounit generation is not yet supported.')
-    
-    # Clip the DEM to the area of interest
+
     dem_clipped = dem.clip(feature.geometry())
-    
-    # Sample elevation values within the polygon
-    samples = dem_clipped.sample(region=feature.geometry(), scale=scale_binning, geometries=False)
-    
-    # Get the list of elevation values
-    elevations = samples.aggregate_array('elevation')
-        
+    aspect_img = ee.Terrain.aspect(dem_clipped)
+
+    # Sample elevation values
+    elev_samples = dem_clipped.sample(region=feature.geometry(), scale=scale_binning, geometries=False)
+    elevations = elev_samples.aggregate_array('elevation')
     elevations_list = ee.List(elevations)
     count = elevations_list.size()
     percentiles = [i * (100 / n) for i in range(1, n)]
@@ -66,46 +66,91 @@ def make_topounits(feature, n, method='epercentiles', dem='arcticdem', ret='geod
     for p in percentiles:
         index = ee.Number(p).multiply(count).divide(100).int()
         thresholds.append(elevations_list.sort().get(index))
+
     thresholds = ee.List(thresholds).getInfo()
     thresholds.insert(0, 0)
     thresholds.append(100000)
 
-    ## Masking
-    # Creating an image of masks; each band represents a different topounit
-    def make_masks(dem, thresholds):
+    ### --- Masking Methods --- ###
+
+    def make_epercentiles_masks(dem, thresholds):
         def make_band(i):
-            i = int(i)  # Cast ee.Number to Python int
+            i = int(i)
             low = thresholds[i]
             high = thresholds[i + 1]
-            topounit_id = i + 1  # IDs start at 1
+            topounit_id = i + 1
             mask = dem.gte(low).And(dem.lt(high)).selfMask()
             return mask.rename(f"topounit_{topounit_id}")
 
         indices = range(len(thresholds) - 1)
         bands = [make_band(i) for i in indices]
-        return ee.ImageCollection.fromImages(bands).toBands()
+        return add_epercentiles_metadata(ee.ImageCollection.fromImages(bands).toBands(), thresholds)
 
-    # To make sure topounit id's are attached to each band
-    def add_metadata(image, thresholds):
+    def make_elevaspect_masks(dem, elev_thresholds, aspect_classes):
+        bands = []
+        bin_id = 1
+
+        for i in range(len(elev_thresholds) - 1):
+            low = elev_thresholds[i]
+            high = elev_thresholds[i + 1]
+            elev_mask = dem.gte(low).And(dem.lt(high)).selfMask()
+
+            for aspect_code, aspect_mask in aspect_classes:
+                combined_mask = elev_mask.And(aspect_mask)
+                band = combined_mask.rename(f"topounit_{bin_id}")
+                bands.append(band)
+                bin_id += 1
+
+        return add_elevaspect_metadata(ee.ImageCollection.fromImages(bands).toBands(), elev_thresholds, aspect_classes)
+
+    def add_epercentiles_metadata(image, thresholds):
         band_info = [
             {'topounit_id': i + 1, 'min_elev': thresholds[i], 'max_elev': thresholds[i + 1]}
             for i in range(len(thresholds) - 1)
         ]
         return image.set({'topounit_metadata': band_info})
 
-    mask = make_masks(dem, thresholds)
-    mask = add_metadata(mask, thresholds)
+    def add_elevaspect_metadata(image, elev_thresholds, aspect_classes):
+        metadata = []
+        bin_id = 1
 
-    ## Polygonizing
+        for i in range(len(elev_thresholds) - 1):
+            low = elev_thresholds[i]
+            high = elev_thresholds[i + 1]
+
+            for aspect_code, _ in aspect_classes:
+                metadata.append({
+                    'topounit_id': bin_id,
+                    'min_elev': float(low),
+                    'max_elev': float(high),
+                    'aspect': aspect_code
+                })
+                bin_id += 1
+
+        return image.set({'topounit_metadata': metadata})
+
+    # Select method
+    if method == 'epercentiles':
+        mask = make_epercentiles_masks(dem_clipped, thresholds)
+
+    elif method == 'elevaspect':
+        north_mask = aspect_img.lte(180).selfMask()
+        south_mask = aspect_img.gt(180).selfMask()
+        aspect_classes = [('N', north_mask), ('S', south_mask)]
+        mask = make_elevaspect_masks(dem_clipped, thresholds, aspect_classes)
+
+    else:
+        raise ValueError(f"Unsupported method: {method}")
+
+    ### --- Vectorize --- ###
+
     def masks_to_featurecollection(mask_image, region, scale):
-        band_names = mask_image.bandNames().getInfo()  # e.g., ['topounit_1', 'topounit_2', ...]
-
+        band_names = mask_image.bandNames().getInfo()
+        metadata_list = mask_image.get('topounit_metadata').getInfo()
         features = []
 
         for band_name in band_names:
             band = mask_image.select(band_name)
-
-            # Convert to vectors
             vectors = band.reduceToVectors(
                 geometry=region,
                 scale=scale,
@@ -114,69 +159,70 @@ def make_topounits(feature, n, method='epercentiles', dem='arcticdem', ret='geod
                 bestEffort=True,
                 maxPixels=1e13
             )
-
-            # Merge all geometries into one (multi)polygon
             merged_geom = vectors.geometry()
-
-            # Extract topounit_id from band name, e.g., 'topounit_1' → 1
             topounit_id = int(band_name.split('_')[-1])
-
-            # Create single feature with topounit_id
-            feature = ee.Feature(merged_geom, {'topounit_id': topounit_id})
+            meta = next(m for m in metadata_list if m['topounit_id'] == topounit_id)
+            feature = ee.Feature(merged_geom, meta)
             features.append(feature)
 
         return ee.FeatureCollection(features)
 
+    if export_scale == 'native':
+        if dem == 'arcticdem':
+            export_scale = 2
+        else:
+            export_scale = 100
+            
     polygons_fc = masks_to_featurecollection(
         mask_image=mask,
         region=feature.geometry(),
-        scale=100
+        scale=export_scale
     )
 
-
-    ## Export Topounits
-    task = ee.batch.Export.table.toDrive(
-        collection=polygons_fc,
-        description='topounit_test',
-        fileFormat='GeoJSON',  # or SHP
-        folder='topotest',
-        fileNamePrefix='topounits'
-    )
-    task.start()
-
-
-
-
-    # Creating an imagecollection of masks
-    def make_bin_mask(dem, low, high, id_tu):
-        mask = dem.gte(low).And(dem.lt(high)).selfMask()
-        return mask.set('id_topounit', id_tu)
-
-    # thresholds = list of elevation edges, e.g., [100, 120, 140, 160]
-    # dem = your elevation image
-    masks = [
-        make_bin_mask(dem, thresholds[i], thresholds[i+1], i + 1)
-        for i in range(len(thresholds) - 1)
-    ]
-
-    mask_collection = ee.ImageCollection(masks)
-    # print(mask_collection.aggregate_array('id_topounit').getInfo())
-
-    # Generate masks for each percentile band
-    masks = []
-    lower_bound = -float('inf')
-    for i, percentile in enumerate(percentiles):
-        upper_bound = thresholds[f'elevation_p{int(percentile)}']
-        mask = dem_clipped.gte(lower_bound).And(dem_clipped.lt(upper_bound))
-        masks.append(mask)
-        lower_bound = upper_bound
-    # Add the last band for the remaining elevations
-    mask = dem_clipped.gte(lower_bound)
-    masks.append(mask)
+    ### --- Export --- ###
+    def export_fc(fc, desc=None, fformat=None, folder=None, prefix=None):
+        task = ee.batch.Export.table.toDrive(
+            collection=fc,
+            description=desc,
+            fileFormat=fformat,
+            folder=folder,
+            fileNamePrefix=prefix)
+        task.start()
+        return
     
-    return masks
+    if ftype == 'gdf':
+        gdf = try_to_download_featurecollection(polygons_fc)
+        if gdf is None:
+            print("🔁 Falling back to Google Drive export...")
+            export_fc(polygons_fc, 
+                      desc=f'topounit_{method}_export', 
+                      fformat='GeoJSON',
+                      folder='topotest',
+                      prefix=f'topounits_{method}')
+            return None
+        return gdf    
+    return
+
+
+def try_to_download_featurecollection(fc):
+    try:
+        fc_geojson = fc.getInfo()  # May raise EEException
+        gdf = gpd.GeoDataFrame.from_features(fc_geojson['features'])
+        gdf.set_crs(epsg=4326, inplace=True)
+ 
+        print("Success! FeatureCollection loaded as GeoDataFrame.")
+        return gdf
+
+    except Exception as e:
+        print("⚠️ Direct download failed. Reason:", e)
+        
+        return None  # or raise if you want downstream logic to handle this
+
 
 from dapper.gee import gee_utils as gutils
 ee.Initialize(project='ee-jonschwenk')
 f = gutils.parse_geometry_objects('projects/ee-jonschwenk/assets/E3SM/Kuparuk_gageshed')
 feature = ee.Feature(f.first())
+
+gdf = make_topounits(feature, 5, method='elevaspect', dem_source='arcticdem', ftype='gdf', export_scale=200)
+gdf.to_file(r'X:\Research\NGEE Arctic\6. Topounits\elevaspect3.json', driver='GeoJSON')
