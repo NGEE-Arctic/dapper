@@ -181,3 +181,44 @@ def ensure_pixel_centers_within_geometries(fc, sample_img, scale):
     
     fc_ensured = fc.map(check_pixels_and_maybe_centroid)
     return fc_ensured
+
+
+def export_fc(fc, filename, fileformat, folder='dapper_exports', prefix=None, verbose=False):
+    """
+    Export a FeatureCollection to Google Drive using Earth Engine's table export.
+
+    Parameters:
+    - fc: ee.FeatureCollection
+        The feature collection to export.
+    - filename: str
+        The export task description and also used as the file name (if prefix is not provided).
+    - fileformat: str
+        File format for the export. Must be one of:
+            - 'CSV'
+            - 'GeoJSON'
+            - 'KML'
+            - 'KMZ'
+    - folder: str, optional
+        Google Drive folder to export to. Defaults to 'dapper_exports'.
+    - prefix: str, optional
+        File name prefix for the exported file. Defaults to the filename if not provided.
+    - verbose: bool, optional
+        If True, prints export destination information.
+
+    Returns:
+    - None
+    """
+
+    if prefix is None:
+        prefix = filename
+
+    if verbose:
+        print(f'{filename} will be exported to folder \"{folder}\" in your Google Drive.')
+
+    ee.batch.Export.table.toDrive(
+        collection=fc,
+        description=filename,
+        fileFormat=fileformat,
+        folder=folder,
+        fileNamePrefix=prefix
+    ).start()
