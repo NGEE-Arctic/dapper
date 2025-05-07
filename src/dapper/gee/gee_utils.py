@@ -1,9 +1,9 @@
 # Generic functions JPS
 import ee
-import os
-import shutil
+import json
 from pathlib import Path
 import pandas as pd
+import geopandas as gpd
 from shapely.geometry import Polygon
 from dateutil.relativedelta import relativedelta
 
@@ -31,6 +31,31 @@ def parse_geometry_object(geom, name):
     return ret
 
 
+def parse_geometry_objects(geom, geometry_id_field=None): 
+    """
+    Translates gdf geometries to ee geometries.
+    If geom is a string, it's interpreted as a path to an available GEE asset.
+    If geom is a GeoDataFrame, the geometries for each are interpreted.
+    geometry_id_field is the column that contains the unique identifier for each geometry/row in the GeoDataFrame.
+    Returns a FeatureCollection, even if a single feature is present. 
+    """
+    # Convert geometries to GEE FeatureCollection (supports dict input OR pre-loaded FeatureCollection)
+    if isinstance(geom, str):
+        geometries_fc = ee.FeatureCollection(geom)  # Directly use pre-loaded GEE asset
+    elif isinstance(geom, ee.FeatureCollection):
+        geometries_fc = ee.FeatureCollection(geom) # re-casting; should already be correct type but this fixes weird errors
+    elif isinstance(geom, gpd.GeoDataFrame):
+        gdf_reduced = geom.copy()
+        if geometry_id_field is None:
+            raise KeyError('No geometry id field was provided, but it is required. Ensure your GeoDataFrame has a unique identifier column.')
+        geom_field = gdf_reduced.geometry.name
+        gdf_reduced = gdf_reduced[[geometry_id_field, geom_field]]
+        geojson_str = gdf_reduced.to_json()    
+        geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
+
+    return geometries_fc
+
+    
 def validate_bands(bandlist, gee_ic="ECMWF/ERA5_LAND/HOURLY"):
     """
     Ensures that the requested bands are available and errors if not.
@@ -96,7 +121,7 @@ def infer_id_field(columns):
     """
     poss_id = [c for c in columns if 'id' in c]
     if len(poss_id) == 0:
-        raise NameError("Could not infer id column. Specify it with 'id_col' kwarg when calling e5hl_to_elm().")
+        raise NameError("Could not infer id column. Specify it with 'id_col' kwarg when calling e5lh_to_elm().")
     else:
         poss_id_lens = [len(pi) for pi in poss_id]
         id_col = poss_id[poss_id_lens.index(min(poss_id_lens))]
@@ -115,3 +140,85 @@ def kill_all_tasks(verbose=True):
             if verbose:
                 print(f"Cancelled task: {task_id}")
 
+
+def ensure_pixel_centers_within_geometries(fc, sample_img, scale):
+    """
+    This function takes a featureCollection and ensures that each feature in the collection
+    samples valid data for an underlying image (that ideally should be representative of
+    an imageCollection). Point geometries are guaranteed to sample from any image regardless
+    of resolution, so if a polygon or multipolygon in the featureCollection doesn't contain
+    any pixel centers, it is replaced by its centroid as a Point geometry.
+    """    
+
+    # Function to process each feature
+    def check_pixels_and_maybe_centroid(feature):
+        geom = feature.geometry()
+        geom_type = geom.type()
+
+        # Only act on polygons or multipolygons
+        is_poly = ee.Algorithms.If(
+            ee.List(["Polygon", "MultiPolygon"]).contains(geom_type),
+            True, False
+        )
+
+        def process_polygon():
+            # Reduce region to count valid pixels inside the geometry
+            count = sample_img.reduceRegion(
+                reducer=ee.Reducer.count(),
+                geometry=geom,
+                scale=scale,
+                maxPixels=1e9
+            ).values().get(0)
+
+            # If no pixels (count == 0), replace geometry with centroid
+            return ee.Algorithms.If(
+                ee.Number(count).gt(0),
+                feature,
+                feature.setGeometry(geom.centroid())
+            )
+
+        return ee.Feature(ee.Algorithms.If(is_poly, process_polygon(), feature))
+    
+    fc_ensured = fc.map(check_pixels_and_maybe_centroid)
+    return fc_ensured
+
+
+def export_fc(fc, filename, fileformat, folder='dapper_exports', prefix=None, verbose=False):
+    """
+    Export a FeatureCollection to Google Drive using Earth Engine's table export.
+
+    Parameters:
+    - fc: ee.FeatureCollection
+        The feature collection to export.
+    - filename: str
+        The export task description and also used as the file name (if prefix is not provided).
+    - fileformat: str
+        File format for the export. Must be one of:
+            - 'CSV'
+            - 'GeoJSON'
+            - 'KML'
+            - 'KMZ'
+    - folder: str, optional
+        Google Drive folder to export to. Defaults to 'dapper_exports'.
+    - prefix: str, optional
+        File name prefix for the exported file. Defaults to the filename if not provided.
+    - verbose: bool, optional
+        If True, prints export destination information.
+
+    Returns:
+    - None
+    """
+
+    if prefix is None:
+        prefix = filename
+
+    if verbose:
+        print(f'{filename} will be exported to folder \"{folder}\" in your Google Drive.')
+
+    ee.batch.Export.table.toDrive(
+        collection=fc,
+        description=filename,
+        fileFormat=fileformat,
+        folder=folder,
+        fileNamePrefix=prefix
+    ).start()

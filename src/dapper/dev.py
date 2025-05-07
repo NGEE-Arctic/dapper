@@ -57,7 +57,7 @@ dformat='BYPASS'
 import dapper.e5l_utils as eu
 import importlib
 importlib.reload(eu)
-eu.e5hl_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap, id_col, nzones=1, compress_level=9)
+eu.e5lh_to_elm_gridded(csv_directory, write_directory, df_loc, remove_leap, id_col, nzones=1, compress_level=9)
 
 import xarray as xr
 path = r"X:\Research\NGEE Arctic\dapper\data\fengming_data\gridded\clmforc.GSWP3.c2011.0.5x0.5.Prec.1901-01.nc"
