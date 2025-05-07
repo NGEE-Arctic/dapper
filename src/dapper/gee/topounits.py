@@ -1,5 +1,6 @@
 import ee
 import geopandas as gpd
+from dapper.gee import gee_utils as gutils
 
 def try_to_download_featurecollection(fc, verbose=True):
     """
@@ -63,49 +64,16 @@ def make_topounits(feature,
                     n_elev_bins=None, 
                     aspect_ranges=None, 
                     dem_source='arcticdem', 
-                    ftype='gdf', # also 'asset'
+                    return_as='gdf', # also 'asset'
                     export_scale='native', 
+                    asset_name='topounits',
+                    asset_ftype = 'GeoJSON',
+                    verbose = False
                    ):
     """
     Creates topounits based on a provided set of geometries (polygons or multipolygons)
     already cast as an ee.Feature.
     """
-
-    # Handle generation method; check parameters don't overshoot max_topounits
-    if method == 'epercentiles':
-        if n_elev_bins is not None:
-            total_topounits = n_elev_bins
-        else:
-            total_topounits = max_topounits
-    elif method == 'elevaspect':
-        if aspect_ranges is None:
-            aspect_ranges = [(270, 90, 'N'), (90.01, 269.99, 'S')]
-        num_aspect_bins = len(aspect_ranges)
-        total_topounits = n_elev_bins * num_aspect_bins
-        if total_topounits > max_topounits:
-            raise ValueError(f"{total_topounits} topounits exceed max of {max_topounits}.")
-    else:
-        raise ValueError(f"Unsupported method: {method}")
-
-    # Handle DEM loading and sampling scale
-    if dem_source == 'arcticdem':
-        dem = ee.Image("UMN/PGC/ArcticDEM/V3/2m_mosaic")
-        scale_binning = max(compute_sampling_scale(feature, total_topounits), 5)
-    else:
-        raise KeyError('DEM source not supported.')
-
-    # Handle sampling
-    dem_clipped = dem.clip(feature.geometry())
-    aspect_img = ee.Terrain.aspect(dem_clipped)
-    elev_samples = dem_clipped.sample(region=feature.geometry(), scale=scale_binning, geometries=False)
-    elevations = elev_samples.aggregate_array('elevation')
-    elevations_list = ee.List(elevations)
-    count = elevations_list.size()
-    percentiles = [i * (100 / n_elev_bins) for i in range(1, n_elev_bins)]
-    thresholds = [elevations_list.sort().get(ee.Number(p).multiply(count).divide(100).int()) for p in percentiles]
-    thresholds = ee.List(thresholds).getInfo()
-    thresholds.insert(0, 0)
-    thresholds.append(100000)
 
     def make_epercentiles_masks(dem, thresholds):
         def make_band(i):
@@ -176,6 +144,45 @@ def make_topounits(feature,
             meta = next(m for m in metadata_list if m['topounit_id'] == unit_id)
             features.append(ee.Feature(geom, meta))
         return ee.FeatureCollection(features)
+
+    # Processing starts here
+    # Handle generation method; check parameters don't overshoot max_topounits
+    if method == 'epercentiles':
+        if n_elev_bins is not None:
+            total_topounits = n_elev_bins
+        else:
+            total_topounits = max_topounits
+    elif method == 'elevaspect':
+        if aspect_ranges is None:
+            aspect_ranges = [(270, 90, 'N'), (90.01, 269.99, 'S')]
+        num_aspect_bins = len(aspect_ranges)
+        total_topounits = n_elev_bins * num_aspect_bins
+        if total_topounits > max_topounits:
+            raise ValueError(f"{total_topounits} topounits exceed max of {max_topounits}.")
+    else:
+        raise ValueError(f"Unsupported method: {method}")
+
+    # Handle DEM loading and sampling scale
+    if dem_source == 'arcticdem':
+        dem = ee.Image("UMN/PGC/ArcticDEM/V4/2m_mosaic").select('elevation')
+        scale_binning = max(compute_sampling_scale(feature, total_topounits), 5)
+        if verbose is True:
+            print(f'Using scale of {scale_binning} m for sampling elevations.')
+    else:
+        raise KeyError('DEM source not supported.')
+
+    # Handle sampling
+    dem_clipped = dem.clip(feature.geometry())
+    aspect_img = ee.Terrain.aspect(dem_clipped)
+    elev_samples = dem_clipped.sample(region=feature.geometry(), scale=scale_binning, geometries=False)
+    elevations = elev_samples.aggregate_array('elevation')
+    elevations_list = ee.List(elevations)
+    count = elevations_list.size()
+    percentiles = [i * (100 / n_elev_bins) for i in range(1, n_elev_bins)]
+    thresholds = [elevations_list.sort().get(ee.Number(p).multiply(count).divide(100).int()) for p in percentiles]
+    thresholds = ee.List(thresholds).getInfo()
+    thresholds.insert(0, 0)
+    thresholds.append(100000)
     
     # Generate masks
     if method == 'epercentiles':
@@ -189,57 +196,15 @@ def make_topounits(feature,
     # Convert masks to polygons for export
     polygons_fc = masks_to_featurecollection(mask, feature.geometry(), export_scale)
 
+    # Exporting
     gdf = None
-    if ftype == 'gdf':
-        gdf = try_to_download_featurecollection(polygons_fc)
-        print("Could not return as GeoDataFrame, exporting to Google Drive." )
-    if ftype== 'asset' or gdf is None:    
-        export_fc(polygons_fc, f'topounit_{method}_export', 'GeoJSON', 'topotest', f'topounits_{method}')
+    if return_as == 'gdf':
+        gdf = try_to_download_featurecollection(polygons_fc, verbose)
+        if gdf is None:
+            print("Could not return as GeoDataFrame, exporting to Google Drive. Check Tasks in your GEE browser for completion." )
+    
+    if return_as== 'asset' or gdf is None:    
+        gutils.export_fc(polygons_fc, f'{asset_name}', asset_ftype, folder='topotest', verbose=True)
         return None
-        return gdf
 
-    return
-
-def export_fc(fc, filename, fileformat, folder=None, prefix=None, verbose=False):
-
-    if folder is None:
-        folder = 'dapper_exports'
-
-    if verbose is True:
-        print(f'{filename} will be exported to {folder} in your GDrive.')
-
-    ee.batch.Export.table.toDrive(
-        collection=fc,
-        description = filename,
-        fileFormat = fileformat,
-        folder = folder,
-        fileNamePrefix = prefix
-    ).start()
-
-
-
-
-
-from dapper.gee import gee_utils as gutils
-ee.Initialize(project='ee-jonschwenk')
-f = gutils.parse_geometry_objects('projects/ee-jonschwenk/assets/E3SM/Kuparuk_gageshed')
-feature = ee.Feature(f.first())
-
-gdf = make_topounits(
-    feature = feature, 
-    n_elev_bins = 3,
-    method = 'elevaspect', 
-    export_scale = 1000
-)
-
-# With 2 elevation bins × 4 aspect bins = 8 total topounits
-gdf = make_topounits(
-    feature=feature, 
-    n=8,               # Total desired topounits
-    method='elevaspect',
-    aspect_ranges=aspect_ranges,
-    max_topounits=11 
-)
-
-gdf = make_topounits(feature, 5, method='elevaspect', dem_source='arcticdem', ftype='gdf', export_scale=200)
-gdf.to_file(r'X:\Research\NGEE Arctic\6. Topounits\elevaspect3.json', driver='GeoJSON')
+    return gdf

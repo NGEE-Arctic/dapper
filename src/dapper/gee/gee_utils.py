@@ -49,7 +49,7 @@ def parse_geometry_objects(geom, geometry_id_field=None):
         if geometry_id_field is None:
             raise KeyError('No geometry id field was provided, but it is required. Ensure your GeoDataFrame has a unique identifier column.')
         geom_field = gdf_reduced.geometry.name
-        gdf_reduced = gdf_reduced[geometry_id_field, geom_field]
+        gdf_reduced = gdf_reduced[[geometry_id_field, geom_field]]
         geojson_str = gdf_reduced.to_json()    
         geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
 
