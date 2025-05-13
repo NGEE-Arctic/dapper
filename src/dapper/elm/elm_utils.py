@@ -357,15 +357,31 @@ def elm_data_dicts():
             }
 
 
-def gen_zone_mappings(df_loc):
+def gen_zone_mappings(df_loc, site=False):
     """
     Creates a dataframe of zone mappings.
-    Note that ELM operates on a 0-360 longitudinal range.
-    zone mappings must be two digits (e.g. 01, not 1)
+    
+    If site=False:
+        Returns a DataFrame with columns ['lon', 'lat', 'zone', 'id'].
+    If site=True:
+        Returns a dictionary: {gid: single-row DataFrame}.
     """
-    zone_mapping = df_loc[['lon', 'lat', 'zone']]
-    zone_mapping.loc[:, 'lon'] = zone_mapping['lon'].values % 360 # convert to ELM-expected range
-    zone_mapping['id'] = np.arange(1, len(zone_mapping)+1) # Not quite sure what id column means, but seems to just increment by 1 in examples
+
+    # Base mapping
+    zone_mapping = df_loc[['lon', 'lat', 'zone']].copy()
+    zone_mapping['lon'] = zone_mapping['lon'] % 360  # ELM uses 0–360 longitudes
+    zone_mapping['id'] = np.arange(1, len(zone_mapping) + 1)
     zone_mapping['zone'] = zone_mapping['zone'].astype(int).astype(str).str.zfill(2)
+
+    if site is True:
+        # Override ID and zone to just "01"
+        zone_mapping['id'] = 1
+        zone_mapping['zone'] = '01'
+        
+        # Export a dictionary of single-row DataFrames
+        zone_mapping_site = {
+            gid: zone_mapping.iloc[[i]] for i, gid in enumerate(df_loc['gid'].values)
+        }
+        return zone_mapping_site
 
     return zone_mapping

@@ -1,7 +1,6 @@
 # Functions specific to ERA5-Land Hourly GEE ImageCollection
 import ee
 import os
-import glob
 import json
 import numpy as np
 import pandas as pd
@@ -9,7 +8,6 @@ import xarray as xr
 import geopandas as gpd
 from pathlib import Path
 from datetime import datetime
-from shapely.geometry import Polygon
 from fastparquet import write
 
 from dapper import utils
@@ -204,6 +202,9 @@ def e5lh_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
         start_year, end_year = dates['year'].values[0], dates['year'].values[0]
         print("There is not a full year's worth of data. Using the full dataset.")
 
+    # Apparently OLMT requires a zone mapping even for site runs - this seems trivial as zone and id will always be 1
+    df_loc['zone'] = 1 # need to define zones even though there's only one
+    zms = eutils.gen_zone_mappings(df_loc, site=True)
 
     # Preprocess each file, save to intermediate parquet file
     for i, f in enumerate(files):
@@ -245,14 +246,13 @@ def e5lh_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
         coords = df_loc[df_loc['pid']==site]
         export_for_elm_site(this_df, coords['lon'].values[0], coords['lat'].values[0], site_write_directory)
 
+        # Zone mappings export
+        zm_write_path = write_directory / site / 'zone_mappings.txt'
+        zms[site].to_csv(zm_write_path, index=False, header=False, sep='\t')
+
+
     # Remove temporary files
     utils.remove_directory_contents(temp_path, remove_directory=True)
-
-    # Apparently OLMT requires a zone mapping even for site runs - this seems trivial as zone and id will always be 1
-    df_loc['zone'] = np.arange(1, len(df_loc)+1) # need to define zones even though there's only one
-    zms = eutils.gen_zone_mappings(df_loc)
-    zm_write_path = write_directory / 'zone_mappings.txt'
-    zms.to_csv(zm_write_path, index=False, header=False, sep='\t')
 
     return
 
