@@ -4,64 +4,70 @@ import json
 from pathlib import Path
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, shape
 from dateutil.relativedelta import relativedelta
 
 from dapper.gee import era5l as e5l
 
 # Pathing for convenience
 import dapper
+
 _ROOT_DIR = Path(next(iter(dapper.__path__))).parent
 _DATA_DIR = _ROOT_DIR / "data"
 
-def parse_geometry_object(geom, name): 
+
+def parse_geometry_object(geom, name):
     """
     Translates gdf geometries to ee geometries.
     """
-    
-    if type(geom) is str: # GEE Asset
+
+    if type(geom) is str:  # GEE Asset
         ret = geom
     elif type(geom) in [Polygon]:
         eegeom = ee.Geometry.Polygon(list(geom.exterior.coords))
-        eefeature = ee.Feature(eegeom, {'name': name})
+        eefeature = ee.Feature(eegeom, {"name": name})
         ret = ee.FeatureCollection(eefeature)
     else:
         raise TypeError(f"Unsupported geometry type: {type(geom)}")
-    
+
     return ret
 
 
-def parse_geometry_objects(geom, geometry_id_field=None): 
+def parse_geometry_objects(geom, geometry_id_field=None):
     """
     Translates gdf geometries to ee geometries.
     If geom is a string, it's interpreted as a path to an available GEE asset.
     If geom is a GeoDataFrame, the geometries for each are interpreted.
     geometry_id_field is the column that contains the unique identifier for each geometry/row in the GeoDataFrame.
-    Returns a FeatureCollection, even if a single feature is present. 
+    Returns a FeatureCollection, even if a single feature is present.
     """
     # Convert geometries to GEE FeatureCollection (supports dict input OR pre-loaded FeatureCollection)
     if isinstance(geom, str):
         geometries_fc = ee.FeatureCollection(geom)  # Directly use pre-loaded GEE asset
     elif isinstance(geom, ee.FeatureCollection):
-        geometries_fc = ee.FeatureCollection(geom) # re-casting; should already be correct type but this fixes weird errors
+        geometries_fc = ee.FeatureCollection(
+            geom
+        )  # re-casting; should already be correct type but this fixes weird errors
     elif isinstance(geom, gpd.GeoDataFrame):
         gdf_reduced = geom.copy()
         if geometry_id_field is None:
-            raise KeyError('No geometry id field was provided, but it is required. Ensure your GeoDataFrame has a unique identifier column.')
+            raise KeyError(
+                "No geometry id field was provided, but it is required. Ensure your GeoDataFrame has a unique identifier column."
+            )
         geom_field = gdf_reduced.geometry.name
         gdf_reduced = gdf_reduced[[geometry_id_field, geom_field]]
-        geojson_str = gdf_reduced.to_json()    
+        geojson_str = gdf_reduced.to_json()
         geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
 
     return geometries_fc
 
-    
+
 def validate_bands(bandlist, gee_ic="ECMWF/ERA5_LAND/HOURLY"):
     """
     Ensures that the requested bands are available and errors if not.
     """
     if gee_ic == "ECMWF/ERA5_LAND/HOURLY":
-        available_bands = set(e5l.e5lh_bands()['band_name'].tolist())
+        available_bands = set(e5l.e5lh_bands()["band_name"].tolist())
     else:
         collection = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY")
         sample_image = collection.first()
@@ -69,16 +75,22 @@ def validate_bands(bandlist, gee_ic="ECMWF/ERA5_LAND/HOURLY"):
 
     not_in = [b for b in bandlist if b not in available_bands]
     if len(not_in) > 0:
-        raise NameError("You requested the following bands which are not in ERA5-Land Hourly (perhaps check spelling?): {}. For a list of available bands, run md.e5lh_bands()['band_name'].".format(not_in))
-    
+        raise NameError(
+            "You requested the following bands which are not in ERA5-Land Hourly (perhaps check spelling?): {}. For a list of available bands, run md.e5lh_bands()['band_name'].".format(
+                not_in
+            )
+        )
+
     return
 
 
-def determine_gee_batches(start_date, end_date, max_date, years_per_task=5, verbose=True):
+def determine_gee_batches(
+    start_date, end_date, max_date, years_per_task=5, verbose=True
+):
     """
     Calculates how to batch tasks for splitting bigger GEE jobs.
     Currently assumes ERA5-Land hourly (i.e. hourly data with a known date range).
-    
+
     Returns a DataFrame where each row defines the start and end time for each
     Task in a batch.
     """
@@ -93,14 +105,17 @@ def determine_gee_batches(start_date, end_date, max_date, years_per_task=5, verb
     break_dates[-1] = end_date
 
     # Create DataFrame
-    df = pd.DataFrame({'task_start' : break_dates[:-1], 
-                       'task_end' : break_dates[1:]})
+    df = pd.DataFrame({"task_start": break_dates[:-1], "task_end": break_dates[1:]})
 
     if verbose:
         if len(df) == 1:
-            print(f'Your request will be executed as {len(df)} Task in Google Earth Engine.')
+            print(
+                f"Your request will be executed as {len(df)} Task in Google Earth Engine."
+            )
         else:
-            print(f'Your request will be executed as {len(df)} Tasks in Google Earth Engine.')
+            print(
+                f"Your request will be executed as {len(df)} Tasks in Google Earth Engine."
+            )
 
     return df
 
@@ -111,7 +126,7 @@ def split_into_dfs(path_csv):
     based on the unique values in the 'pid' column.
     """
     df = pd.read_csv(path_csv)
-    return {k : group for k, group in df.groupby('pid')}
+    return {k: group for k, group in df.groupby("pid")}
 
 
 def infer_id_field(columns):
@@ -119,13 +134,17 @@ def infer_id_field(columns):
     Tries to discern the id field from a list of columns.
     Used when id_col is not specified.
     """
-    poss_id = [c for c in columns if 'id' in c]
+    poss_id = [c for c in columns if "id" in c]
     if len(poss_id) == 0:
-        raise NameError("Could not infer id column. Specify it with 'id_col' kwarg when calling e5lh_to_elm().")
+        raise NameError(
+            "Could not infer id column. Specify it with 'id_col' kwarg when calling e5lh_to_elm()."
+        )
     else:
         poss_id_lens = [len(pi) for pi in poss_id]
         id_col = poss_id[poss_id_lens.index(min(poss_id_lens))]
-        print(f"Inferred '{id_col}' as id column. If this is not correct, re-run this function and specify 'id_col' kwarg.")
+        print(
+            f"Inferred '{id_col}' as id column. If this is not correct, re-run this function and specify 'id_col' kwarg."
+        )
 
     return id_col
 
@@ -133,9 +152,9 @@ def infer_id_field(columns):
 def kill_all_tasks(verbose=True):
     tasks = ee.data.listOperations()
     for task in tasks:
-        task_id = task['name']
-        state = task.get('metadata', {}).get('state', '')
-        if state in ['PENDING', 'RUNNING']:
+        task_id = task["name"]
+        state = task.get("metadata", {}).get("state", "")
+        if state in ["PENDING", "RUNNING"]:
             ee.data.cancelOperation(task_id)
             if verbose:
                 print(f"Cancelled task: {task_id}")
@@ -148,7 +167,7 @@ def ensure_pixel_centers_within_geometries(fc, sample_img, scale):
     an imageCollection). Point geometries are guaranteed to sample from any image regardless
     of resolution, so if a polygon or multipolygon in the featureCollection doesn't contain
     any pixel centers, it is replaced by its centroid as a Point geometry.
-    """    
+    """
 
     # Function to process each feature
     def check_pixels_and_maybe_centroid(feature):
@@ -157,33 +176,36 @@ def ensure_pixel_centers_within_geometries(fc, sample_img, scale):
 
         # Only act on polygons or multipolygons
         is_poly = ee.Algorithms.If(
-            ee.List(["Polygon", "MultiPolygon"]).contains(geom_type),
-            True, False
+            ee.List(["Polygon", "MultiPolygon"]).contains(geom_type), True, False
         )
 
         def process_polygon():
             # Reduce region to count valid pixels inside the geometry
-            count = sample_img.reduceRegion(
-                reducer=ee.Reducer.count(),
-                geometry=geom,
-                scale=scale,
-                maxPixels=1e9
-            ).values().get(0)
+            count = (
+                sample_img.reduceRegion(
+                    reducer=ee.Reducer.count(),
+                    geometry=geom,
+                    scale=scale,
+                    maxPixels=1e9,
+                )
+                .values()
+                .get(0)
+            )
 
             # If no pixels (count == 0), replace geometry with centroid
             return ee.Algorithms.If(
-                ee.Number(count).gt(0),
-                feature,
-                feature.setGeometry(geom.centroid())
+                ee.Number(count).gt(0), feature, feature.setGeometry(geom.centroid())
             )
 
         return ee.Feature(ee.Algorithms.If(is_poly, process_polygon(), feature))
-    
+
     fc_ensured = fc.map(check_pixels_and_maybe_centroid)
     return fc_ensured
 
 
-def export_fc(fc, filename, fileformat, folder='dapper_exports', prefix=None, verbose=False):
+def export_fc(
+    fc, filename, fileformat, folder="dapper_exports", prefix=None, verbose=False
+):
     """
     Export a FeatureCollection to Google Drive using Earth Engine's table export.
 
@@ -213,12 +235,53 @@ def export_fc(fc, filename, fileformat, folder='dapper_exports', prefix=None, ve
         prefix = filename
 
     if verbose:
-        print(f'{filename} will be exported to folder \"{folder}\" in your Google Drive.')
+        print(f'{filename} will be exported to folder "{folder}" in your Google Drive.')
 
     ee.batch.Export.table.toDrive(
         collection=fc,
         description=filename,
         fileFormat=fileformat,
         folder=folder,
-        fileNamePrefix=prefix
+        fileNamePrefix=prefix,
     ).start()
+
+
+def featurecollection_to_df_loc(fc):
+    """
+    Converts an ee.FeatureCollection object to a GeoDataFrame
+    needed for further processing in dapper.
+    """
+    # Convert FeatureCollection to GeoJSON (client-side)
+    geojson = fc.getInfo()
+
+    rows = []
+    for feature in geojson["features"]:
+        gid = feature["properties"].get("gid", None)
+        geom = shape(feature["geometry"])
+        geom_type = geom.geom_type
+
+        if geom_type == "Point":
+            lon, lat = geom.x, geom.y
+            method = "sampled at provided coordinate"
+        elif geom_type == "Polygon":
+            centroid = geom.centroid
+            lat, lon = centroid.y, centroid.x
+            method = "sampled across provided polygon"
+        elif geom_type == "MultiPolygon":
+            centroid = geom.centroid
+            lat, lon = centroid.y, centroid.x
+            method = "sampled across provided multipolygon"
+        else:
+            raise ValueError(f"Unsupported geometry type: {geom_type}")
+
+        rows.append({"gid": gid, "lat": lat, "lon": lon, "method": method})
+
+    # Create DataFrame
+    df_loc = pd.DataFrame(rows)
+
+    # Convert to GeoDataFrame
+    gdf_loc = gpd.GeoDataFrame(
+        df_loc, geometry=gpd.points_from_xy(df_loc.lon, df_loc.lat), crs="EPSG:4326"
+    )
+
+    return gdf_loc

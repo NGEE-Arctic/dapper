@@ -4,6 +4,7 @@ import numpy as np
 import netCDF4 as nc
 from datetime import datetime
 
+from dapper import utils
 from dapper.elm import elm_utils as eutils
 from dapper.utils import _DATA_DIR
 
@@ -51,9 +52,10 @@ def create_met_netcdf(df_loc, elm_var, write_path, dformat='BYPASS', compress=Fa
             var.setncattr('units', mdd['units'][elm_var])
             var.setncattr('description', mdd['descriptions'][elm_var])
 
-            ds.setncattr('history', "Created using netCDF4")
+            ds.setncattr('history', "Created using netCDF4 with dapper")
             ds.setncattr('calendar', 'noleap')
             ds.setncattr('created_on', datetime.today().strftime('%Y-%m-%d'))
+            ds.setncattr('dapper_commit_hash', utils.get_git_commit_hash())
 
     return
 
