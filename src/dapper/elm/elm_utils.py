@@ -8,59 +8,77 @@ from dapper import utils
 from dapper.elm import elm_utils as eutils
 from dapper.utils import _DATA_DIR
 
-def create_met_netcdf(df_loc, elm_var, write_path, dformat='BYPASS', compress=False, compress_level=0):
+def initialize_met_netcdf(df_loc, elm_var, start_year, write_path, calendar='noleap', compress_level=0, dformat='BYPASS'):
+    """
+    Creates an empty netCDF met file to be written into with append_met_netcdf().
+    """
+    fillvalue = -32767 
+    
     if os.path.exists(write_path):
         print(f"NetCDF file '{write_path}' already exists.")
         return
 
     if dformat == 'BYPASS':
-        mdd = eutils.elm_data_dicts()
+        mdd = elm_data_dicts()
         add_offset, scale_factor = elm_var_compression_params(elm_var)
 
         # Ensure df_loc is sorted by LATIXY, LONGXY for consistent ordering
         df_loc = df_loc.sort_values(['lat', 'lon']).reset_index(drop=True)
 
-        with nc.Dataset(write_path, mode='w', format='NETCDF4') as ds:
-            ds.createDimension('n', len(df_loc))
-            ds.createDimension('DTIME', None)
+        try:
+            with nc.Dataset(write_path, mode='w', format='NETCDF4') as ds:
+                # Handle compression
+                compress = False
+                if compress_level > 0:
+                    compress = True
 
-            # Define coordinate variables with correct names and types
-            lat = ds.createVariable('LATIXY', 'f4', ('n',))
-            lon = ds.createVariable('LONGXY', 'f4', ('n',))
-            gid = ds.createVariable('gid', str, ('n',))
-            
-            # Define DTIME as datetime64[ns]
-            dtime = ds.createVariable('DTIME', 'f8', ('DTIME',))
-            dtime.setncattr('units', 'seconds since 1970-01-01 00:00:00')
-            dtime.setncattr('calendar', 'standard')
+                ds.createDimension('n', len(df_loc))
+                ds.createDimension('DTIME', None)
 
-            # Define data variable with (DTIME, n) order
-            var = ds.createVariable(elm_var, 'f4', ('DTIME', 'n'), zlib=compress, complevel=compress_level, fill_value=-32767)
+                # Define coordinate variables with correct names and types
+                lat = ds.createVariable('LATIXY', 'f4', ('n',))
+                lon = ds.createVariable('LONGXY', 'f4', ('n',))
+                lat[:] = df_loc['lat'].values
+                lon[:] = df_loc['lon'].values
+                lat.setncattr('units', 'degrees_north')
+                lon.setncattr('units', 'degrees_east')
+                
+                # Set gid only if lenght of df_loc is > 1 (more than one site/grid cell)
+                if len(df_loc) > 1:
+                    gid = ds.createVariable('gid', str, ('n',))
+                    gid[:] = df_loc['gid'].values
+                
+                # Define and create DTIME
+                dtime = ds.createVariable('DTIME', 'f8', ('DTIME',), zlib=compress, complevel=compress_level, fill_value=fillvalue)
+                dtime.setncattr('units', f'days since {start_year}-01-01 00:00:00')
+                dtime.setncattr('calendar', calendar)
+                dtime.setncattr('long_name', 'observation_time')
 
-            # Populate lat, lon, and gid in sorted order
-            lat[:] = df_loc['lat'].values
-            lon[:] = df_loc['lon'].values
-            gid[:] = df_loc['gid'].values
+                # Define and create met variable
+                var = ds.createVariable(elm_var, 'f4', ('DTIME', 'n'), zlib=compress, complevel=compress_level, fill_value=fillvalue)
+                var.setncattr('add_offset', add_offset)
+                var.setncattr('scale_factor', scale_factor)
+                var.setncattr('units', mdd['units'][elm_var])
+                var.setncattr('description', mdd['descriptions'][elm_var])
+                var.setncattr('long_name' , next((k for k, v in mdd['e5namemap'].items() if v == elm_var), None)) # reverse dictionary lookup
+                var.setncattr('mode' , 'time-dependent')
 
-            # Set attributes for coordinates
-            lat.setncattr('units', 'degrees_north')
-            lon.setncattr('units', 'degrees_east')
+                # Dapper-specific attributes
+                ds.setncattr('history', "Created using netCDF4 with dapper")
+                ds.setncattr('calendar', calendar)
+                ds.setncattr('created_on', datetime.today().strftime('%Y-%m-%d'))
+                ds.setncattr('dapper_commit_hash', utils.get_git_commit_hash())
+                wkt_strings = df_loc['sampled_geometry'].astype(str).tolist()
+                ds.setncattr('sampled_geometry', "\n".join(wkt_strings))
+                ds.setncattr('method', df_loc['method'].values[0])
 
-            # Set attributes for data variable
-            var.setncattr('add_offset', add_offset)
-            var.setncattr('scale_factor', scale_factor)
-            var.setncattr('units', mdd['units'][elm_var])
-            var.setncattr('description', mdd['descriptions'][elm_var])
-
-            ds.setncattr('history', "Created using netCDF4 with dapper")
-            ds.setncattr('calendar', 'noleap')
-            ds.setncattr('created_on', datetime.today().strftime('%Y-%m-%d'))
-            ds.setncattr('dapper_commit_hash', utils.get_git_commit_hash())
-
+        except Exception as e:
+            print(f"Error creating NetCDF: {e}")
     return
 
 
 def append_met_netcdf(this_df, elm_var, write_path, dformat='BYPASS', compress=False, compress_level=0):
+    
     if not os.path.exists(write_path):
         print(f"NetCDF file '{write_path}' does not exist and cannot be appended.")
         return
@@ -74,35 +92,69 @@ def append_met_netcdf(this_df, elm_var, write_path, dformat='BYPASS', compress=F
             add_offset = ds.variables[elm_var].getncattr('add_offset')
             scale_factor = ds.variables[elm_var].getncattr('scale_factor')
 
-            # Convert times to datetime64[ns] and then to seconds since 1970-01-01
-            times = pd.to_datetime(this_df['time']).values.astype('datetime64[ns]')
-            unique_times = np.unique(times)
-            int64_times = (unique_times.astype('datetime64[ns]').astype('int64') // 10**9).astype('f8')
+            # Handle DTIME
+            dtime_units = ds['DTIME'].getncattr('units')  # e.g., "days since 1950-01-01"
+            ref_date = pd.to_datetime(dtime_units.split('since')[1].strip())
 
-            # Get existing size of DTIME and GID dimensions
+            this_df['time'] = pd.to_datetime(this_df['time'])
+            this_df = this_df.sort_values(['time', 'LATIXY', 'LONGXY']).reset_index(drop=True)
+            unique_times = pd.to_datetime(this_df['time'].drop_duplicates().to_numpy())
+
+            calendar = ds.getncattr('calendar') if 'calendar' in ds.ncattrs() else 'standard'
+            dtime_vals = compute_dtime_vals(unique_times, ref_date, calendar)
+
+            # Get dimensions
             current_time_size = ds.dimensions['DTIME'].size
-            current_gid_size = ds.dimensions['n'].size
-
-            # Append new times directly in one go as float64 (seconds since 1970-01-01)
-            ds['DTIME'][current_time_size:current_time_size + len(int64_times)] = int64_times
-
-            # Sort this_df by LATIXY, LONGXY to match NetCDF order
-            this_df = this_df.sort_values(['LATIXY', 'LONGXY']).reset_index(drop=True)
-
-            # Pack data to float32 and apply offset/scale
-            packed_data_column = np.round((this_df[elm_var].values - add_offset) / scale_factor).astype(np.float32)
-
-            # Reshape data: (DTIME, n) order
+            num_sites = ds.dimensions['n'].size
             num_times = len(unique_times)
-            reshaped_data = packed_data_column.reshape(num_times, current_gid_size)
 
-            # Append reshaped data as float32 in (DTIME, n) order
+            # Append DTIME values
+            ds['DTIME'][current_time_size:current_time_size + num_times] = dtime_vals
+
+            # Prepare and reshape data
+            packed_data_column = np.round((this_df[elm_var].values - add_offset) / scale_factor).astype(np.float32)
+            reshaped_data = packed_data_column.reshape(num_times, num_sites)
+
+            # Write to NetCDF
             ds[elm_var][current_time_size:current_time_size + num_times, :] = reshaped_data
-
-            # Force writing data to disk
             ds.sync()
 
-        # print(f"Successfully appended data for {elm_var} to {write_path}.")
+def compute_dtime_vals(unique_times, ref_date, calendar="standard"):
+    """
+    Compute DTIME values (fractional days since ref_date) for NetCDF writing.
+    Supports both 'standard' (Gregorian) and 'noleap' calendars.
+    
+    Parameters:
+        unique_times (np.ndarray): array of pandas Timestamps (assumed sorted)
+        ref_date (pd.Timestamp): reference date from NetCDF units
+        calendar (str): either 'standard' or 'noleap'
+    
+    Returns:
+        np.ndarray: array of floats representing fractional days since ref_date
+    """
+    if calendar.lower() == "noleap":
+        # Compute days since ref_date with 365-day years
+        # Compute year, day-of-year, and hour offset
+        ref = pd.Timestamp(ref_date)
+
+        years = unique_times.year - ref.year
+        days_in_year = unique_times.dayofyear - ref.dayofyear
+        hours = unique_times.hour
+        minutes = unique_times.minute
+        seconds = unique_times.second
+
+        # Fractional days since reference
+        frac_days = (
+            years * 365
+            + days_in_year
+            + (hours + minutes / 60 + seconds / 3600) / 24
+        )
+
+        return frac_days.to_numpy(dtype="float64")
+    else:
+        # Use actual time delta for Gregorian calendar
+        return ((unique_times - ref_date) / np.timedelta64(1, "D")).astype("float64")
+
 
 def validate_met_vars(df):
     """
@@ -242,13 +294,14 @@ def elm_data_dicts():
     """
     Defines some dictionaries for ELM-expected variables.
     """
-    # Required bands/vars are the minimum needed to generate a full suite of ELM data
+    # Required bands/vars are the minimum ERA5-Land hourly needed to generate a full suite of ELM data
     e5_required_bands = ['temperature_2m', 'u_component_of_wind_10m', 'v_component_of_wind_10m',
                           'surface_solar_radiation_downwards_hourly', 'surface_thermal_radiation_downwards_hourly',
                           'total_precipitation_hourly', 'surface_pressure', 'dewpoint_temperature_2m']
     
     cmip_required_vars = ['sfcWind', 'rsds', 'rlds', 'huss', 'pr', 'tas', 'hur', 'ps'] #  dewpoint temperature 'tdps' is derivable so not included
         
+    # Distinguishing between OLMT's coupler_bypass mode and non-bypass (datm)
     elm_required_vars = {'datm' : ['LONGXY','LATIXY','time', 'ZBOT','TBOT', 'PRECTmms', 'RH', 'FSDS', 'FLDS', 'PSRF', 'WIND'],
                       'cbypass' : ['LONGXY','LATIXY','time', 'TBOT', 'PRECTmms', 'QBOT', 'FSDS', 'FLDS', 'PSRF', 'WIND']}
 

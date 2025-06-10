@@ -72,9 +72,7 @@ def sample_e5lh(params, skip_tasks=False):
     max_date = datetime.fromtimestamp(max_timestamp / 1000)
 
     # Determine number of batches
-    batches = gutils.determine_gee_batches(
-        start_date, end_date, max_date, years_per_task=params["gee_years_per_task"]
-    )
+    batches = gutils.determine_gee_batches(start_date, end_date, max_date, years_per_task=params["gee_years_per_task"], verbose=not skip_tasks)
 
     # Default to 'gid' if no field provided
     if "geometry_id_field" not in params:
@@ -150,11 +148,8 @@ def sample_e5lh(params, skip_tasks=False):
             )
             task.start()
 
-            print(f"Export task submitted: {export_filename}")
-
-    print(
-        "All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion."
-    )
+            print(f"GEE Export task submitted: {export_filename}")
+        print("All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion.")
 
     return df_loc
 
@@ -248,9 +243,7 @@ def e5lh_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
     # Preprocess each file, save to intermediate parquet file
     for i, f in enumerate(files):
         file_path = csv_directory / f
-        ppdf = _preprocess_e5lh_to_elm_file(
-            file_path, start_year, end_year, remove_leap
-        )
+        ppdf = _preprocess_e5lh_to_elm_file(file_path, start_year, end_year, remove_leap)
 
         # Infer id field name if not specified
         # Just uses the shortest field name that has "id" in it
@@ -263,9 +256,7 @@ def e5lh_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
                     poss_id_lens = [len(pi) for pi in poss_id]
                     id_col = poss_id[poss_id_lens.index(min(poss_id_lens))]
                     print(f"Inferred '{id_col}' as id column. If this is not correct, re-run this function and specify 'id_col' kwarg.")
-            df_loc.rename(
-                columns={id_col: "gid"}, inplace=True
-            )  # Set id_col to something consistent
+            df_loc.rename(columns={id_col: "gid"}, inplace=True)  # Set id_col to something consistent
         ppdf.rename(columns={id_col: "gid"}, inplace=True)
         df_loc.rename(columns={id_col: "gid"}, inplace=True)
 
@@ -286,14 +277,36 @@ def e5lh_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
         site = pf.stem
         site_write_directory = write_directory / site
         this_df = pd.read_parquet(pf)
-        coords = df_loc[df_loc["gid"] == site]
-        export_for_elm_site(
-            this_df,
-            coords["lon"].values[0],
-            coords["lat"].values[0],
-            site_write_directory,
-            attrs={"sampling_method": df_loc["method"].values[df_loc["gid"] == site][0]},
-        )
+        this_df_loc = df_loc[df_loc['gid']==site]
+
+        # Make sure directory exists and is empty for each site
+        utils.make_directory(site_write_directory, delete_all_contents=True)
+
+        # Grab some metadata dictionaries
+        mdd = eutils.elm_data_dicts()
+
+        # Determine ELM-required variables
+        dformat = 'BYPASS' # hardcoded as only option for now
+        if dformat == "BYPASS":
+            do_vars = [v for v in mdd["elm_req_vars"]["cbypass"] if v not in ["LONGXY", "LATIXY", "time"]]
+        elif dformat == "DATM_MODE":
+            do_vars = [v for v in mdd["elm_req_vars"]["datm"] if v not in ["LONGXY", "LATIXY", "time"]]
+
+        start_year = pd.to_datetime(this_df['date'].values).year[0]
+        end_year = pd.to_datetime(this_df['date'].values).year[-1]
+
+
+        for var in do_vars:
+            zval = 1
+            filename = 'ERA5_' + var + '_' + str(start_year) + '-' + str(end_year) + '_z' + str(zval).zfill(2) + '.nc'
+            filepath = site_write_directory / filename
+
+            eutils.create_met_netcdf(this_df_loc, 
+                                    var, 
+                                    start_year, 
+                                    filepath, 
+                                    )
+            eutils.append_met_netcdf()
 
         # Zone mappings export
         zm_write_path = write_directory / site / "zone_mappings.txt"
@@ -303,7 +316,6 @@ def e5lh_to_elm(csv_directory, write_directory, df_loc, remove_leap=True, id_col
     utils.remove_directory_contents(temp_path, remove_directory=True)
 
     return
-
 
 def _preprocess_e5lh_to_elm_file(file_path, start_year, end_year, remove_leap):
     """
@@ -355,132 +367,21 @@ def _preprocess_e5lh_to_elm_file(file_path, start_year, end_year, remove_leap):
                 #     pct_neg = sum(negs) / len(df) * 100
                 #     print(f"{pct_neg:.2f}% of the values in {c} were negative and reset to 0.")
 
-    return df
-
-
-def export_for_elm_site(
-    df,
-    lon,
-    lat,
-    elm_write_dir,
-    zval=1,
-    dformat="BYPASS",
-    compress=True,
-    compress_level=4,
-    attrs={},
-):
-    """
-    Export in ELM-ready foramts.
-    df has all the data. Sorted by date already.
-    df_loc has a list of points (pids) and their locations (lat, lon).
-    zval is the height in meters of the observations - defaults to 1.
-    dformat must be BYPASS for now.
-    attrs is a dictionary of additional attributes to append to the netCDF
-    file.
-    """
-    # except for 'site', other type of BYPASS requires zone_mapping.txt file
-
-    # Grab some metadata dictionaries
+    # Rename columns
     mdd = eutils.elm_data_dicts()
-
-    if dformat not in ["DATM_MODE", "BYPASS"]:
-        raise KeyError(
-            "You provided an unsupported dformat value. Currently only DATM_MODE and BYPASS are available."
-        )
-    elif dformat == "DATM_MODE":
-        print("DATM_MODE is not yet available. Exiting.")
-        return
-
-    # Make sure directory exists and is empty for each location
-    utils.make_directory(elm_write_dir, delete_all_contents=True)
-
-    start_year = str(pd.to_datetime(df["date"].values[0]).year)
-    end_year = str(pd.to_datetime(df["date"].values[-1]).year)
-
     if dformat == "BYPASS":
-        do_vars = [
-            v
-            for v in mdd["elm_req_vars"]["cbypass"]
-            if v not in ["LONGXY", "LATIXY", "time"]
-        ]
+        do_vars = [v for v in mdd["elm_req_vars"]["cbypass"] if v not in ["LONGXY", "LATIXY", "time"]]
     elif dformat == "DATM_MODE":
-        do_vars = [
-            v
-            for v in mdd["elm_req_vars"]["datm"]
-            if v not in ["LONGXY", "LATIXY", "time"]
-        ]
+        do_vars = [v for v in mdd["elm_req_vars"]["datm"] if v not in ["LONGXY", "LATIXY", "time"]]
+    renamer = {k: v for k, v in mdd["short_names"].items() if v in do_vars}
+    renamer.update({"date": "time", "lon": "LONGXY", "lat": "LATIXY"})
+    df.rename(columns=renamer, inplace=True)
 
-    # Create and save netcdf for each variable
-    for elm_var in do_vars:
-        era5_var = next(
-            (k for k, v in mdd["e5namemap"].items() if v == elm_var), None
-        )  # Column name in df
+    # Drop unnecessary columns
+    do_vars.extend(["LONGXY", "LATIXY", "time", "gid", "zone"])
+    df = df[do_vars]
 
-        if era5_var not in df.columns:
-            raise KeyError(
-                "A required variable was not found in the input dataframe: {}".format(
-                    era5_var
-                )
-            )
-
-        # Packing params (like compression but not quite)
-        add_offset, scale_factor = eutils.elm_var_compression_params(elm_var)
-
-        # Handle attributes
-        these_attrs = {
-            "history": "Created using xarray via dapper; contact jschwenk@lanl.gov for more information",
-            "units": mdd["units"][elm_var],
-            "description": mdd["descriptions"][elm_var],
-            "calendar": "noleap",
-            "created_on": datetime.today().strftime("%Y-%m-%d"),
-            "add_offset": add_offset,
-            "scale_factor": scale_factor,
-            "metadata": "Variables sampled via Google Earth Engine; see https://developers.google.com/earth-engine/datasets/catalog/ECMWF_ERA5_LAND_HOURLY#description",
-            "dapper_commit_hash": utils.get_git_commit_hash(),
-        }
-
-        if attrs:  # add any user-defined attributes
-            these_attrs.update(attrs)
-
-        # Create dataset
-        ds = xr.Dataset(
-            coords={"DTIME": ("DTIME", df["date"])},  # Set DTIME as a coordinate
-            data_vars={
-                "LONGXY": (("n",), np.array([lon], dtype=np.float32)),
-                "LATIXY": (("n",), np.array([lat], dtype=np.float32)),
-                elm_var: (("n", "DTIME"), df[era5_var].values.reshape(1, -1)),
-            },
-            attrs=these_attrs,
-        )
-
-        # Save file
-        filename = (
-            "ERA5_"
-            + elm_var
-            + "_"
-            + start_year
-            + "-"
-            + end_year
-            + "_z"
-            + str(zval).zfill(2)
-            + ".nc"
-        )
-        this_out_file = elm_write_dir / filename
-        ds.to_netcdf(
-            this_out_file,
-            encoding={
-                elm_var: {
-                    "dtype": "int16",
-                    "scale_factor": scale_factor,
-                    "add_offset": add_offset,
-                    "_FillValue": -32767,
-                    "zlib": compress,
-                    "complevel": compress_level,
-                }
-            },
-        )
-
-    return
+    return df
 
 
 def e5lh_to_elm_gridded(
@@ -526,9 +427,7 @@ def e5lh_to_elm_gridded(
 
     # Clip to first available Jan 01 year and last available Dec. 31 year.
     dates["year"] = dates["date"].dt.year
-    dates["month_day"] = (
-        dates["date"].dt.month * 100 + dates["date"].dt.day
-    )  # Converts to integer format (e.g., 101 for Jan 1)
+    dates["month_day"] = dates["date"].dt.month * 100 + dates["date"].dt.day # Converts to integer format (e.g., 101 for Jan 1)
     # Group by year and check if both January 1 and December 31 exist
     valid_years = dates.groupby("year")["month_day"].agg(
         lambda x: {101, 1231}.issubset(set(x))
@@ -573,13 +472,9 @@ def e5lh_to_elm_gridded(
         this_df.rename(columns={id_col: "gid"}, inplace=True)
 
         # Add lat/lon data to preprocessed dataframe and sort
-        this_df = this_df.merge(
-            df_loc[["gid", "lat", "lon", "zone"]], on="gid", how="inner"
-        )
+        this_df = this_df.merge(df_loc[["gid", "lat", "lon", "zone"]], on="gid", how="inner")
 
-        ppdf = _preprocess_e5lh_to_elm_file_grid(
-            this_df, start_year, end_year, remove_leap, dformat
-        )
+        ppdf = _preprocess_e5lh_to_elm_file_grid(this_df, start_year, end_year, remove_leap, dformat)
         ppdf = ppdf.sort_values(["time", "LATIXY", "LONGXY"]).reset_index(drop=True)
 
         for elm_var in ppdf.columns:
@@ -587,20 +482,10 @@ def e5lh_to_elm_gridded(
                 continue
             for zone in unique_zones:
 
-                filename = (
-                    "ERA5_"
-                    + elm_var
-                    + "_"
-                    + str(start_year)
-                    + "-"
-                    + str(end_year)
-                    + "_z"
-                    + str(zone).zfill(2)
-                    + ".nc"
-                )
+                filename = "ERA5_" + elm_var + "_" + str(start_year) + "-" + str(end_year) + "_z" + str(zone).zfill(2) + ".nc"
                 write_path = write_directory / filename
 
-                # Initialize netCDF file
+                # Initialize netCDF file - NEED TO EDIT AFTER MODIFYING CREATE FUNCTION
                 if i == 0:
                     this_df_loc = df_loc[df_loc["zone"] == zone]
                     eutils.create_met_netcdf(
@@ -677,17 +562,9 @@ def _preprocess_e5lh_to_elm_file_grid(df, start_year, end_year, remove_leap, dfo
     # Rename columns
     mdd = eutils.elm_data_dicts()
     if dformat == "BYPASS":
-        do_vars = [
-            v
-            for v in mdd["elm_req_vars"]["cbypass"]
-            if v not in ["LONGXY", "LATIXY", "time"]
-        ]
+        do_vars = [v for v in mdd["elm_req_vars"]["cbypass"] if v not in ["LONGXY", "LATIXY", "time"]]
     elif dformat == "DATM_MODE":
-        do_vars = [
-            v
-            for v in mdd["elm_req_vars"]["datm"]
-            if v not in ["LONGXY", "LATIXY", "time"]
-        ]
+        do_vars = [v for v in mdd["elm_req_vars"]["datm"] if v not in ["LONGXY", "LATIXY", "time"]]
     renamer = {k: v for k, v in mdd["short_names"].items() if v in do_vars}
     renamer.update({"date": "time", "lon": "LONGXY", "lat": "LATIXY"})
     df.rename(columns=renamer, inplace=True)
@@ -1042,3 +919,128 @@ def _preprocess_e5lh_to_elm_file_grid(df, start_year, end_year, remove_leap, dfo
 #     task.start()
 
 #     return f"Export task started: {params['filename']} (Check Google Drive or Task Status in the Javascript Editor for completion.)"
+
+
+# def export_for_elm_site(
+#     df,
+#     lon,
+#     lat,
+#     elm_write_dir,
+#     zval=1,
+#     dformat="BYPASS",
+#     compress=True,
+#     compress_level=4,
+#     attrs={},
+# ):
+#     """
+#     Export in ELM-ready foramts.
+#     df has all the data. Sorted by date already.
+#     df_loc has a list of points (pids) and their locations (lat, lon).
+#     zval is the height in meters of the observations - defaults to 1.
+#     dformat must be BYPASS for now.
+#     attrs is a dictionary of additional attributes to append to the netCDF
+#     file.
+#     """
+#     # except for 'site', other type of BYPASS requires zone_mapping.txt file
+
+#     # Grab some metadata dictionaries
+#     mdd = eutils.elm_data_dicts()
+
+#     if dformat not in ["DATM_MODE", "BYPASS"]:
+#         raise KeyError(
+#             "You provided an unsupported dformat value. Currently only DATM_MODE and BYPASS are available."
+#         )
+#     elif dformat == "DATM_MODE":
+#         print("DATM_MODE is not yet available. Exiting.")
+#         return
+
+#     # Make sure directory exists and is empty for each location
+#     utils.make_directory(elm_write_dir, delete_all_contents=True)
+
+#     start_year = str(pd.to_datetime(df["date"].values[0]).year)
+#     end_year = str(pd.to_datetime(df["date"].values[-1]).year)
+
+#     if dformat == "BYPASS":
+#         do_vars = [
+#             v
+#             for v in mdd["elm_req_vars"]["cbypass"]
+#             if v not in ["LONGXY", "LATIXY", "time"]
+#         ]
+#     elif dformat == "DATM_MODE":
+#         do_vars = [
+#             v
+#             for v in mdd["elm_req_vars"]["datm"]
+#             if v not in ["LONGXY", "LATIXY", "time"]
+#         ]
+
+#     # Create and save netcdf for each variable
+#     for elm_var in do_vars:
+#         era5_var = next(
+#             (k for k, v in mdd["e5namemap"].items() if v == elm_var), None
+#         )  # Column name in df
+
+#         if era5_var not in df.columns:
+#             raise KeyError(
+#                 "A required variable was not found in the input dataframe: {}".format(
+#                     era5_var
+#                 )
+#             )
+
+#         # Packing params (like compression but not quite)
+#         add_offset, scale_factor = eutils.elm_var_compression_params(elm_var)
+
+#         # Handle attributes
+#         these_attrs = {
+#             "history": "Created using xarray via dapper; contact jschwenk@lanl.gov for more information",
+#             "units": mdd["units"][elm_var],
+#             "description": mdd["descriptions"][elm_var],
+#             "calendar": "noleap",
+#             "created_on": datetime.today().strftime("%Y-%m-%d"),
+#             "add_offset": add_offset,
+#             "scale_factor": scale_factor,
+#             "metadata": "Variables sampled via Google Earth Engine; see https://developers.google.com/earth-engine/datasets/catalog/ECMWF_ERA5_LAND_HOURLY#description",
+#             "dapper_commit_hash": utils.get_git_commit_hash(),
+#         }
+
+#         if attrs:  # add any user-defined attributes
+#             these_attrs.update(attrs)
+
+#         # Create dataset
+#         ds = xr.Dataset(
+#             coords={"DTIME": ("DTIME", df["date"])},  # Set DTIME as a coordinate
+#             data_vars={
+#                 "LONGXY": (("n",), np.array([lon], dtype=np.float32)),
+#                 "LATIXY": (("n",), np.array([lat], dtype=np.float32)),
+#                 elm_var: (("n", "DTIME"), df[era5_var].values.reshape(1, -1)),
+#             },
+#             attrs=these_attrs,
+#         )
+
+#         # Save file
+#         filename = (
+#             "ERA5_"
+#             + elm_var
+#             + "_"
+#             + start_year
+#             + "-"
+#             + end_year
+#             + "_z"
+#             + str(zval).zfill(2)
+#             + ".nc"
+#         )
+#         this_out_file = elm_write_dir / filename
+#         ds.to_netcdf(
+#             this_out_file,
+#             encoding={
+#                 elm_var: {
+#                     "dtype": "int16",
+#                     "scale_factor": scale_factor,
+#                     "add_offset": add_offset,
+#                     "_FillValue": -32767,
+#                     "zlib": compress,
+#                     "complevel": compress_level,
+#                 }
+#             },
+#         )
+
+#     return

@@ -84,9 +84,7 @@ def validate_bands(bandlist, gee_ic="ECMWF/ERA5_LAND/HOURLY"):
     return
 
 
-def determine_gee_batches(
-    start_date, end_date, max_date, years_per_task=5, verbose=True
-):
+def determine_gee_batches(start_date, end_date, max_date, years_per_task=5, verbose=True):
     """
     Calculates how to batch tasks for splitting bigger GEE jobs.
     Currently assumes ERA5-Land hourly (i.e. hourly data with a known date range).
@@ -109,13 +107,9 @@ def determine_gee_batches(
 
     if verbose:
         if len(df) == 1:
-            print(
-                f"Your request will be executed as {len(df)} Task in Google Earth Engine."
-            )
+            print(f"Your request will be executed as one Task in Google Earth Engine.")
         else:
-            print(
-                f"Your request will be executed as {len(df)} Tasks in Google Earth Engine."
-            )
+            print(f"Your request will be executed as {len(df)} Tasks in Google Earth Engine.")
 
     return df
 
@@ -249,9 +243,8 @@ def export_fc(
 def featurecollection_to_df_loc(fc):
     """
     Converts an ee.FeatureCollection object to a GeoDataFrame
-    needed for further processing in dapper.
+    and includes WKT representations of the sampled geometry.
     """
-    # Convert FeatureCollection to GeoJSON (client-side)
     geojson = fc.getInfo()
 
     rows = []
@@ -274,14 +267,19 @@ def featurecollection_to_df_loc(fc):
         else:
             raise ValueError(f"Unsupported geometry type: {geom_type}")
 
-        rows.append({"gid": gid, "lat": lat, "lon": lon, "method": method})
+        rows.append({
+            "gid": gid,
+            "lat": lat,
+            "lon": lon,
+            "method": method,
+            "sampled_geometry": geom.wkt  # WKT representation
+        })
 
-    # Create DataFrame
     df_loc = pd.DataFrame(rows)
-
-    # Convert to GeoDataFrame
     gdf_loc = gpd.GeoDataFrame(
-        df_loc, geometry=gpd.points_from_xy(df_loc.lon, df_loc.lat), crs="EPSG:4326"
+        df_loc,
+        geometry=gpd.points_from_xy(df_loc.lon, df_loc.lat),
+        crs="EPSG:4326"
     )
 
     return gdf_loc
