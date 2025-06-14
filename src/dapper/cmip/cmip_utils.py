@@ -1,39 +1,19 @@
 ## Pangeo approach - https://pangeo-data.github.io/pangeo-cmip6-cloud/accessing_data.html
-import intake
-import xarray as xr
-import fsspec
-import pandas as pd
-from pathlib import Path
-import gcsfs
-import xarray as xr
 import os
-from dapper import utils 
+import gcsfs
+import intake
+import fsspec
+import numpy as np
+import pandas as pd
+import xarray as xr
+from tqdm import tqdm
+import geopandas as gpd
+from pathlib import Path
+
 from dapper.elm import elm_utils as euts
 
-
+# Need a smarter way to import this
 col = intake.open_esm_datastore("https://storage.googleapis.com/cmip6/pangeo-cmip6.json")
-
-
-params = {
-    # 'models' : ['BCC-CSM2-MR', 'CanESM5', 'CESM2', 'E3SM-1-0', 'E3SM-1-1', 'EC-Earth3', 'GFDL-ESM4', 'IPSL-CM6A-LR', 'MIROC6', 'MPI-ESM1-2-HR', 'MRI-ESM2-0', 'NorESM2-LM'],
-    'models' : ['NorESM2-LM'],
-    'variables' : ['pr', 'tas'],
-    'experiment' : 'historical',
-    'table' : ['Amon'],
-    'ensemble' : 'r2i1p1f1',
-    'start_date' : '1850-01-01',
-    'end_date' : '2015-12-31'
-}
-path_out = Path(r'X:\Research\NGEE Arctic\CMIP output\Katrinas\Kurts_Paper')
-
-# The problem is that ps is not provided daily.
-
-params = {
-    'variables' : 'elm',
-    'experiment' : 'historical',
-    'table' : ['day', '3hr', '6hrLev'],
-    'ensemble' : 'r1i1p1f1',
-}
 
 def find_available_data(params):
 
@@ -74,36 +54,151 @@ def find_available_data(params):
 
     return df_export
 
-def download_pangeo(df, dir_out):
-    """
-    df should be created by intake using find_available_data() to ensure it has 
-    the correct columns.
-    """
 
-    # Create a GCS file system object (anonymous for public buckets)
+def download_pangeo(df, dir_out, lat=None, lon=None, lat_bounds=None, lon_bounds=None, polygon_path=None):
+    """
+    Download CMIP6 data from Pangeo, with optional spatial subsetting.
+
+    Args:
+        df (pd.DataFrame): From find_available_data().
+        dir_out (Path or str): Output directory.
+        lat, lon (float): Point location to sample (optional).
+        lat_bounds, lon_bounds (tuple): Box to sample (min, max) (optional).
+        polygon_path (str): Path to GeoJSON or Shapefile with polygon (optional).
+
+    Note: Only one of (lat/lon), (lat_bounds/lon_bounds), or (polygon_path) should be provided.
+    """
     fs = gcsfs.GCSFileSystem(token='anon')
+    file_urls = df['zstore'].unique()
 
-    file_urls = df['zstore'].unique()  # or include duplicates if needed
-    utils.make_directory(dir_out, delete_all_contents=True)
+    os.makedirs(dir_out, exist_ok=True)
 
-    # Download the files
     time_coder = xr.coding.times.CFDatetimeCoder(use_cftime=True)
+
     for i, row in df.iterrows():
         filename = f"{row.variable_id}_{row.source_id}_{row.experiment_id}_{row.member_id}.nc"
         try:
             ds = xr.open_zarr(fsspec.get_mapper(row.zstore), consolidated=True, decode_times=time_coder)
-            this_file_out = dir_out / filename
+
+            # Normalize longitude to 0–360 if needed
+            if 'lon' in ds.coords and ds.lon.max() > 180:
+                if lon is not None and lon < 0:
+                    lon = lon % 360
+                if lon_bounds is not None:
+                    lon_bounds = tuple(l % 360 for l in lon_bounds)
+
+            # Point sampling
+            if lat is not None and lon is not None:
+                ds = ds.sel(lat=lat, lon=lon, method='nearest')
+
+            # Box selection
+            elif lat_bounds and lon_bounds:
+                ds = ds.sel(
+                    lat=slice(lat_bounds[0], lat_bounds[1]),
+                    lon=slice(lon_bounds[0], lon_bounds[1])
+                )
+
+            # Polygon masking (optional, will still save entire box but mask values)
+            elif polygon_path is not None:
+                gdf = gpd.read_file(polygon_path)
+                poly = gdf.unary_union
+
+                # First select a box to speed things up
+                minx, miny, maxx, maxy = poly.bounds
+                ds = ds.sel(lat=slice(miny, maxy), lon=slice(minx, maxx))
+
+                # Mask outside polygon
+                lon2d, lat2d = np.meshgrid(ds.lon, ds.lat)
+                points = gpd.GeoSeries(gpd.points_from_xy(lon2d.ravel(), lat2d.ravel()))
+                mask = np.array([poly.contains(pt) for pt in points]).reshape(lat2d.shape)
+                ds = ds.where(mask)
+
+            # Save output
+            this_file_out = os.path.join(dir_out, filename)
             ds.to_netcdf(this_file_out)
             print(f"Saved: {filename}")
+
         except Exception as e:
             print(f"Failed to download {filename}: {e}")
 
-    
+
+def extract_vars_from_files(files, start_date, end_date, path_out):
+    """
+    Robust CMIP6 NetCDF merger for multiple calendars — using CFDatetimeCoder.
+
+    This is slow but robust.
+    """
+    all_dfs = []
+    time_coder = xr.coding.times.CFDatetimeCoder(use_cftime=True)
+
+    for file in tqdm(files, desc="Processing"):
+        try:
+            ds = xr.open_dataset(file, decode_times=time_coder)
+
+            varnames = [v for v in ds.data_vars if {'time', 'lat', 'lon'}.intersection(ds[v].dims)]
+            for var in varnames:
+                arr = ds[var]
+                time = ds['time'].values
+
+                # If time is cftime, use safe bounds
+                if isinstance(time[0], np.datetime64):
+                    times = pd.to_datetime(time)
+                    mask = (times >= start_date) & (times <= end_date)
+                else:
+                    times = time
+                    mask = np.array([ (t >= cftime_date(start_date, t)) and (t <= cftime_date(end_date, t)) for t in time ])
+
+                values = arr.values[mask]
+                filtered_times = np.array(times)[mask]
+
+                lon = ds['lon'].values.item() if ds['lon'].size == 1 else ds['lon'].values
+                lat = ds['lat'].values.item() if ds['lat'].size == 1 else ds['lat'].values
+
+                parts = Path(file).stem.split('_')
+                varname = var
+                model = parts[1]
+                ssp = parts[2]
+
+                df = pd.DataFrame({
+                    'date': filtered_times,
+                    'lon': lon,
+                    'lat': lat,
+                    'value': values,
+                    'var': varname,
+                    'model': model,
+                    'ssp': ssp
+                })
+                all_dfs.append(df)
+
+        except Exception as e:
+            print(f"Failed: {file} — {e}")
+
+    if all_dfs:
+        out_df = pd.concat(all_dfs, ignore_index=True)
+        # Convert cftime safely to ISO string for storage
+        if not np.issubdtype(out_df['date'].dtype, np.datetime64):
+            out_df['date'] = out_df['date'].astype(str)
+        out_df.to_csv(path_out, index=False)
+        print(f"Saved to {path_out}")
+    else:
+        print("No valid data extracted.")
+
+
+def cftime_date(string_date, sample_cftime):
+    """
+    Convert YYYY-MM-DD to same cftime type as sample_cftime
+    """
+    import cftime
+    y, m, d = map(int, string_date.split('-'))
+    if isinstance(sample_cftime, cftime.DatetimeNoLeap):
+        return cftime.DatetimeNoLeap(y, m, d)
+    elif isinstance(sample_cftime, cftime.Datetime360Day):
+        return cftime.Datetime360Day(y, m, min(d, 30))
+    else:
+        return cftime.DatetimeProlepticGregorian(y, m, d)
 
 
 # # Load the Pangeo CMIP6 ESM Collection
-
-
 # for experiment in params['experiment']:
 #     print(experiment)
     

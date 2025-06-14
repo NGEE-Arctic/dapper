@@ -3,12 +3,16 @@ import pandas as pd
 import numpy as np
 import netCDF4 as nc
 from datetime import datetime
+import xarray as xr
+import time
 
 from dapper import utils
 from dapper.elm import elm_utils as eutils
 from dapper.utils import _DATA_DIR
 
-def initialize_met_netcdf(df_loc, elm_var, start_year, write_path, calendar='noleap', compress_level=0, dformat='BYPASS'):
+
+
+def initialize_met_netcdf_o(df_loc, elm_var, start_year, write_path, calendar='noleap', compress_level=0, dformat='BYPASS'):
     """
     Creates an empty netCDF met file to be written into with append_met_netcdf().
     """
@@ -77,7 +81,7 @@ def initialize_met_netcdf(df_loc, elm_var, start_year, write_path, calendar='nol
     return
 
 
-def append_met_netcdf(this_df, elm_var, write_path, dformat='BYPASS', compress=False, compress_level=0):
+def append_met_netcdf_o(this_df, elm_var, write_path, dformat='BYPASS', compress=False, compress_level=0):
     
     if not os.path.exists(write_path):
         print(f"NetCDF file '{write_path}' does not exist and cannot be appended.")
@@ -92,16 +96,16 @@ def append_met_netcdf(this_df, elm_var, write_path, dformat='BYPASS', compress=F
             add_offset = ds.variables[elm_var].getncattr('add_offset')
             scale_factor = ds.variables[elm_var].getncattr('scale_factor')
 
-            # Handle DTIME
-            dtime_units = ds['DTIME'].getncattr('units')  # e.g., "days since 1950-01-01"
-            ref_date = pd.to_datetime(dtime_units.split('since')[1].strip())
+            # # Handle DTIME
+            # dtime_units = ds['DTIME'].getncattr('units')  # e.g., "days since 1950-01-01"
+            # ref_date = pd.to_datetime(dtime_units.split('since')[1].strip())
 
-            this_df['time'] = pd.to_datetime(this_df['time'])
-            this_df = this_df.sort_values(['time', 'LATIXY', 'LONGXY']).reset_index(drop=True)
-            unique_times = pd.to_datetime(this_df['time'].drop_duplicates().to_numpy())
+            # this_df['time'] = pd.to_datetime(this_df['time'])
+            # this_df = this_df.sort_values(['time', 'LATIXY', 'LONGXY']).reset_index(drop=True)
+            # unique_times = pd.to_datetime(this_df['time'].drop_duplicates().to_numpy())
 
-            calendar = ds.getncattr('calendar') if 'calendar' in ds.ncattrs() else 'standard'
-            dtime_vals = compute_dtime_vals(unique_times, ref_date, calendar)
+            # calendar = ds.getncattr('calendar') if 'calendar' in ds.ncattrs() else 'standard'
+            # dtime_vals = compute_dtime_vals(unique_times, ref_date, calendar)
 
             # Get dimensions
             current_time_size = ds.dimensions['DTIME'].size
@@ -115,45 +119,202 @@ def append_met_netcdf(this_df, elm_var, write_path, dformat='BYPASS', compress=F
             packed_data_column = np.round((this_df[elm_var].values - add_offset) / scale_factor).astype(np.float32)
             reshaped_data = packed_data_column.reshape(num_times, num_sites)
 
+            import time
+
+            t0 = time.time()
             # Write to NetCDF
             ds[elm_var][current_time_size:current_time_size + num_times, :] = reshaped_data
+            print("Write time:", time.time() - t0)
+            t1 = time.time()
             ds.sync()
+            print("Sync time:", time.time() - t1)
 
-def compute_dtime_vals(unique_times, ref_date, calendar="standard"):
+            
+def initialize_met_netcdf_xr(df_loc, elm_var, dtime_vals, dtime_units, write_path,
+                              calendar='noleap', compress_level=0, dformat='BYPASS'):
+    fillvalue = -32767
+
+    if os.path.exists(write_path):
+        print(f"NetCDF file '{write_path}' already exists.")
+        return
+
+    if dformat != 'BYPASS':
+        raise NotImplementedError("Only BYPASS format is currently supported.")
+
+    mdd = elm_data_dicts()
+    add_offset, scale_factor = elm_var_compression_params(elm_var)
+
+    df_loc = df_loc.sort_values(['lat', 'lon']).reset_index(drop=True)
+    n = len(df_loc)
+    nt = len(dtime_vals)
+
+    coords = {
+        "n": np.arange(n),
+        "DTIME": ("DTIME", dtime_vals, {
+            "units": dtime_units,
+            "calendar": calendar,
+            "long_name": "observation_time"
+        }),
+        "LATIXY": ("n", df_loc["lat"].values, {"units": "degrees_north"}),
+        "LONGXY": ("n", df_loc["lon"].values, {"units": "degrees_east"}),
+    }
+
+    if "gid" in df_loc.columns and len(df_loc) > 1:
+        coords["gid"] = ("n", df_loc["gid"].astype(str).values)
+
+    # Placeholder data: float values that will be encoded to int16
+    data_vars = {
+        elm_var: (("DTIME", "n"), np.full((nt, n), np.nan, dtype=np.float32))
+    }
+
+    ds = xr.Dataset(
+        data_vars=data_vars,
+        coords=coords,
+        attrs={
+            "history": "Created using xarray with dapper",
+            "calendar": calendar,
+            "created_on": datetime.today().strftime('%Y-%m-%d'),
+            "dapper_commit_hash": utils.get_git_commit_hash(),
+            "sampled_geometry": "\n".join(df_loc["sampled_geometry"].astype(str).tolist()),
+            "method": df_loc["method"].values[0],
+        }
+    )
+
+    ds[elm_var].attrs.update({
+        "units": mdd["units"][elm_var],
+        "description": mdd["descriptions"][elm_var],
+        "long_name": next((k for k, v in mdd["e5namemap"].items() if v == elm_var), None),
+        "mode": "time-dependent",
+        "add_offset": add_offset,
+        "scale_factor": scale_factor
+    })
+
+    encoding = {
+        elm_var: {
+            "dtype": "int16",
+            "_FillValue": fillvalue,
+            "add_offset": add_offset,
+            "scale_factor": scale_factor,
+            "zlib": False,
+        }
+    }
+
+    ds.to_netcdf(write_path, format="NETCDF4", encoding=encoding)
+
+def append_met_netcdf_xr(this_df, elm_var, write_path, dtime_vals, start_idx, calendar='noleap', tol=1e-6):
     """
-    Compute DTIME values (fractional days since ref_date) for NetCDF writing.
-    Supports both 'standard' (Gregorian) and 'noleap' calendars.
-    
+    Appends *manually packed* data to a preallocated NetCDF file.
+    Avoids any reliance on xarray's encoding logic.
+    """
+    fillvalue = -32767
+
+    if not os.path.exists(write_path):
+        raise FileNotFoundError(f"NetCDF file '{write_path}' does not exist.")
+
+    with xr.open_dataset(write_path, mode="r+", decode_times=False, engine="netcdf4") as ds:
+        if elm_var not in ds.variables:
+            raise KeyError(f"{elm_var} not found in {write_path}.")
+
+        add_offset = ds[elm_var].attrs.get("add_offset")
+        scale_factor = ds[elm_var].attrs.get("scale_factor")
+        if add_offset is None or scale_factor is None:
+            raise ValueError("Missing add_offset or scale_factor in variable attributes.")
+
+        # Sort and extract unique times
+        this_df['time'] = pd.to_datetime(this_df['time'])
+        this_df = this_df.sort_values(['time', 'LATIXY', 'LONGXY']).reset_index(drop=True)
+        unique_times = this_df['time'].drop_duplicates().to_numpy()
+        num_times = len(unique_times)
+        num_sites = ds.sizes['n']
+        end_idx = start_idx + num_times
+
+        # Sanity check on DTIME
+        dtime_existing = ds['DTIME'].values[start_idx:end_idx]
+        dtime_expected = dtime_vals[start_idx:end_idx]
+        if not np.allclose(dtime_existing, dtime_expected, atol=tol):
+            raise ValueError("DTIME mismatch between expected and existing NetCDF values.")
+
+        # Manual packing
+        values = this_df[elm_var].to_numpy(dtype=np.float64)
+        packed = np.full(values.shape, fillvalue, dtype=np.int16)
+
+        mask = np.isfinite(values)
+        packed[mask] = np.round((values[mask] - add_offset) / scale_factor).astype(np.int16)
+
+        # Reshape and write
+        reshaped = packed.reshape(num_times, num_sites)
+        ds[elm_var].data[start_idx:end_idx, :] = reshaped
+
+
+def create_dtime(csv_filepaths, calendar='standard', dtime_units='days'):
+    """
+    Reads multiple CSVs, extracts and filters dates to full years only (Jan 1 to Dec 31),
+    and computes DTIME values from the reference date.
+
     Parameters:
-        unique_times (np.ndarray): array of pandas Timestamps (assumed sorted)
-        ref_date (pd.Timestamp): reference date from NetCDF units
-        calendar (str): either 'standard' or 'noleap'
-    
+        csv_filepaths (list): List of paths to CSVs containing a 'date' column.
+        calendar (str): Calendar type ('standard' or 'noleap').
+        dtime_units (str): Units for DTIME ('days', 'hours', or 'years').
+
     Returns:
-        np.ndarray: array of floats representing fractional days since ref_date
+        dtime_vals (np.ndarray): Computed DTIME values.
+        dtime_attr (str): DTIME attribute string (e.g., 'days since 2001-01-01 00:00:00').
+        unique_times (np.ndarray): Filtered unique timestamps used for DTIME.
     """
+    # Read and merge dates
+    dates = [pd.read_csv(file, usecols=["date"]) for file in csv_filepaths]
+    dates = pd.concat(dates, ignore_index=True)
+    dates["date"] = pd.to_datetime(dates["date"])
+    dates.sort_values(by="date", inplace=True)
+
+    # Remove leap days if using noleap calendar
     if calendar.lower() == "noleap":
-        # Compute days since ref_date with 365-day years
-        # Compute year, day-of-year, and hour offset
-        ref = pd.Timestamp(ref_date)
+        dates = dates[~((dates["date"].dt.month == 2) & (dates["date"].dt.day == 29))]
 
-        years = unique_times.year - ref.year
-        days_in_year = unique_times.dayofyear - ref.dayofyear
-        hours = unique_times.hour
-        minutes = unique_times.minute
-        seconds = unique_times.second
+    # Identify full years
+    dates["year"] = dates["date"].dt.year
+    dates["month_day"] = dates["date"].dt.month * 100 + dates["date"].dt.day
+    valid_years = dates.groupby("year")["month_day"].agg(lambda x: {101, 1231}.issubset(set(x)))
+    valid_years = valid_years[valid_years].index
 
-        # Fractional days since reference
-        frac_days = (
-            years * 365
-            + days_in_year
-            + (hours + minutes / 60 + seconds / 3600) / 24
-        )
-
-        return frac_days.to_numpy(dtype="float64")
+    if not valid_years.empty:
+        start_year, end_year = valid_years[0], valid_years[-1]
+        dates = dates[(dates["year"] >= start_year) & (dates["year"] <= end_year)]
     else:
-        # Use actual time delta for Gregorian calendar
-        return ((unique_times - ref_date) / np.timedelta64(1, "D")).astype("float64")
+        print("There is not a full year's worth of data. Using the full dataset.")
+        start_year, end_year = dates["year"].values[0], dates["year"].values[-1]
+
+    # Compute DTIME
+    unique_times = pd.to_datetime(dates['date'].drop_duplicates().to_numpy())
+    ref_date = unique_times[0]
+    dtime_vals = compute_dtime_vals(unique_times, ref_date, units=dtime_units)
+    dtime_attr = f"{dtime_units} since {ref_date.strftime('%Y-%m-%d %H:%M:%S')}"
+
+    return dtime_vals, dtime_attr, unique_times
+
+
+def compute_dtime_vals(unique_times, ref_date, units="days"):
+    """
+    Compute DTIME values as time since ref_date in the given units.
+
+    Parameters:
+        unique_times (np.ndarray): Array of pandas Timestamps (assumed sorted).
+        ref_date (pd.Timestamp): Reference date.
+        units (str): 'days', 'hours', or 'years'.
+
+    Returns:
+        np.ndarray: Array of floats representing time since ref_date.
+    """
+    if units not in {"days", "hours", "years"}:
+        raise ValueError(f"Unsupported units: {units}. Must be 'days', 'hours', or 'years'.")
+
+    delta = unique_times - ref_date
+    if units == "days":
+        return (delta / np.timedelta64(1, "D")).astype("float64")
+    elif units == "hours":
+        return (delta / np.timedelta64(1, "h")).astype("float64")
+    elif units == "years":
+        return (delta / np.timedelta64(1, "Y")).astype("float64")
 
 
 def validate_met_vars(df):
@@ -220,26 +381,6 @@ def validate_met_vars(df):
     return
 
 
-def elm_var_compression_params(elm_var):
-    """
-    Computes the offset and scale for BYPASS compression.
-    See https://github.com/fmyuan/elm-pf-tools/blob/a581c104f7a20238e144daa8418e334d5d966e55/pytools/metdata_merge.py#L1309C1-L1325C1
-    """
-    
-    ranges = {'PRECTmms' : [-0.04, 0.04],
-              'FSDS' : [-20.0, 2000.0],
-              'TBOT' : [175.0, 350.0],
-              'RH' : [0.0, 100.0],
-              'QBOT' : [0.0, 0.10],
-              'FLDS' : [0.0, 1000.0],
-              'PSRF' : [20000.0, 120000.0],
-              'WIND' : [-1.0, 100.0]
-    }
-
-    add_offset = (ranges[elm_var][1]+ranges[elm_var][0])/2.0
-    scale_factor = (ranges[elm_var][1]-ranges[elm_var][0])*1.1/(2**15)
-
-    return add_offset, scale_factor
 
 
 def compute_humidities(temp, dewpoint_temp, surf_pressure):
@@ -350,7 +491,7 @@ def elm_data_dicts():
             'FSDS'      : [-20, 2000],
             'TBOT'      : [175, 350],
             'RH'        : [0, 100],
-            'QBOT'      : [0, 0.1],
+            'QBOT'      : [0, .04], # Changed the range to 100 (from 0.1) to avoid a warning when storing the packed data
             'FLDS'      : [0, 1000],
             'PSRF'      : [20000, 120000],
             'WIND'      : [-1, 100]}
