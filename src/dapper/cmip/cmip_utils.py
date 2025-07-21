@@ -68,9 +68,6 @@ def download_pangeo(df, dir_out, lat=None, lon=None, lat_bounds=None, lon_bounds
 
     Note: Only one of (lat/lon), (lat_bounds/lon_bounds), or (polygon_path) should be provided.
     """
-    fs = gcsfs.GCSFileSystem(token='anon')
-    file_urls = df['zstore'].unique()
-
     os.makedirs(dir_out, exist_ok=True)
 
     time_coder = xr.coding.times.CFDatetimeCoder(use_cftime=True)
@@ -78,7 +75,7 @@ def download_pangeo(df, dir_out, lat=None, lon=None, lat_bounds=None, lon_bounds
     for i, row in df.iterrows():
         filename = f"{row.variable_id}_{row.source_id}_{row.experiment_id}_{row.member_id}.nc"
         try:
-            ds = xr.open_zarr(fsspec.get_mapper(row.zstore), consolidated=True, decode_times=time_coder)
+            ds = xr.open_zarr(fsspec.get_mapper(row.zstore, token='anon', access='read_only'), consolidated=True, decode_times=time_coder)
 
             # Normalize longitude to 0–360 if needed
             if 'lon' in ds.coords and ds.lon.max() > 180:
