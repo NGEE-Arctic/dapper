@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "dapper"
 version = "0.1.0"
 description = "Data Preprocessing for ELM Runs"
-authors = [{ name = "Jon Schwenk", email = "jschwenk@lanl.gov" }]
+authors = [{ name = "Dapper contributors", email = "dapper@lanl.gov" }]
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "BSD-3" }
