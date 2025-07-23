@@ -9,3 +9,5 @@ fengming_data/
 batchtesting/
 celltesting/
 cmip_downloads/
+build
+dist
