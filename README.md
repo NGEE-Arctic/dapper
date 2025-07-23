@@ -53,5 +53,8 @@ Check out the [jupyter notebooks](https://github.com/NGEE-Arctic/dapper/tree/mai
 ## Contributing
 Feel free to fork the repo and make improvements. Open a pull request and we'll check it out.
 
-## Contact
-Repo maintained by jschwenk@lanl.gov. Some tools were ported from work by Ryan Crumley and Cade Trotter at Los Alamos National Laboratory.
+## Credits
+Repo initialized by Jon Schwenk; maintained by Jon Schwenk and Jemma Stachelek. Some `dapper` functionality was ported from work by Ryan Crumley and Cade Trotter at Los Alamos National Laboratory. Rich Fiorella contributed OLMT-related content and assists with package maintenance. Others have contributed via the Issue Tracker and valuable feedback/testing.
+
+## Copyright/License
+O4898 (for copyright verification); see the [License](https://github.com/NGEE-Arctic/dapper/tree/main/license.md) file.
