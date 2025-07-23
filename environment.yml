@@ -1,8 +1,7 @@
 name: dapper
-channels:  
+channels:
   - conda-forge
 dependencies:
-  - python
   - geopandas
   - earthengine-api
   - geemap
@@ -16,3 +15,4 @@ dependencies:
   - netcdf4
   - intake-esm # for Pangeo CMIP access
   - gcsfs # for Pangeo CMIP downloading
+
