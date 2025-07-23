@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from dapper.utils import _DATA_DIR
+from dapper.utils.utils import _DATA_DIR
 
 
 def validate_met_vars(df):
