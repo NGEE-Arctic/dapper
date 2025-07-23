@@ -26,6 +26,10 @@ dependencies = [
   "gcsfs" # for Pangeo CMIP downloading
  ]
 
+[project.urls]
+"Homepage" = "https://github.com/NGEE-Arctic/dapper"
+"Bug Tracker" = "https://github.com/NGEE-Arctic/dapper/issues"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
