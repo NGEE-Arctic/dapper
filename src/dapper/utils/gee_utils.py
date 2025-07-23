@@ -7,11 +7,10 @@ import geopandas as gpd
 from shapely.geometry import Polygon, shape
 from dateutil.relativedelta import relativedelta
 
-from dapper.gee import era5l as e5l
+from dapper.met import era5land as e5l
 
 # Pathing for convenience
 import dapper
-
 _ROOT_DIR = Path(next(iter(dapper.__path__))).parent
 _DATA_DIR = _ROOT_DIR / "data"
 

@@ -5,7 +5,7 @@ import netCDF4 as nc
 from datetime import datetime
 
 from dapper.utils import utils
-from dapper.met import elm_utils as eu
+from dapper.utils import elm_utils as eu
 
 def initialize_met_netcdf(df_loc, elm_var, dtime_vals, dtime_units, write_path, 
                           add_offset=None, scale_factor=None, calendar='noleap', compress_level=0, dformat='BYPASS'):

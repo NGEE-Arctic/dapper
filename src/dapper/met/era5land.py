@@ -11,7 +11,7 @@ from fastparquet import write
 
 from dapper.utils import utils
 from dapper.utils import gee_utils as gu
-from dapper.met import elm_utils as eu
+from dapper.utils import elm_utils as eu
 from dapper.met import met_io as io
 
 
