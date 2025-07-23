@@ -9,7 +9,7 @@ description = "Data Preprocessing for ELM Runs"
 authors = [{ name = "Dapper contributors", email = "dapper@lanl.gov" }]
 readme = "README.md"
 requires-python = ">=3.8"
-license = { text = "BSD-3" }
+license = {file = "license.md"}
 dependencies = [
   "geopandas",
   "earthengine-api",
