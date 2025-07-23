@@ -10,6 +10,21 @@ authors = [{ name = "Dapper contributors", email = "dapper@lanl.gov" }]
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "BSD-3" }
+dependencies = [
+  "geopandas",
+  "earthengine-api",
+  "geemap",
+  "pip",
+  "xarray",
+  "cftime",
+  "tqdm",
+  "rioxarray",
+  "jupyter",
+  "fastparquet",
+  "netcdf4",
+  "intake-esm", # for Pangeo CMIP access
+  "gcsfs" # for Pangeo CMIP downloading
+ ]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
