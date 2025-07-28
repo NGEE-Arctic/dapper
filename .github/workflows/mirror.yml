@@ -13,3 +13,5 @@ jobs:
           git remote set-url --push origin git@github.com:lanl/dapper.git
           git fetch -p origin
           git push --mirror
+        env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
