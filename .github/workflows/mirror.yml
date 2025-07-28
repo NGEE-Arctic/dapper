@@ -6,7 +6,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
       - run: |
           echo "$NGEE_PRIVATE" > ngee_private.key
           echo "$NGEE_PRIVATE2" > ngee_private2.key
