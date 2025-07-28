@@ -14,4 +14,4 @@ jobs:
           git fetch -p origin
           git push --mirror
         env:
-            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            GH_TOKEN: ${{ secrets.GH_TOKEN }}
