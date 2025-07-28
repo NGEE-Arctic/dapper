@@ -50,11 +50,19 @@ You will not need to run `ee.Authenticate()` again as it stores your credentials
 ## Usage
 Check out the [jupyter notebooks](https://github.com/NGEE-Arctic/dapper/tree/main/docs/notebooks) for ways to use the tools in this package.
 
-## Contributing
-Feel free to fork the repo and make improvements. Open a pull request and we'll check it out.
+## Contributing & Contact
+Feel free to fork the repo and make improvements. Open a pull request and we'll check it out. For suggestions and other general queations regarding `dapper`, email **dapper@lanl.gov**.
 
-## Credits
-Repo initialized by Jon Schwenk; maintained by Jon Schwenk and Jemma Stachelek. Some `dapper` functionality was ported from work by Ryan Crumley and Cade Trotter at Los Alamos National Laboratory. Rich Fiorella contributed OLMT-related content and assists with package maintenance. Others have contributed via the Issue Tracker and valuable feedback/testing.
 
-## Copyright/License
+### Contributors
+
+- [Jon Schwenk](https://github.com/jonschwenk)
+- [Ryan Crumley](https://github.com/ryanlcrumley)
+- [Rich Fiorella](https://github.com/rfiorella)
+- [Cade Trotter](https://github.com/ctrotterlanl)
+- [Jemma Stachelek](https://github.com/jsta)
+- [Ross Spicer](https://github.com/rwspicer)
+- [Maggie Farley](https://github.com/maggiefarley)
+
+### Copyright/License
 O4898 (for copyright verification); see the [License](https://github.com/NGEE-Arctic/dapper/tree/main/license.md) file.
