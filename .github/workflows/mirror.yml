@@ -14,11 +14,13 @@ jobs:
           chmod 600 ngee_private2.key
           key_location=$(pwd)/ngee_private.key
           key_location2=$(pwd)/ngee_private2.key
+          #
           git clone --mirror git@github.com:NGEE-Arctic/dapper.git --config core.sshCommand="ssh -i $key_location"
           cd dapper.git
           git remote set-url --push origin git@github.com:lanl/dapper.git
           git fetch -p origin
-          git push --mirror --config core.sshCommand="ssh -i $key_location2.key"
+          git config --global core.sshCommand "ssh -i $key_location2"
+          git push --mirror
         env:
             NGEE_PRIVATE: ${{ secrets.NGEE_PRIVATE }}
             NGEE_PRIVATE2: ${{ secrets.NGEE_PRIVATE2 }}
