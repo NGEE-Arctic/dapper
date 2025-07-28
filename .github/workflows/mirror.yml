@@ -20,7 +20,7 @@ jobs:
           git remote set-url --push origin git@github.com:lanl/dapper.git
           git fetch -p origin
           git config --global core.sshCommand "ssh -i $key_location2"
-          git push --mirror
+          git push --mirror || true
         env:
             NGEE_PRIVATE: ${{ secrets.NGEE_PRIVATE }}
             NGEE_PRIVATE2: ${{ secrets.NGEE_PRIVATE2 }}
