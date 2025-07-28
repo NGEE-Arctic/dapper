@@ -1,0 +1,15 @@
+name: Mirror
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          git clone --mirror git@github.com:NGEE-Arctic/dapper.git
+          cd dapper
+          git remote set-url --push origin git@github.com:lanl/dapper.git
+          git fetch -p origin
+          git push --mirror
