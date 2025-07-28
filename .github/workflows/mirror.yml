@@ -8,10 +8,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: |
-          git clone --mirror git@github.com:NGEE-Arctic/dapper.git
+          echo ${{ NGEE_PRIVATE }} > ngee_private.key
+          echo ${{ NGEE_PRIVATE2 }} > ngee_private2.key
+          git clone --mirror git@github.com:NGEE-Arctic/dapper.git --config core.sshCommand="ssh -i ngee_private.key"
           cd dapper
           git remote set-url --push origin git@github.com:lanl/dapper.git
-          git fetch -p origin
-          git push --mirror
+          git fetch -p origin --config core.sshCommand="ssh -i ngee_private.key"
+          git push --mirror --config core.sshCommand="ssh -i ngee_private2.key"
         env:
-            GH_TOKEN: ${{ secrets.GH_TOKEN }}
+            NGEE_PRIVATE: ${{ secrets.NGEE_PRIVATE }}
+            NGEE_PRIVATE2: ${{ secrets.NGEE_PRIVATE2 }}
