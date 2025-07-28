@@ -64,5 +64,5 @@ Feel free to fork the repo and make improvements. Open a pull request and we'll 
 - [Ross Spicer](https://github.com/rwspicer)
 - [Maggie Farley](https://github.com/maggiefarley)
 
-### Copyright/License
+## Copyright/License
 O4898 (for copyright verification); see the [License](https://github.com/NGEE-Arctic/dapper/tree/main/license.md) file.
