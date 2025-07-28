@@ -15,7 +15,7 @@ jobs:
           git clone --mirror git@github.com:NGEE-Arctic/dapper.git --config core.sshCommand="ssh -i ngee_private.key"
           cd dapper.git
           git remote set-url --push origin git@github.com:lanl/dapper.git
-          git fetch -p origin --config core.sshCommand="ssh -i ngee_private.key"
+          git fetch -p origin
           git push --mirror --config core.sshCommand="ssh -i ngee_private2.key"
         env:
             NGEE_PRIVATE: ${{ secrets.NGEE_PRIVATE }}
