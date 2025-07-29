@@ -23,6 +23,9 @@ def initialize_met_netcdf(df_loc, elm_var, dtime_vals, dtime_units, write_path,
         if add_offset is None or scale_factor is None:
             add_offset, scale_factor = eu.elm_var_packing_params(elm_var)
 
+        if scale_factor > 0: # testing if scale factor makes a difference. The reference "good" files had negative scale factors...
+            scale_factor *= -1
+
         df_loc = df_loc.sort_values(['lat', 'lon']).reset_index(drop=True)
 
         try:
@@ -49,13 +52,14 @@ def initialize_met_netcdf(df_loc, elm_var, dtime_vals, dtime_units, write_path,
                 dtime.calendar = calendar
                 dtime.long_name = 'observation_time'
 
-                var = ds.createVariable(elm_var, 'i2', ('DTIME', 'n'), zlib=compress, complevel=compress_level, fill_value=fillvalue)
+                var = ds.createVariable(elm_var, 'i2', ('n', 'DTIME'), zlib=compress, complevel=compress_level, fill_value=fillvalue) # testing dimensionality
+                # var = ds.createVariable(elm_var, 'i2', ('DTIME', 'n'), zlib=compress, complevel=compress_level, fill_value=fillvalue)
                 var.add_offset = add_offset
                 var.scale_factor = scale_factor
                 var.units = mdd['units'][elm_var]
                 var.description = mdd['descriptions'][elm_var]
                 var.long_name = next((k for k, v in mdd['e5namemap'].items() if v == elm_var), None)
-                var.mode = 'time-dependent'
+                # var.mode = 'time-dependent'
 
                 ds.history = "Created using netCDF4 with dapper"
                 ds.calendar = calendar
@@ -101,8 +105,11 @@ def append_met_netcdf(this_df, elm_var, write_path, dtime_vals, start_idx, dform
                 raise ValueError("DTIME mismatch between expected and existing NetCDF values.")
 
             # Write physical floats — netCDF4 handles packing.
-            reshaped = this_df[elm_var].values.reshape(num_times, num_sites)
-            var[start_idx:end_idx, :] = reshaped
+            # reshaped = this_df[elm_var].values.reshape(num_times, num_sites)
+            # var[start_idx:end_idx, :] = reshaped
+
+            reshaped = this_df[elm_var].values.reshape(num_times, num_sites).T # testing reshaping
+            var[:, start_idx:end_idx] = reshaped
 
             ds.sync()
 
