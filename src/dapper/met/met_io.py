@@ -114,47 +114,128 @@ def append_met_netcdf(this_df, elm_var, write_path, dtime_vals, start_idx, dform
             ds.sync()
 
 
-def create_dtime(df, calendar='standard', dtime_units='days', dtime_resolution_hrs=1):
+def create_dtime(
+    df,
+    calendar='standard',
+    dtime_units='days',
+    dtime_resolution_hrs=1,
+    force_half_hour_for_hourly=True
+):
     """
     Computes DTIME values and the corresponding DTIME attribute string from a dataframe.
+    Optionally upsamples from hourly to 30-minute data to avoid the ELM hourly-index bug.
+
+    Guarantees:
+        - df_out['time'] is sorted ascending, no duplicates
+        - dtime_vals aligns exactly with df_out['time']
+        - Missing values for both state and rate variables are filled in both directions
 
     Parameters:
         df (pd.DataFrame): DataFrame with a 'time' column (datetime64)
         calendar (str): Calendar type ('standard' or 'noleap')
         dtime_units (str): 'days' or 'hours'
         dtime_resolution_hrs (int): Desired time resolution in hours
+        force_half_hour_for_hourly (bool): If True and dtime_resolution_hrs==1, 
+                                           switch to a 30-min grid and upsample.
 
     Returns:
-        dtime_vals (np.ndarray): Array of DTIME values (float)
-        dtime_attr (str): DTIME attribute string (e.g., "days since 2001-01-01 00:00:00")
-        unique_times (np.ndarray): Array of unique datetime64 timestamps
+        dtime_vals (np.ndarray)
+        dtime_attr (str)
+        df_out (pd.DataFrame)
     """
     if "time" not in df.columns:
         raise ValueError("DataFrame must contain a 'time' column.")
 
+    df = df.copy()
     df["time"] = pd.to_datetime(df["time"])
     df = df.sort_values("time")
 
     if calendar.lower() == "noleap":
         df = df[~((df["time"].dt.month == 2) & (df["time"].dt.day == 29))]
 
-    # Round time to match resolution, if needed
-    if dtime_resolution_hrs > 1:
+    # Variable categorization
+    linear_vars = ['TBOT', 'DTBOT', 'RH', 'QBOT', 'PSRF', 'ZBOT',
+                   'UWIND', 'VWIND', 'WIND']
+    ffill_vars = ['FSDS', 'FLDS', 'PRECTmms']
+    accum_vars = []  # per-interval totals go here if needed
+
+    # Build target time axis
+    if dtime_resolution_hrs == 1 and force_half_hour_for_hourly:
+        print("1-hr export requested, but export will be 30-minute due to E3SM bug.")
+        t0, t1 = df["time"].iloc[0], df["time"].iloc[-1]
+        target_times = pd.date_range(t0, t1, freq="30min", inclusive="both").to_numpy()
+    elif dtime_resolution_hrs > 1:
         df = df.set_index("time")
         df = df.resample(f"{dtime_resolution_hrs}h").mean(numeric_only=True).dropna().reset_index()
+        target_times = df["time"].drop_duplicates().sort_values().to_numpy()
+    else:
+        target_times = df["time"].drop_duplicates().sort_values().to_numpy()
 
-    unique_times = df["time"].drop_duplicates().sort_values().to_numpy()
-    ref_date = unique_times[0]
+    ref_date = target_times[0]
 
+    # Compute DTIME values
     if dtime_units == "days":
-        dtime_vals = (unique_times - ref_date) / np.timedelta64(1, "D")
+        dtime_vals = (target_times - ref_date) / np.timedelta64(1, "D")
     elif dtime_units == "hours":
-        dtime_vals = (unique_times - ref_date) / np.timedelta64(1, "h")
+        dtime_vals = (target_times - ref_date) / np.timedelta64(1, "h")
     else:
         raise ValueError("Unsupported dtime_units: choose 'days' or 'hours'")
 
     dtime_attr = f"{dtime_units} since {pd.Timestamp(ref_date).strftime('%Y-%m-%d %H:%M:%S')}"
-    return dtime_vals.astype("float64"), dtime_attr, unique_times
+
+    # Upsample/align data to target_times
+    df = df.set_index("time").sort_index()
+    target_index = pd.DatetimeIndex(target_times, name='time')
+    df_out = pd.DataFrame(index=target_index)
+
+    # 1) Interpolate state variables (fill both directions)
+    cols = [c for c in linear_vars if c in df.columns]
+    if cols:
+        df_out[cols] = (
+            df[cols]
+            .reindex(target_index)
+            .interpolate(method='time', limit_direction='both')
+            .ffill().bfill()
+        )
+
+    # 2) Forward-fill rates/fluxes (fill both directions)
+    cols = [c for c in ffill_vars if c in df.columns]
+    if cols:
+        df_out[cols] = (
+            df[cols]
+            .reindex(target_index)
+            .ffill().bfill()
+        )
+
+    # 3) Split hourly accumulations
+    for v in accum_vars:
+        if v in df.columns:
+            s = df[v]
+            half = s / 2.0
+            half_early = half.copy()
+            half_early.index = half_early.index - pd.Timedelta(minutes=30)
+            split_series = (
+                half_early.reindex(target_index, fill_value=0.0) +
+                half.reindex(target_index, fill_value=0.0)
+            )
+            df_out[v] = split_series
+
+    # 4) Carry along any other columns (metadata, coords) — fill both directions
+    other_cols = [c for c in df.columns if c not in (linear_vars + ffill_vars + accum_vars)]
+    if other_cols:
+        df_out[other_cols] = (
+            df[other_cols]
+            .reindex(target_index)
+            .ffill().bfill()
+        )
+
+    # Final guarantee: time column exactly matches target_times
+    df_out.index.name = 'time'
+    df_out = df_out.reset_index().sort_values('time').drop_duplicates(subset='time', keep='first')
+    assert np.array_equal(df_out['time'].to_numpy(), target_times), \
+        "df_out['time'] does not match generated target_times"
+
+    return dtime_vals.astype("float64"), dtime_attr, df_out
 
 
 def get_start_end_years(csv_filepaths, calendar='standard'):

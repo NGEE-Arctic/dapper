@@ -105,7 +105,7 @@ def sample_e5lh(params, skip_tasks=False):
     geometries_fc = gu.ensure_pixel_centers_within_geometries(
         geometries_fc, sample_img, scale
     )
-
+    
     # Function to extract spatially averaged values over each feature (polygon or point)
     def image_to_features(image):
         date = ee.Date(image.get("system:time_start")).format("YYYY-MM-dd HH:mm")
@@ -205,139 +205,204 @@ def e5lh_to_elm(
     id_col=None,
     gridded=False,
     calendar='noleap',
-    dtime_units='days',
     dtime_resolution_hrs=1,
+    dtime_units='days',
     nzones=1,
     dformat="BYPASS",
+    force_half_hour_for_hourly=True
 ):
     """
-    Under construction:
-        - needs to check for longitudinal range when exporting (0-360)
-        - needs to be exapanded and re-tested for gridded exports
-
-    Batched version for grids.
-
-    compress_level - higher will compress more but take longer to write
-
+    Site (point) pipeline:
+      1) Read GEE CSV shards, preprocess to ELM format
+      2) Write per-site parquet (skip sites with no finite data)
+      3) Read each per-site parquet; if ANY variable has <=5% finite data, skip the whole site
+      4) Otherwise create DTIME and write NetCDFs (variables still checked for sanity)
+    Notes:
+      - ELM/E3SM use 0–360 longitudes.
+      - Does NOT preserve 'gid' in NetCDF; export directory names are 'gid', however.
     """
-    compress_level = 0 # hardcoding no compression because there are issues when both packing and using compression (outputs are all fillvalue) that I couldn't solve
+    # ---- basic checks ----
     if dformat not in ["DATM_MODE", "BYPASS"]:
-        raise KeyError("You provided an unsupported dformat value. Currently only DATM_MODE and BYPASS are available.")
-    elif dformat == "DATM_MODE":
+        raise KeyError("Unsupported dformat. Only DATM_MODE and BYPASS are available.")
+    if dformat == "DATM_MODE":
         print("DATM_MODE is not yet available. Exiting.")
         return
 
-    if type(csv_directory) is str:
+    # ---- normalize paths ----
+    if isinstance(csv_directory, str):
         csv_directory = Path(csv_directory)
-    if type(write_directory) is str:
+    if isinstance(write_directory, str):
         write_directory = Path(write_directory)
 
-    # ELM/E3SM operate on a longitudinal range of 0-360, so convert from -180 to 180 if necessary
+    # ---- prep df_loc, ids, zones, longitudes ----
+    df_loc = df_loc.copy()
     df_loc['lon_0-360'] = np.mod(df_loc['lon'], 360)
 
-    # Determine our date range to make sure we provide only complete years of data
-    csv_files = [os.path.join(csv_directory, f) for f in os.listdir(csv_directory) if os.path.splitext(f)[1] == ".csv"]
-    start_year, end_year = io.get_start_end_years(csv_files, calendar=calendar)
-
-    # Rename id field for consistency to 'gid'
     if id_col is None:
         id_col = gu.infer_id_field(df_loc)
-    df_loc.rename(columns={id_col: "gid"}, inplace=True)
 
-    # Prepare the netCDF grid
+    df_loc = df_loc.rename(columns={id_col: "gid"})
     df_loc = df_loc.sort_values(by=["lat", "lon"]).reset_index(drop=True)
     df_loc["gid"] = df_loc["gid"].astype(str)
 
-    # Account for zones if not already provided in df_loc
     if "zone" not in df_loc.columns:
         df_loc["zone"] = np.tile(np.arange(1, nzones + 1), (len(df_loc) // nzones) + 1)[: len(df_loc)]
-    unique_zones = list(set(df_loc["zone"]))
 
-    # Create directory for storing results
+    # ---- discover CSVs and overall year range ----
+    csv_files = [os.path.join(csv_directory, f) for f in os.listdir(csv_directory) if os.path.splitext(f)[1] == ".csv"]
+    start_year, end_year = io.get_start_end_years(csv_files, calendar=calendar)
+
+    # ---- output root ----
     utils.make_directory(write_directory, delete_all_contents=True)
 
-    # If exporting sites individually, for speed of processing and writing we use an intermediate
-    # parquet file. This reduces runtime by orders of magnitude (as opposed to writing each variable, 
-    # each time chunk one-at-a-time)
-    if gridded is False: # site-specific exports
-
-        # Create temporary parquet file storage directory
+    if not gridded:
+        # ========= PASS 1: write per-site parquet =========
         path_temp_parquet = write_directory / 'temp_parquet'
         utils.make_directory(path_temp_parquet, delete_all_contents=True)
 
-        # Read each file, format it, and compile into one parquet dataframe per site
         for i, f in enumerate(csv_files):
             print(f"Processing file {i+1} of {len(csv_files)}: {f}")
             this_df = pd.read_csv(f)
 
-            # Ensure id_col is set properly
-            this_df.rename(columns={id_col: "gid"}, inplace=True)
+            # ensure gid present & stringy to match df_loc
+            this_df = this_df.rename(columns={id_col: "gid"})
+            this_df["gid"] = this_df["gid"].astype(str)
 
-            # Transform data to ELM-ready
+            # join site meta
             this_df = this_df.merge(df_loc[["gid", "lat", "lon", "zone"]], on="gid", how="inner")
-            remove_leap = False
-            if calendar == 'noleap':
-                remove_leap = True
+
+            remove_leap = (calendar == 'noleap')
             ppdf = _preprocess_e5lh_to_elm_file_grid(this_df, start_year, end_year, remove_leap, dformat)
             ppdf = ppdf.sort_values(["time", "LATIXY", "LONGXY"]).reset_index(drop=True)
 
-            # Split by location and save to parquet
+            # site split
             ppdfg = ppdf.groupby(by="gid")
-            for gid, this_df in ppdfg:
+            data_cols_ppdf = [c for c in ppdf.columns if c not in ("gid", "time", "LONGXY", "LATIXY", "zone")]
+
+            for gid, gdf in ppdfg:
+                # early site-level finite check
+                if len(data_cols_ppdf) == 0 or not np.isfinite(gdf[data_cols_ppdf].to_numpy()).any():
+                    print(f"Skipping {gid}: no finite data in any variable (pre-parquet).")
+                    continue
+
                 parquet_path = path_temp_parquet / f"{gid}.parquet"
                 if os.path.isfile(parquet_path):
-                    write(parquet_path, this_df, append=True)
+                    write(parquet_path, gdf, append=True)
                 else:
-                    write(parquet_path, this_df)
+                    write(parquet_path, gdf)
 
+        # zone mappings (per site)
         zms = eu.gen_zone_mappings(df_loc, site=True)
 
-        # Read merged parquet files and store as netCDFs
-        parquet_files = path_temp_parquet.glob("*.parquet")
+        # ========= PASS 2: parquet → NetCDFs =========
+        print(path_temp_parquet)
+        parquet_files = list(path_temp_parquet.glob("*.parquet"))
         for pf in parquet_files:
-            site = pf.stem
+            site = pf.stem  # filename is the site id (gid)
             print(f"Exporting {site}...")
-            site_allvar_df = pd.read_parquet(pf)
-            
-            # Handle time resampling 
-            dtime_vals, these_dtime_units, unique_times = io.create_dtime(site_allvar_df, calendar=calendar, dtime_units=dtime_units, dtime_resolution_hrs=dtime_resolution_hrs)
+            site_allvar_df0 = pd.read_parquet(pf)
 
-            # Ensure that re-loaded data matches DTIME ordering computed earlier. DTIME (unique_times) is ordered already, so this also ensures date sorting.
-            site_allvar_df = site_allvar_df.set_index('time')
-            site_allvar_df = site_allvar_df.reindex(unique_times)
-            site_allvar_df.index.name = 'time'
-            site_allvar_df.reset_index(inplace=True)  # Restores 'time' as column
+            if site_allvar_df0.empty:
+                print(f"Skipping {site}: parquet is empty.")
+                continue
 
-            # Make storage directory
+            # Required meta before DTIME
+            required_before = {"time", "LONGXY", "LATIXY", "zone"}
+            missing_before = sorted(required_before - set(site_allvar_df0.columns))
+            if missing_before:
+                raise KeyError(f"{site}: missing required columns in parquet before DTIME: {missing_before}")
+
+            # Site-level 10% rule (skip site if ANY variable ≤10% valid)
+            exclude = {"gid", "time", "LONGXY", "LATIXY", "zone"}
+            data_cols0 = [c for c in site_allvar_df0.columns if c not in exclude]
+            if len(data_cols0) == 0:
+                print(f"Skipping {site}: no data variables found.")
+                continue
+
+            finite_ratios = {c: float(np.isfinite(site_allvar_df0[c].to_numpy()).mean()) for c in data_cols0}
+            offenders = {c: r for c, r in finite_ratios.items() if r <= 0.10}
+            if offenders:
+                msg = ", ".join(f"{k}={v:.1%}" for k, v in sorted(offenders.items()))
+                print(f"Skipping {site}: some variables have ≤5% finite data → {msg}")
+                # optionally remove any partial outputs for this site
+                utils.remove_directory_contents(write_directory / site, remove_directory=True)
+                continue
+
+            # Keep a one-row meta snapshot in case create_dtime drops meta cols
+            meta_row = site_allvar_df0[["LONGXY", "LATIXY", "zone"]].iloc[0]
+
+            # Create/resample DTIME
+            dtime_vals, these_dtime_units, site_allvar_df = io.create_dtime(
+                site_allvar_df0,
+                calendar=calendar,
+                dtime_units=dtime_units,
+                dtime_resolution_hrs=dtime_resolution_hrs,
+                force_half_hour_for_hourly=force_half_hour_for_hourly
+            )
+
+            # Restore meta if create_dtime dropped them
+            for col in ["LONGXY", "LATIXY", "zone"]:
+                if col not in site_allvar_df.columns:
+                    site_allvar_df[col] = meta_row[col]
+
+            # Final meta presence check
+            required_meta = {"time", "LONGXY", "LATIXY", "zone"}
+            missing_meta = sorted(required_meta - set(site_allvar_df.columns))
+            if missing_meta:
+                raise KeyError(f"{site}: missing required columns after create_dtime: {missing_meta}")
+
+            # Make site output dir
             utils.make_directory(write_directory / site, delete_all_contents=True)
 
+            # Pull location info for this site (for zone in filename)
+            this_df_loc = df_loc[df_loc['gid'] == site]
+            if this_df_loc.empty:
+                print(f"Skipping {site}: not found in df_loc.")
+                utils.remove_directory_contents(write_directory / site, remove_directory=True)
+                continue
+            site_zone_str = str(this_df_loc['zone'].iloc[0]).zfill(2)
 
-            # Pull out the location information and sampling metadata for this site            
-            this_df_loc = df_loc[df_loc['gid']==site]
-
-            # Store each variable in the file
+            # Iterate variables (exclude meta)
             for elm_var in site_allvar_df.columns:
-                if elm_var in ["gid", "time", "LONGXY", "LATIXY", "zone"]:
+                if elm_var in ("gid", "time", "LONGXY", "LATIXY", "zone"):
                     continue
-                filename = 'ERA5_' + elm_var + '_' + str(start_year) + '-' + str(end_year) + '_z' + str(df_loc['zone'].values[df_loc['gid']==site][0]).zfill(2) + '.nc'
-                path_site_var = write_directory / site / filename
-                site_var_df = site_allvar_df[site_allvar_df['gid']==site]
-                site_var_df = site_var_df[[elm_var, 'time', 'gid', 'LONGXY', 'LATIXY', 'zone']]
-                site_var_df = site_var_df.sort_values(by='time')
-                
-                # Compute packing parameters using the data range, not preset range
-                add_offset, scale_factor = eu.elm_var_packing_params(elm_var, data=site_var_df[elm_var].values)
 
-                # Initialize and write netcdf for each variable
-                io.initialize_met_netcdf(this_df_loc, elm_var, dtime_vals, these_dtime_units, path_site_var, add_offset=add_offset, scale_factor=scale_factor, calendar=calendar)
+                cols_needed = ['time', 'LONGXY', 'LATIXY', 'zone', elm_var]
+                missing = [c for c in cols_needed if c not in site_allvar_df.columns]
+                if missing:
+                    raise KeyError(f"{site}/{elm_var}: missing columns {missing}")
+
+                site_var_df = site_allvar_df[cols_needed].sort_values('time')
+
+                # Per-variable sanity (should pass the site-level rule already)
+                vals = site_var_df[elm_var].to_numpy()
+                if not np.isfinite(vals).any():
+                    # defensive: should not happen given site-level rule
+                    print(f"Skipping {site} / {elm_var}: all values non-finite.")
+                    continue
+
+                # Packing params from actual data
+                add_offset, scale_factor = eu.elm_var_packing_params(elm_var, data=vals)
+
+                # Initialize + write
+                filename = f"ERA5_{elm_var}_{start_year}-{end_year}_z{site_zone_str}.nc"
+                path_site_var = write_directory / site / filename
+
+                io.initialize_met_netcdf(
+                    this_df_loc, elm_var, dtime_vals, these_dtime_units, path_site_var,
+                    add_offset=add_offset, scale_factor=scale_factor, calendar=calendar
+                )
                 io.append_met_netcdf(site_var_df, elm_var, path_site_var, dtime_vals, 0, dformat='BYPASS')
 
             # Zone mappings export
             zm_write_path = write_directory / site / "zone_mappings.txt"
             zms[site].to_csv(zm_write_path, index=False, header=False, sep="\t")
 
-    # Remove temporary files
-    utils.remove_directory_contents(path_temp_parquet, remove_directory=True)
+        # Cleanup temp parquet
+        utils.remove_directory_contents(path_temp_parquet, remove_directory=True)
+
+    else:
+        print("Gridded exports not implemented in this branch yet.")
 
     return
 

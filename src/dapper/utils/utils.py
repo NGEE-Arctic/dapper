@@ -21,13 +21,20 @@ def make_directory(path, delete_all_contents=False):
 
 
 def remove_directory_contents(path, remove_directory=False):
-    if any(path.glob("*")):  # Check if directory contains any files
-        for item in path.glob("*"):
-            if item.is_file():
-                item.unlink()  # Delete file
-            elif item.is_dir():
-                shutil.rmtree(item)  # Delete folder and its contents
+    path = Path(path)
 
+    # Bail out if the directory doesn't exist
+    if not path.exists():
+        return
+
+    # Remove children
+    for item in path.glob("*"):
+        if item.is_file():
+            item.unlink()
+        elif item.is_dir():
+            shutil.rmtree(item)
+
+    # Remove the directory itself if requested
     if remove_directory:
         path.rmdir()
 
