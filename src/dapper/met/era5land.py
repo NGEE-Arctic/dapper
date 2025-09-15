@@ -1,58 +1,159 @@
 # Functions specific to ERA5-Land Hourly GEE ImageCollection
 import os
+import ee
+import json
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 from pathlib import Path
 from fastparquet import write
+from datetime import datetime
 
 from dapper.utils import utils
 from dapper.utils import gee_utils as gu
 from dapper.utils import elm_utils as eu
 from dapper.met import met_io as io
 
-def e5lh_to_elm_unit_conversions(df):
-    """
-    Converts ERA5-Land hourly bands to units expected by ELM.
+def e5lh_bands():
+    return pd.read_csv(utils._DATA_DIR / "e5lh_band_metadata.csv")
 
-    This is not a comprehensive function for all E5LH variables;
-    only ELM variables are handled here.
+def sample_e5lh(params, skip_tasks=False):
     """
-    # Compute wind magnitude (speed) and direction
-    if (
-        "u_component_of_wind_10m" in df.columns
-        and "v_component_of_wind_10m" in df.columns
-    ):
-        df["wind_speed"] = np.sqrt(
-            df["u_component_of_wind_10m"].values ** 2
-            + df["v_component_of_wind_10m"].values ** 2
+    Exports ERA5-Land hourly time-series data for multiple geometries (polygons or points) to Google Drive in N-year chunks.
+
+    Input is params, a dictionary with the following keys:
+        start_date (str) : YYYY-MM-DD format
+        end_date (str) : YYYY-MM-DD format
+        geometries (list of dict OR ee.FeatureCollection) : geopandas.GeoDataFrame with 'geometry' and 'pid' columns,
+                                                            OR a pre-loaded GEE FeatureCollection.
+        geometry_id_field (str) : the ID field associated with the geometries; is 'gid' by default
+        gee_bands (str OR list of str) : 'all' for all bands, 'elm' for ELM-required bands, or a list of specific bands.
+        gdrive_folder (str) : Google Drive folder name for export.
+        file_name (str) : Base name of the exported CSV file (without extension).
+
+        If skip_tasks is True, the tasks will not be sent to GEE. 
+    """
+
+    # Populate and validate requested bands
+    if params["gee_bands"] == "all":
+        params["gee_bands"] = e5lh_bands()["band_name"].tolist()
+    elif params["gee_bands"] == "elm":
+        params["gee_bands"] = eu.elm_data_dicts()["elm_required_bands"]
+    else:
+        gu.validate_bands(params["gee_bands"])
+
+    # Handle scale
+    if params["gee_scale"] == "native":
+        scale = 11132  # Native ERA5-Land hourly scale in meters
+    elif params["gee_scale"] < 11132:
+        scale = 11132
+    else:
+        scale = params["gee_scale"]
+
+    # Prepare for batching
+    if "gee_years_per_task" not in params:
+        params["gee_years_per_task"] = 5
+
+    # Set the imageCollection
+    params["gee_ic"] = "ECMWF/ERA5_LAND/HOURLY"
+    ic = ee.ImageCollection(params["gee_ic"])
+
+    # Convert start and end dates
+    start_date = datetime.strptime(params["start_date"], "%Y-%m-%d")
+    end_date = datetime.strptime(params["end_date"], "%Y-%m-%d")
+
+    # Find latest available date in the image collection
+    max_timestamp = ic.aggregate_max("system:time_start").getInfo()
+    max_date = datetime.fromtimestamp(max_timestamp / 1000)
+
+    # Determine number of batches
+    batches = gu.determine_gee_batches(start_date, end_date, max_date, years_per_task=params["gee_years_per_task"], verbose=not skip_tasks)
+
+    # Default to 'gid' if no field provided
+    if "geometry_id_field" not in params:
+        params["geometry_id_field"] = "gid"
+
+    # Convert geometries to GEE FeatureCollection (supports dict input OR pre-loaded FeatureCollection)
+    if isinstance(params["geometries"], str):
+        geometries_fc = ee.FeatureCollection(
+            params["geometries"]
+        )  # Directly use pre-loaded GEE asset
+    elif isinstance(params["geometries"], ee.FeatureCollection):
+        geometries_fc = ee.FeatureCollection(
+            params["geometries"]
+        )  # re-casting; should already be correct type but this fixes weird errors
+    elif isinstance(params["geometries"], gpd.GeoDataFrame):
+        gdf_reduced = params["geometries"].copy()
+        gdf_reduced = gdf_reduced[[params["geometry_id_field"], "geometry"]]
+        gdf_reduced = gdf_reduced.rename(columns={params["geometry_id_field"]: "gid"})
+        geojson_str = gdf_reduced.to_json()
+        geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
+
+    # If the provided polygons do not overlap a pixel center of the native image (ERA5L) resolution,
+    # no data will be sampled. Here, we ensure that at least one pixel center is included.
+    # If not, we convert the polygon to a point, as points do return data even if they're not
+    # perfectly aligned with pixel centers.
+    # Use a single ERA5 image
+    sample_img = (
+        ic.filterDate("2020-01-01T00:00", "2020-01-01T01:00")
+        .first()
+        .select("temperature_2m")
+    )
+    
+    # make sure every feature has 'gid' set from the chosen id_field
+    id_field = params.get("geometry_id_field", "gid")
+    def _ensure_gid(f):
+        return ee.Feature(f).set("gid", f.get(id_field))
+    
+    geometries_fc = gu.ensure_pixel_centers_within_geometries(geometries_fc, sample_img, scale)
+    geometries_fc = geometries_fc.map(_ensure_gid)
+
+    # Function to extract spatially averaged values over each feature (polygon or point)
+    def image_to_features(image):
+        date = ee.Date(image.get("system:time_start")).format("YYYY-MM-dd HH:mm")
+
+        # Reduce regions (spatial average for each feature)
+        values = image.reduceRegions(
+            collection=geometries_fc,
+            reducer=ee.Reducer.mean(),  # Compute spatial mean over feature
+            scale=scale,
         )
-        wind_dir = np.degrees(
-            np.arctan2(
-                df["u_component_of_wind_10m"].values,
-                df["v_component_of_wind_10m"].values,
+
+        return values.map(lambda f: f.set("date", date))  # Attach date to results
+
+    df_loc = gu.featurecollection_to_df_loc(geometries_fc)
+
+    # Fire off the Tasks
+    if skip_tasks is False:
+        for batch_id, bdf in batches.iterrows():
+
+            # Filter this Task by date range
+            ic_filtered = ic.filterDate(
+                bdf["task_start"].strftime("%Y-%m-%d"), bdf["task_end"].strftime("%Y-%m-%d")
             )
-        )
-        wind_dir[np.where(wind_dir >= 180)] = wind_dir[np.where(wind_dir >= 180)] - 180
-        wind_dir[np.where(wind_dir < 180)] = wind_dir[np.where(wind_dir < 180)] + 180
-        df["wind_direction"] = wind_dir
 
-    # Precipitation - convert from meters/hour to mm/second
-    if "total_precipitation_hourly" in df.columns:
-        df["total_precipitation_hourly"] = df["total_precipitation_hourly"].values / 3.6
+            # Compute averages for each feature
+            feature_collection = ic_filtered.map(image_to_features).flatten()
 
-    # Solar rad downwards - convert from J/hr/m2 to W/m2
-    if "surface_solar_radiation_downwards_hourly" in df.columns:
-        df["surface_solar_radiation_downwards_hourly"] = (
-            df["surface_solar_radiation_downwards_hourly"].values / 3600
-        )
+            # Create a unique filename for each chunk
+            file_suffix = f"{bdf['task_start'].strftime('%Y-%m-%d')}_{bdf['task_end'].strftime('%Y-%m-%d')}"
+            export_filename = f"{params['job_name']}_{file_suffix}"
 
-    # Thermal rad downwards - convert from J/hr/m2 to W/m2
-    if "surface_thermal_radiation_downwards_hourly" in df.columns:
-        df["surface_thermal_radiation_downwards_hourly"] = (
-            df["surface_thermal_radiation_downwards_hourly"].values / 3600
-        )
+            # Export to Google Drive as CSV
+            selectors = ["gid", "date"] + params["gee_bands"]
+            task = ee.batch.Export.table.toDrive(
+                collection=feature_collection,
+                description=export_filename,
+                folder=params["gdrive_folder"],
+                fileFormat="CSV",
+                selectors=selectors,
+            )
+            task.start()
 
-    return df
+            print(f"GEE Export task submitted: {export_filename}")
+        print("All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion.")
+
+    return df_loc
 
 
 def _discover_csvs_and_years(csv_directory, calendar="noleap"):

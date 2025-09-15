@@ -1,31 +1,83 @@
-class BaseAdapter:
+# dapper/met/adapters/base.py
+from __future__ import annotations
+from abc import ABC, abstractmethod
+import numpy as np
+import pandas as pd
+
+class BaseAdapter(ABC):
     """
-    Minimal interface the exporter expects.
+    Adapter contract for met sources. The Exporter depends only on this interface.
+    Implementations may override defaults as needed.
     """
 
-    # --- discovery & locations ---
-    def discover_files(self, csv_directory, calendar):
-        # return (csv_files, start_year, end_year)
-        raise NotImplementedError
+    # ---------- discovery ----------
+    @abstractmethod
+    def discover_files(self, csv_directory, calendar: str):
+        """Return (csv_files, start_year, end_year)."""
 
-    def normalize_locations(self, df_loc, id_col, nzones):
-        # return df_loc_norm with ['gid','lat','lon','lon_0-360','zone', ...]
-        raise NotImplementedError
+    # ---------- locations (default provided) ----------
+    def normalize_locations(self, df_loc: pd.DataFrame, id_col=None, nzones: int = 1) -> pd.DataFrame:
+        """
+        Standardize df_loc to include ['gid','lat','lon','lon_0-360','zone'], sorted by (lat, lon).
+        Assumes 'gid' is present (your project-wide convention).
+        """
+        required = {"gid", "lat", "lon"}
+        if not required.issubset(df_loc.columns):
+            missing = required - set(df_loc.columns)
+            raise KeyError(f"df_loc missing required columns: {sorted(missing)}")
 
-    def id_column_for_csv(self, df_csv, id_col):
-        # return the id col name present in df_csv (e.g., 'gid', 'pids', etc.)
-        raise NotImplementedError
+        out = df_loc.copy()
+        if out["gid"].isna().any():
+            raise ValueError("df_loc contains null gid values.")
 
-    # --- preprocessing & requirements ---
-    def preprocess_shard(self, df_merged, start_year, end_year, calendar, dformat):
-        # return preprocessed df with at least ['gid','time','LATIXY','LONGXY','zone', <ELM vars>]
-        raise NotImplementedError
+        out["gid"] = out["gid"].astype(str).str.strip()
+        out["lon_0-360"] = np.mod(out["lon"].to_numpy(), 360.0)
 
-    def required_vars(self, dformat):
-        # list of ELM var short names to output for this dformat
-        raise NotImplementedError
+        if "zone" not in out.columns:
+            if nzones < 1:
+                raise ValueError("nzones must be >= 1")
+            out["zone"] = np.tile(
+                np.arange(1, nzones + 1, dtype=int),
+                (len(out) // nzones) + 1
+            )[: len(out)]
 
-    # --- packing ---
-    def pack_params(self, elm_var, data=None):
-        # return (add_offset, scale_factor)
-        raise NotImplementedError
+        return out.sort_values(["lat", "lon"]).reset_index(drop=True)
+
+    # ---------- preprocessing (must be implemented) ----------
+    @abstractmethod
+    def preprocess_shard(
+        self,
+        df_merged: pd.DataFrame,
+        start_year: int,
+        end_year: int,
+        calendar: str,
+        dformat: str
+    ) -> pd.DataFrame:
+        """
+        Return a DataFrame with at least:
+        ['gid','time','LATIXY','LONGXY','zone', <ELM vars>]
+        """
+
+    # ---------- optional hint ----------
+    def required_vars(self, dformat: str):
+        """
+        Optional: return a list of ELM var short names that this adapter will produce
+        for the given dformat ('BYPASS' or 'DATM_MODE'). Exporter doesn’t require it.
+        """
+        return None
+
+    # ---------- packing (default provided) ----------
+    def pack_params(self, elm_var: str, data=None):
+        """
+        Default: use elm_utils.elm_var_packing_params if available; otherwise a safe fallback.
+        Adapters can override for source-specific packing strategies.
+        """
+        try:
+            from dapper.utils import elm_utils as eu
+            ao, sf = eu.elm_var_packing_params(elm_var, data=data if data is not None else [])
+            return float(ao), float(sf)
+        except Exception:
+            # Very safe fallback: map around min(data) (or 0) with unit scale.
+            arr = np.asarray(data) if data is not None else np.array([0.0])
+            m = float(np.nanmin(arr)) if np.isfinite(arr).any() else 0.0
+            return m, 1.0
