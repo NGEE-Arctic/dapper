@@ -16,9 +16,7 @@ from dapper.met import met_io as io
 
 
 def e5lh_bands():
-    from dapper.utils import _DATA_DIR
-
-    return pd.read_csv(_DATA_DIR / "e5lh_band_metadata.csv")
+    return pd.read_csv(utils._DATA_DIR / "e5lh_band_metadata.csv")
 
 
 def sample_e5lh(params, skip_tasks=False):
@@ -89,6 +87,7 @@ def sample_e5lh(params, skip_tasks=False):
     elif isinstance(params["geometries"], gpd.GeoDataFrame):
         gdf_reduced = params["geometries"].copy()
         gdf_reduced = gdf_reduced[[params["geometry_id_field"], "geometry"]]
+        gdf_reduced = gdf_reduced.rename(columns={params["geometry_id_field"]: "gid"})
         geojson_str = gdf_reduced.to_json()
         geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
 
@@ -102,10 +101,15 @@ def sample_e5lh(params, skip_tasks=False):
         .first()
         .select("temperature_2m")
     )
-    geometries_fc = gu.ensure_pixel_centers_within_geometries(
-        geometries_fc, sample_img, scale
-    )
     
+    # make sure every feature has 'gid' set from the chosen id_field
+    id_field = params.get("geometry_id_field", "gid")
+    def _ensure_gid(f):
+        return ee.Feature(f).set("gid", f.get(id_field))
+    
+    geometries_fc = gu.ensure_pixel_centers_within_geometries(geometries_fc, sample_img, scale)
+    geometries_fc = geometries_fc.map(_ensure_gid)
+
     # Function to extract spatially averaged values over each feature (polygon or point)
     def image_to_features(image):
         date = ee.Date(image.get("system:time_start")).format("YYYY-MM-dd HH:mm")
@@ -138,12 +142,13 @@ def sample_e5lh(params, skip_tasks=False):
             export_filename = f"{params['job_name']}_{file_suffix}"
 
             # Export to Google Drive as CSV
+            selectors = ["gid", "date"] + params["gee_bands"]
             task = ee.batch.Export.table.toDrive(
                 collection=feature_collection,
                 description=export_filename,
                 folder=params["gdrive_folder"],
                 fileFormat="CSV",
-                selectors=[params["geometry_id_field"], "date"] + params["gee_bands"],
+                selectors=selectors,
             )
             task.start()
 

@@ -122,7 +122,7 @@ def split_into_dfs(path_csv):
     return {k: group for k, group in df.groupby("pid")}
 
 
-def infer_id_field(columns):
+def infer_id_field(columns, verbose=False):
     """
     Tries to discern the id field from a list of columns.
     Used when id_col is not specified.
@@ -135,9 +135,10 @@ def infer_id_field(columns):
     else:
         poss_id_lens = [len(pi) for pi in poss_id]
         id_col = poss_id[poss_id_lens.index(min(poss_id_lens))]
-        print(
-            f"Inferred '{id_col}' as id column. If this is not correct, re-run this function and specify 'id_col' kwarg."
-        )
+        if verbose:
+            print(
+                f"Inferred '{id_col}' as id column. If this is not correct, re-run this function and specify 'id_col' kwarg."
+            )
 
     return id_col
 
@@ -155,45 +156,36 @@ def kill_all_tasks(verbose=True):
 
 def ensure_pixel_centers_within_geometries(fc, sample_img, scale):
     """
-    This function takes a featureCollection and ensures that each feature in the collection
-    samples valid data for an underlying image (that ideally should be representative of
-    an imageCollection). Point geometries are guaranteed to sample from any image regardless
-    of resolution, so if a polygon or multipolygon in the featureCollection doesn't contain
-    any pixel centers, it is replaced by its centroid as a Point geometry.
+    Ensures each feature in `fc` will sample valid data from `sample_img` at the given `scale`.
+    For polygons/multipolygons with zero pixel centers inside, replaces geometry with its centroid.
+    Properties are preserved.
     """
+    band = sample_img.bandNames().get(0)
 
-    # Function to process each feature
     def check_pixels_and_maybe_centroid(feature):
         geom = feature.geometry()
         geom_type = geom.type()
-
-        # Only act on polygons or multipolygons
-        is_poly = ee.Algorithms.If(
-            ee.List(["Polygon", "MultiPolygon"]).contains(geom_type), True, False
-        )
+        is_poly = ee.List(["Polygon", "MultiPolygon"]).contains(geom_type)
 
         def process_polygon():
-            # Reduce region to count valid pixels inside the geometry
-            count = (
-                sample_img.reduceRegion(
-                    reducer=ee.Reducer.count(),
-                    geometry=geom,
-                    scale=scale,
-                    maxPixels=1e9,
-                )
-                .values()
-                .get(0)
+            d = sample_img.reduceRegion(
+                reducer=ee.Reducer.count(),
+                geometry=geom,
+                scale=scale,
+                maxPixels=1e9,
+                tileScale=2,  # helps with large/complex polygons
             )
-
-            # If no pixels (count == 0), replace geometry with centroid
+            count = ee.Number(ee.Dictionary(d).get(band, 0))
             return ee.Algorithms.If(
-                ee.Number(count).gt(0), feature, feature.setGeometry(geom.centroid())
+                count.gt(0),
+                feature,
+                feature.setGeometry(geom.centroid(1, sample_img.projection()))
             )
 
-        return ee.Feature(ee.Algorithms.If(is_poly, process_polygon(), feature))
+        # Return feature unchanged if not polygon/multipolygon
+        return ee.Algorithms.If(is_poly, process_polygon(), feature)
 
-    fc_ensured = fc.map(check_pixels_and_maybe_centroid)
-    return fc_ensured
+    return fc.map(check_pixels_and_maybe_centroid)
 
 
 def export_fc(

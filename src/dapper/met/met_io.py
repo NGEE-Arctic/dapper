@@ -1,117 +1,120 @@
 import os
+import warnings
 import numpy as np
 import pandas as pd
-import netCDF4 as nc
-from datetime import datetime
+# import netCDF4 as nc
+from pathlib import Path
+from netCDF4 import Dataset
+# from datetime import datetime
 
-from dapper.utils import utils
-from dapper.utils import elm_utils as eu
+# from dapper.utils import utils
+# from dapper.utils import elm_utils as eu
 
-def initialize_met_netcdf(df_loc, elm_var, dtime_vals, dtime_units, write_path, 
-                          add_offset=None, scale_factor=None, calendar='noleap', compress_level=0, dformat='BYPASS'):
-    """
-    Creates a preallocated NetCDF file using netCDF4 with provided DTIME values and units.
-    """
-    fillvalue = -32767
+# def initialize_met_netcdf(df_loc, elm_var, dtime_vals, dtime_units, write_path, 
+#                           add_offset=None, scale_factor=None, calendar='noleap', compress_level=0, dformat='BYPASS'):
+#     """
+#     Creates a preallocated NetCDF file using netCDF4 with provided DTIME values and units.
+#     """
+#     fillvalue = -32767
 
-    if os.path.exists(write_path):
-        print(f"NetCDF file '{write_path}' already exists.")
-        return
+#     if os.path.exists(write_path):
+#         print(f"NetCDF file '{write_path}' already exists.")
+#         return
 
-    if dformat == 'BYPASS':
-        mdd = eu.elm_data_dicts()
-        if add_offset is None or scale_factor is None:
-            add_offset, scale_factor = eu.elm_var_packing_params(elm_var)
+#     if dformat == 'BYPASS':
+#         mdd = eu.elm_data_dicts()
+#         if add_offset is None or scale_factor is None:
+#             add_offset, scale_factor = eu.elm_var_packing_params(elm_var)
 
-        if scale_factor > 0: # testing if scale factor makes a difference. The reference "good" files had negative scale factors...
-            scale_factor *= -1
+#         if scale_factor > 0: # testing if scale factor makes a difference. The reference "good" files had negative scale factors...
+#             scale_factor *= -1
 
-        df_loc = df_loc.sort_values(['lat', 'lon']).reset_index(drop=True)
+#         df_loc = df_loc.sort_values(['lat', 'lon']).reset_index(drop=True)
 
-        try:
-            with nc.Dataset(write_path, mode='w', format='NETCDF4') as ds:
-                compress = compress_level > 0
+#         try:
+#             with nc.Dataset(write_path, mode='w', format='NETCDF4') as ds:
+#                 compress = compress_level > 0
 
-                ds.createDimension('n', len(df_loc))
-                ds.createDimension('DTIME', len(dtime_vals))
+#                 ds.createDimension('n', len(df_loc))
+#                 ds.createDimension('DTIME', len(dtime_vals))
 
-                lat = ds.createVariable('LATIXY', 'f4', ('n',))
-                lon = ds.createVariable('LONGXY', 'f4', ('n',))
-                lat[:] = df_loc['lat'].values
-                lon[:] = df_loc['lon_0-360'].values
-                lat.units = 'degrees_north'
-                lon.units = 'degrees_east'
+#                 lat = ds.createVariable('LATIXY', 'f4', ('n',))
+#                 lon = ds.createVariable('LONGXY', 'f4', ('n',))
+#                 lat[:] = df_loc['lat'].values
+#                 lon[:] = df_loc['lon_0-360'].values
+#                 lat.units = 'degrees_north'
+#                 lon.units = 'degrees_east'
 
-                if len(df_loc) > 1:
-                    gid = ds.createVariable('gid', str, ('n',))
-                    gid[:] = df_loc['gid'].values
+#                 if len(df_loc) > 1:
+#                     gid = ds.createVariable('gid', str, ('n',))
+#                     gid[:] = df_loc['gid'].values
 
-                dtime = ds.createVariable('DTIME', 'f8', ('DTIME',), zlib=compress, complevel=compress_level, fill_value=fillvalue)
-                dtime[:] = dtime_vals
-                dtime.units = dtime_units
-                dtime.calendar = calendar
-                dtime.long_name = 'observation_time'
+#                 dtime = ds.createVariable('DTIME', 'f8', ('DTIME',), zlib=compress, complevel=compress_level, fill_value=fillvalue)
+#                 dtime[:] = dtime_vals
+#                 dtime.units = dtime_units
+#                 dtime.calendar = calendar
+#                 dtime.long_name = 'observation_time'
 
-                var = ds.createVariable(elm_var, 'i2', ('n', 'DTIME'), zlib=compress, complevel=compress_level, fill_value=fillvalue) # testing dimensionality
-                # var = ds.createVariable(elm_var, 'i2', ('DTIME', 'n'), zlib=compress, complevel=compress_level, fill_value=fillvalue)
-                var.add_offset = add_offset
-                var.scale_factor = scale_factor
-                var.units = mdd['units'][elm_var]
-                var.description = mdd['descriptions'][elm_var]
-                var.long_name = next((k for k, v in mdd['e5namemap'].items() if v == elm_var), None)
-                # var.mode = 'time-dependent'
+#                 var = ds.createVariable(elm_var, 'i2', ('n', 'DTIME'), zlib=compress, complevel=compress_level, fill_value=fillvalue) # testing dimensionality
+#                 # var = ds.createVariable(elm_var, 'i2', ('DTIME', 'n'), zlib=compress, complevel=compress_level, fill_value=fillvalue)
+#                 var.add_offset = add_offset
+#                 var.scale_factor = scale_factor
+#                 var.units = mdd['units'][elm_var]
+#                 var.description = mdd['descriptions'][elm_var]
+#                 var.long_name = next((k for k, v in mdd['e5namemap'].items() if v == elm_var), None)
+#                 # var.mode = 'time-dependent'
 
-                ds.history = "Created using netCDF4 with dapper"
-                ds.calendar = calendar
-                ds.created_on = datetime.today().strftime('%Y-%m-%d')
-                ds.dapper_commit_hash = utils.get_git_commit_hash()
-                ds.sampled_geometry = "\n".join(df_loc['sampled_geometry'].astype(str).tolist())
-                ds.method = df_loc['method'].values[0]
+#                 ds.history = "Created using netCDF4 with dapper"
+#                 ds.calendar = calendar
+#                 ds.created_on = datetime.today().strftime('%Y-%m-%d')
+#                 ds.dapper_commit_hash = utils.get_git_commit_hash()
+#                 ds.sampled_geometry = "\n".join(df_loc['sampled_geometry'].astype(str).tolist())
+#                 ds.method = df_loc['method'].values[0]
 
-        except Exception as e:
-            print(f"Error creating NetCDF: {e}")
+#         except Exception as e:
+#             print(f"Error creating NetCDF: {e}")
 
 
-def append_met_netcdf(this_df, elm_var, write_path, dtime_vals, start_idx, dformat='BYPASS'):
-    """
-    Appends *unpacked* physical data to preallocated NetCDF at the given start index.
-    Lets netCDF4 handle packing using the variable's scale_factor and add_offset.
-    """
-    if not os.path.exists(write_path):
-        print(f"NetCDF file '{write_path}' does not exist and cannot be appended.")
-        return
+# def append_met_netcdf(this_df, elm_var, write_path, dtime_vals, start_idx, dformat='BYPASS'):
+#     """
+#     Appends *unpacked* physical data to preallocated NetCDF at the given start index.
+#     Lets netCDF4 handle packing using the variable's scale_factor and add_offset.
+#     """
+#     if not os.path.exists(write_path):
+#         print(f"NetCDF file '{write_path}' does not exist and cannot be appended.")
+#         return
 
-    if dformat == 'BYPASS':
-        with nc.Dataset(write_path, mode='a') as ds:
-            if elm_var not in ds.variables:
-                raise KeyError(f"{elm_var} is missing in {write_path}. Cannot append data.")
+#     if dformat == 'BYPASS':
+#         with nc.Dataset(write_path, mode='a') as ds:
+#             if elm_var not in ds.variables:
+#                 raise KeyError(f"{elm_var} is missing in {write_path}. Cannot append data.")
 
-            # Make sure netCDF4 auto-scaling is ON (default)
-            var = ds.variables[elm_var]
-            var.set_auto_scale(True)  # This line is defensive; it's True by default
+#             # Make sure netCDF4 auto-scaling is ON (default)
+#             var = ds.variables[elm_var]
+#             var.set_auto_scale(True)  # This line is defensive; it's True by default
 
-            # Validate DTIME match
-            this_df['time'] = pd.to_datetime(this_df['time'])
-            this_df = this_df.sort_values(['time', 'LATIXY', 'LONGXY']).reset_index(drop=True)
-            unique_times = this_df['time'].drop_duplicates().sort_values().to_numpy()
+#             # Validate DTIME match
+#             this_df['time'] = pd.to_datetime(this_df['time'])
+#             this_df = this_df.sort_values(['time', 'LATIXY', 'LONGXY']).reset_index(drop=True)
+#             unique_times = this_df['time'].drop_duplicates().sort_values().to_numpy()
 
-            num_times = len(unique_times)
-            num_sites = ds.dimensions['n'].size
-            end_idx = start_idx + num_times
+#             num_times = len(unique_times)
+#             num_sites = ds.dimensions['n'].size
+#             end_idx = start_idx + num_times
 
-            expected = dtime_vals[start_idx:end_idx]
-            actual = ds.variables['DTIME'][start_idx:end_idx]
-            if not np.allclose(expected, actual, atol=1e-6):
-                raise ValueError("DTIME mismatch between expected and existing NetCDF values.")
+#             expected = dtime_vals[start_idx:end_idx]
+#             actual = ds.variables['DTIME'][start_idx:end_idx]
+#             if not np.allclose(expected, actual, atol=1e-6):
+#                 raise ValueError("DTIME mismatch between expected and existing NetCDF values.")
 
-            # Write physical floats — netCDF4 handles packing.
-            # reshaped = this_df[elm_var].values.reshape(num_times, num_sites)
-            # var[start_idx:end_idx, :] = reshaped
+#             # Write physical floats — netCDF4 handles packing.
+#             # reshaped = this_df[elm_var].values.reshape(num_times, num_sites)
+#             # var[start_idx:end_idx, :] = reshaped
 
-            reshaped = this_df[elm_var].values.reshape(num_times, num_sites).T # testing reshaping
-            var[:, start_idx:end_idx] = reshaped
+#             reshaped = this_df[elm_var].values.reshape(num_times, num_sites).T # testing reshaping
+#             var[:, start_idx:end_idx] = reshaped
 
-            ds.sync()
+#             ds.sync()
 
 
 def create_dtime(
@@ -272,133 +275,434 @@ def get_start_end_years(csv_filepaths, calendar='standard'):
         return dates["date"].dt.year.min(), dates["date"].dt.year.max()
 
 
+def _compute_auto_chunks(dims,
+                         dim_lengths,
+                         dtype,
+                         dtime_units,
+                         dtime_vals,
+                         target_mb=1.5,
+                         days_per_chunk=28.0,
+                         write_pattern='by_site'):
+    """
+    Compute chunk sizes aligned to `dims`.
 
-# def e5lh_to_elm_gridded(
-#     csv_directory,
-#     write_directory,
-#     df_loc,
-#     remove_leap=True,
-#     id_col=None,
-#     nzones=1,
-#     dformat="BYPASS",
-#     compress=True,
-#     compress_level=4,
+    Heuristics:
+      - ('n','DTIME') with write_pattern='by_site'  -> (1, t_chunk)
+      - ('DTIME','lat','lon') with 'by_cell'       -> (t_chunk, 1, 1)
+      - Otherwise, aim for ~target_mb chunk size by shrinking t_chunk.
+
+    Parameters
+    ----------
+    dims : tuple[str,...]
+    dim_lengths : dict[str,int]
+    dtype : str or np.dtype
+    dtime_units : str ('days ...' or 'hours ...')
+    dtime_vals : array-like numeric DTIME
+    target_mb : float
+    days_per_chunk : float
+    write_pattern : 'by_site' | 'by_cell' | 'by_time'
+    """
+    # dtype size in bytes
+    if isinstance(dtype, str):
+        try:
+            dtype_size = np.dtype(dtype).itemsize
+        except TypeError:
+            # common shorthands
+            dtype_size = 2 if dtype in ("i2", "int16", "short") else 4
+    else:
+        dtype_size = np.dtype(dtype).itemsize
+
+    # infer steps per day from DTIME
+    dtime_vals = np.asarray(dtime_vals, dtype=float)
+    nt = int(len(dtime_vals))
+    if nt > 1:
+        dt_raw = float(np.median(np.diff(dtime_vals)))
+    else:
+        dt_raw = 1.0
+
+    units_lower = str(dtime_units).lower()
+    if "day" in units_lower:
+        dt_hours = dt_raw * 24.0
+    elif "hour" in units_lower:
+        dt_hours = dt_raw
+    else:
+        dt_hours = dt_raw  # assume already hours
+
+    steps_per_day = 24.0 / dt_hours if (np.isfinite(dt_hours) and dt_hours > 0) else 24.0
+    t_chunk = int(max(1, min(nt, round(days_per_chunk * steps_per_day))))
+
+    # default chunks: 1 for non-time dims if writing by that index, else full
+    chunks = []
+    target_bytes = int(target_mb * 1024 * 1024)
+
+    if dims == ('n', 'DTIME'):
+        n = int(dim_lengths['n'])
+        if write_pattern == 'by_site':
+            n_chunk = 1
+        else:
+            n_chunk = min(n, 512)
+        cur_bytes = n_chunk * t_chunk * dtype_size
+        if cur_bytes > target_bytes and t_chunk > 1:
+            shrink = int(np.ceil(cur_bytes / target_bytes))
+            t_chunk = max(1, t_chunk // max(1, shrink))
+        chunks = [int(n_chunk), int(t_chunk)]
+
+    elif dims == ('DTIME', 'lat', 'lon'):
+        # write by cell -> keep lat,lon = 1 so we don't rewrite neighboring cells' chunks
+        lat_len = int(dim_lengths['lat'])
+        lon_len = int(dim_lengths['lon'])
+        if write_pattern == 'by_cell':
+            lat_chunk = 1
+            lon_chunk = 1
+        else:
+            # fallback: small tiles
+            lat_chunk = min(lat_len, 8)
+            lon_chunk = min(lon_len, 8)
+        cur_bytes = t_chunk * lat_chunk * lon_chunk * dtype_size
+        if cur_bytes > target_bytes and t_chunk > 1:
+            shrink = int(np.ceil(cur_bytes / target_bytes))
+            t_chunk = max(1, t_chunk // max(1, shrink))
+        chunks = [int(t_chunk), int(lat_chunk), int(lon_chunk)]
+
+    else:
+        # generic: set 1 for any non-time dim if write_pattern hints so
+        for d in dims:
+            if d.upper() == 'DTIME' or d == 'time':
+                chunks.append(int(t_chunk))
+            else:
+                chunks.append(1)
+        # shrink if necessary
+        cur = int(np.prod(chunks)) * dtype_size
+        if cur > target_bytes and t_chunk > 1:
+            shrink = int(np.ceil(cur / target_bytes))
+            chunks = [c if (i != dims.index('DTIME')) else max(1, c // max(1, shrink))
+                      for i, c in enumerate(chunks)]
+
+    return tuple(int(c) for c in chunks)
+
+
+def initialize_met_netcdf(path_nc,
+                          var_name,
+                          dims,
+                          dim_lengths,
+                          dtime_name,
+                          dtime_vals,
+                          dtime_units,
+                          calendar,
+                          coord_specs,
+                          add_offset,
+                          scale_factor,
+                          dtype="i2",
+                          fill_value=32767,
+                          chunks=None,
+                          write_pattern='by_site',
+                          append_attrs=None,
+                          nc_format="NETCDF4_CLASSIC"):
+    """
+    Generic initializer for all three layouts.
+
+    Parameters
+    ----------
+    path_nc : Path-like
+    var_name : str
+    dims : tuple[str,...]               e.g., ('n','DTIME') or ('DTIME','lat','lon')
+    dim_lengths : dict[str,int]
+    dtime_name : str                    e.g., 'DTIME'
+    dtime_vals : array-like (numeric)
+    dtime_units : str                   CF units string
+    calendar : str
+    coord_specs : list of dicts         [{'name','dtype','dims','data','attrs':{...}}, ...]
+    add_offset, scale_factor : float    packing params
+    dtype : str or np.dtype             on-disk dtype (e.g., 'i2')
+    fill_value : int/float              must match dtype
+    chunks : tuple[int,...] or None     auto-chunk if None
+    write_pattern : 'by_site' | 'by_cell' | 'by_time'
+    append_attrs : dict                 extra global attributes
+    nc_format : str                     e.g., "NETCDF4_CLASSIC"
+    """
+    path_nc = Path(path_nc)
+    path_nc.parent.mkdir(parents=True, exist_ok=True)
+
+    if chunks is None:
+        chunks = _compute_auto_chunks(dims=dims,
+                                      dim_lengths=dim_lengths,
+                                      dtype=dtype,
+                                      dtime_units=dtime_units,
+                                      dtime_vals=dtime_vals,
+                                      write_pattern=write_pattern)
+
+    ds = Dataset(path_nc, "w", format=nc_format)
+
+    # Dimensions
+    for d in dims:
+        if d not in ds.dimensions:
+            ds.createDimension(d, int(dim_lengths[d]))
+
+    # Time coordinate (numeric DTIME)
+    vtime = ds.createVariable(dtime_name, "f8", (dtime_name,))
+    vtime[:] = np.asarray(dtime_vals, dtype="float64")
+    vtime.setncattr("units", str(dtime_units))
+    vtime.setncattr("calendar", str(calendar))
+    vtime.setncattr("long_name", "time")
+
+    # Coordinate variables
+    for spec in coord_specs or []:
+        v = ds.createVariable(spec["name"], spec["dtype"], spec["dims"])
+        v[:] = np.asarray(spec["data"])
+        for ak, av in (spec.get("attrs") or {}).items():
+            v.setncattr(str(ak), av)
+
+    # Data variable
+    create_kwargs = dict(zlib=True, shuffle=True, complevel=1, fill_value=fill_value, chunksizes=chunks)
+    vdata = ds.createVariable(var_name, dtype, dims, **create_kwargs)
+    vdata.setncattr("add_offset", float(add_offset))
+    vdata.setncattr("scale_factor", float(scale_factor))
+    # keep both for downstream compatibility
+    vdata.setncattr("missing_value", np.array(fill_value, dtype=np.int16 if str(dtype) in ("i2","int16","short") else type(fill_value)))
+
+    # Globals
+    ds.setncattr("Conventions", "CF-1.8")
+    ds.setncattr("calendar", str(calendar))
+    if append_attrs:
+        for k, val in append_attrs.items():
+            ds.setncattr(str(k), val)
+
+    ds.close()
+
+
+def append_met_netcdf(path_nc,
+                      var_name,
+                      data,
+                      indexers):
+    """
+    Shape-agnostic appender. Assigns `data` (float array) into the variable
+    using `indexers` dict, e.g.:
+
+      sites_file/site_dirs:  indexers = {"n": isite, "DTIME": slice(0, nt)}
+      gridded:               indexers = {"DTIME": slice(0, nt), "lat": iy, "lon": ix}
+
+    Notes:
+      - Variable must have on-disk integer dtype with 'scale_factor'/'add_offset'
+        so netCDF4 will pack floats on assignment.
+      - Any NaNs in `data` will be written as the variable's _FillValue.
+    """
+    arr = np.asarray(data, dtype="float64")
+
+    with Dataset(path_nc, "r+") as ds:
+        v = ds.variables[var_name]
+
+        # Build index tuple in variable's dim order
+        key = []
+        for d in v.dimensions:
+            if d not in indexers:
+                raise KeyError(f"append_met_netcdf: indexer for dim '{d}' not provided.")
+            k = indexers[d]
+            if isinstance(k, tuple):
+                # e.g., (start, stop) -> slice
+                key.append(slice(k[0], k[1]))
+            else:
+                key.append(k)
+        key = tuple(key)
+
+        # Optional: bounds check for time window when slice is used
+        # (netCDF4 will also raise if out of range)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            v[key] = arr
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ####################################################################
+# ####################################################################
+# ####################################################################
+# ####################################################################
+
+
+# def _compute_auto_chunks_sites(dtime_vals, dtime_units, n, dtype,
+#                                target_mb=1.5, max_n_chunk=512, days_per_chunk=28.0,
+#                                write_by_site=True):
+#     """
+#     Compute (n_chunk, t_chunk) for NetCDF chunking.
+
+#     - If write_by_site=True (your current pattern: one site/row at a time),
+#       force n_chunk=1 to avoid repeatedly rewriting the same compressed chunk.
+#     - Otherwise, n_chunk=min(n, max_n_chunk).
+#     - t_chunk ~ days_per_chunk worth of steps (derived from dtime_vals + units),
+#       then shrunk to keep chunk size near target_mb.
+#     """
+#     nt = int(len(dtime_vals))
+
+#     # infer nominal dt from DTIME values and units
+#     if nt > 1:
+#         dt_raw = float(np.median(np.diff(np.asarray(dtime_vals, dtype=float))))
+#     else:
+#         dt_raw = 1.0
+
+#     units_lower = str(dtime_units).lower()
+#     if "day" in units_lower:
+#         dt_hours = dt_raw * 24.0
+#     elif "hour" in units_lower:
+#         dt_hours = dt_raw
+#     else:
+#         # unknown units → assume already in hours
+#         dt_hours = dt_raw
+
+#     if (not np.isfinite(dt_hours)) or dt_hours <= 0:
+#         steps_per_day = 24.0
+#     else:
+#         steps_per_day = max(1.0, 24.0 / dt_hours)
+
+#     # target ~28 days per chunk along time
+#     t_chunk = int(max(1, min(nt, round(days_per_chunk * steps_per_day))))
+
+#     # site chunking pattern
+#     if write_by_site:
+#         n_chunk = 1
+#     else:
+#         n_chunk = int(max(1, min(int(n), int(max_n_chunk))))
+
+#     # dtype size (handle common strings)
+#     if isinstance(dtype, str):
+#         if dtype in ("i2", "int16", "short"):
+#             dtype_size = 2
+#         elif dtype in ("i4", "int32", "int"):
+#             dtype_size = 4
+#         elif dtype in ("f4", "float32"):
+#             dtype_size = 4
+#         elif dtype in ("f8", "float64"):
+#             dtype_size = 8
+#         else:
+#             dtype_size = np.dtype(dtype).itemsize
+#     else:
+#         dtype_size = np.dtype(dtype).itemsize
+
+#     # keep chunk size near target_mb by shrinking t_chunk if needed
+#     target_bytes = int(target_mb * 1024 * 1024)
+#     cur_bytes = n_chunk * t_chunk * dtype_size
+#     if cur_bytes > target_bytes and t_chunk > 1:
+#         shrink = int(np.ceil(cur_bytes / target_bytes))
+#         t_chunk = max(1, t_chunk // max(1, shrink))
+
+#     return (int(n_chunk), int(t_chunk))
+
+# def initialize_met_netcdf_sites(
+#     path_nc,
+#     var_name,
+#     dtime_vals,        # numeric DTIME from create_dtime(...)
+#     dtime_units,       # e.g., "days since 1950-01-01 00:00:00"
+#     lats,              # 1D (n,)
+#     lons0360,          # 1D (n,), 0–360
+#     add_offset,
+#     scale_factor,
+#     calendar="noleap",
+#     dtype="i2",        # packed int16 on disk
+#     fill_value=32767,  # int16 fill
+#     chunks=None,       # if None, auto-chunk with write_by_site=True
+#     append_attrs=None,
+#     write_by_site=True # NEW: set True when assigning row-wise (isite) writes
 # ):
 #     """
-#     Batched version for grids.
+#     Initialize a multi-site NetCDF with dims ('n','DTIME') and:
+#       - DTIME(DTIME) numeric CF time using provided units/calendar
+#       - LATIXY(n), LONGXY(n) as site coordinate variables
+#       - var_name(n,DTIME) stored as packed int16 with scale_factor/add_offset
 
-#     compress_level - higher will compress more but take longer to write
-
+#     Chunking:
+#       - If chunks is None, uses _compute_auto_chunks_sites(..., write_by_site=True)
+#         so chunks=(1, t_chunk) by default, matching row-wise write pattern.
 #     """
-#     if dformat not in ["DATM_MODE", "BYPASS"]:
-#         raise KeyError(
-#             "You provided an unsupported dformat value. Currently only DATM_MODE and BYPASS are available."
-#         )
-#     elif dformat == "DATM_MODE":
-#         print("DATM_MODE is not yet available. Exiting.")
-#         return
+#     path_nc = Path(path_nc)
+#     path_nc.parent.mkdir(parents=True, exist_ok=True)
 
-#     if type(csv_directory) is str:
-#         csv_directory = Path(csv_directory)
-#     if type(write_directory) is str:
-#         write_directory = Path(write_directory)
+#     n  = int(len(lats))
+#     nt = int(len(dtime_vals))
 
-#     mdd = eu.elm_data_dicts()
+#     # Auto-chunk if not provided
+#     if chunks is None:
+#         chunks = _compute_auto_chunks_sites(dtime_vals, dtime_units, n, dtype,
+#                                             write_by_site=write_by_site)
 
-#     # ELM/E3SM operate on a longitudinal range of 0-360
+#     ds = Dataset(path_nc, "w", format="NETCDF4_CLASSIC")
 
-#     # Determine our date range to make sure we provide only complete years of data
-#     files = [f for f in os.listdir(csv_directory) if os.path.splitext(f)[1] == ".csv"]
-#     dates = [pd.read_csv(csv_directory / file, usecols=["date"]) for file in files]
-#     dates = pd.concat(dates, ignore_index=True)
-#     dates["date"] = pd.to_datetime(dates["date"])
-#     dates.sort_values(by="date", inplace=True)
+#     # Dimensions
+#     ds.createDimension("n", n)
+#     ds.createDimension("DTIME", nt)
 
-#     # Clip to first available Jan 01 year and last available Dec. 31 year.
-#     dates["year"] = dates["date"].dt.year
-#     dates["month_day"] = dates["date"].dt.month * 100 + dates["date"].dt.day # Converts to integer format (e.g., 101 for Jan 1)
-#     # Group by year and check if both January 1 and December 31 exist
-#     valid_years = dates.groupby("year")["month_day"].agg(
-#         lambda x: {101, 1231}.issubset(set(x))
-#     )
-#     # Get the first and last valid years
-#     valid_years = valid_years[valid_years].index
-#     if not valid_years.empty:
-#         start_year, end_year = valid_years[0], valid_years[-1]
-#     else:
-#         start_year, end_year = dates["year"].values[0], dates["year"].values[0]
-#         print("There is not a full year's worth of data. Using the full dataset.")
+#     # Time coordinate
+#     vtime = ds.createVariable("DTIME", "f8", ("DTIME",))
+#     vtime[:] = np.asarray(dtime_vals, dtype="float64")
+#     vtime.setncattr("units", str(dtime_units))
+#     vtime.setncattr("calendar", str(calendar))
 
-#     # Create temporary folder for storing intermediate results
-#     utils.make_directory(write_directory, delete_all_contents=True)
+#     # Site coordinates
+#     vlat = ds.createVariable("LATIXY", "f4", ("n",))
+#     vlon = ds.createVariable("LONGXY", "f4", ("n",))
+#     vlat[:] = np.asarray(lats, dtype="float32")
+#     vlon[:] = np.asarray(lons0360, dtype="float32")
+#     vlat.setncattr("long_name", "latitude")
+#     vlat.setncattr("units", "degrees_north")
+#     vlon.setncattr("long_name", "longitude")
+#     vlon.setncattr("units", "degrees_east")
+#     vlon.setncattr("note", "0–360 convention")
 
-#     # Rename id field for consistency to 'gid'
-#     if id_col is None:
-#         id_col = utils.infer_id_field(df_loc)
-#     df_loc.rename(columns={id_col: "gid"}, inplace=True)
+#     # Data variable (packed int16; netCDF4 packs on assignment from floats)
+#     create_kwargs = dict(zlib=True, shuffle=True, complevel=1, fill_value=fill_value)
+#     if chunks is not None:
+#         create_kwargs["chunksizes"] = tuple(chunks)
 
-#     # Prepare the netCDF grid
-#     df_loc = df_loc.sort_values(by=["lat", "lon"]).reset_index(drop=True)
-#     df_loc["gid"] = df_loc["gid"].astype(str)
+#     v = ds.createVariable(var_name, dtype, ("n", "DTIME"), **create_kwargs)
+#     v.setncattr("add_offset", float(add_offset))
+#     v.setncattr("scale_factor", float(scale_factor))
+#     v.setncattr("missing_value", np.int16(fill_value) if dtype in ("i2", np.int16) else fill_value)
 
-#     # Account for zones if not already provided in df_loc
-#     if "zone" not in df_loc.columns:
-#         df_loc["zone"] = np.tile(np.arange(1, nzones + 1), (len(df_loc) // nzones) + 1)[
-#             : len(df_loc)
-#         ]
-#     unique_zones = list(set(df_loc["zone"]))
+#     # Global attributes
+#     ds.setncattr("Conventions", "CF-1.8")
+#     ds.setncattr("calendar", str(calendar))
+#     if append_attrs:
+#         for k, val in append_attrs.items():
+#             ds.setncattr(str(k), val)
 
-#     # Save each file to netCDF
-#     for i, f in enumerate(files):
-#         print(f"Processing file {i+1} of {len(files)}: {f}")
-#         file_path = csv_directory / f
-#         this_df = pd.read_csv(file_path)
+#     ds.close()
 
-#         # Rename id columns for consistency to 'gid'
-#         if i == 0:
-#             if id_col is None:
-#                 id_col = utils.infer_id_field(ppdf.columns)
-#         this_df.rename(columns={id_col: "gid"}, inplace=True)
 
-#         # Add lat/lon data to preprocessed dataframe and sort
-#         this_df = this_df.merge(df_loc[["gid", "lat", "lon", "zone"]], on="gid", how="inner")
+# def append_met_netcdf_sites(
+#     path_nc,
+#     var_name,
+#     vals_time_1d,   # float array aligned to global DTIME (physical units)
+#     isite,          # row index in 'n' dimension
+#     add_offset,     # kept for consistency; packing handled by NetCDF variable attrs
+#     scale_factor,   # kept for consistency; packing handled by NetCDF variable attrs
+#     fill_value=32767,
+#     t0=0,
+# ):
+#     """Append one site's time series (floats) to a packed int16 NetCDF var with attrs.
+#     The NetCDF variable should have dtype='i2' and attrs 'scale_factor'/'add_offset'
+#     set at creation; netCDF4 will pack on assignment.
+#     """
 
-#         ppdf = _preprocess_e5lh_to_elm_file_grid(this_df, start_year, end_year, remove_leap, dformat)
-#         ppdf = ppdf.sort_values(["time", "LATIXY", "LONGXY"]).reset_index(drop=True)
+#     arr = np.asarray(vals_time_1d, dtype="float64")
+#     n_time = arr.shape[0]
 
-#         for elm_var in ppdf.columns:
-#             if elm_var in ["gid", "time", "LONGXY", "LATIXY", "zone"]:
-#                 continue
-#             for zone in unique_zones:
+#     # basic sanity on write window
+#     with Dataset(path_nc, "r+") as ds:
+#         v = ds.variables[var_name]
+#         if v.dimensions != ("n", "DTIME"):
+#             raise ValueError(f"{var_name} has dims {v.dimensions}, expected ('n','DTIME').")
+#         nt_var = v.shape[1]
+#         if t0 < 0 or (t0 + n_time) > nt_var:
+#             raise IndexError(f"Write window [{t0}:{t0+n_time}] exceeds DTIME length {nt_var}.")
 
-#                 filename = "ERA5_" + elm_var + "_" + str(start_year) + "-" + str(end_year) + "_z" + str(zone).zfill(2) + ".nc"
-#                 write_path = write_directory / filename
-
-#                 # Initialize netCDF file - NEED TO EDIT AFTER MODIFYING CREATE FUNCTION
-#                 if i == 0:
-#                     this_df_loc = df_loc[df_loc["zone"] == zone]
-#                     eu.create_met_netcdf(
-#                         this_df_loc,
-#                         elm_var,
-#                         write_path,
-#                         dformat,
-#                         compress,
-#                         compress_level,
-#                         attrs={"sampling_method": this_df_loc["method"].values[0]},
-#                     )
-
-#                 # Select required vars and zone
-#                 save_df = ppdf[["time", "LONGXY", "LATIXY", "gid", "zone", elm_var]]
-#                 save_df = save_df[save_df["zone"] == zone]
-#                 # Write to netCDF
-#                 eu.append_met_netcdf(
-#                     save_df, elm_var, write_path, dformat, compress, compress_level
-#                 )
-
-#     # Generate zone_mappings file
-#     zms = eu.gen_zone_mappings(df_loc)
-#     zm_write_path = write_directory / "zone_mappings.txt"
-#     zms.to_csv(zm_write_path, index=False, header=False, sep="\t")
-
-#     return
-
+#         # assign floats; netCDF4 packs using the variable's attrs
+#         v[isite, t0:t0 + n_time] = arr
