@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from dapper.utils.utils import _DATA_DIR
 
-
 def validate_met_vars(df):
     """
     Uses pre-computed statistics to ensure that the unit conversions resulted in

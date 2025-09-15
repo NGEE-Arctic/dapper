@@ -6,7 +6,7 @@ import geopandas as gpd
 
 from dapper.utils import utils
 from dapper.met import era5land as e5l
-from dapper.met import era5land_griddev as gridded
+from dapper.met import era5land as gridded
 
 ee.Initialize(project='ee-jonschwenk')
 
@@ -44,7 +44,7 @@ csv_directory = r'X:\Research\NGEE Arctic\dapper\data\celltesting'
 write_directory = r'X:\Research\NGEE Arctic\dapper\data\celltesting\elm_formatted3'
 append_attrs= {'note' : 'testing for bugs'}
 exp = gridded.e5lh_to_elm_class(csv_directory, write_directory, df_loc, append_attrs=append_attrs)
-exp.run(output_mode='sites_dirs', pack_scope='global')
+exp.run(output_mode='site_dirs', pack_scope='global')
 # gridded.e5lh_to_elm_gridded(csv_directory, write_directory, df_loc, append_attrs=append_attrs)
 
 # import xarray as xr
