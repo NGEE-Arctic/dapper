@@ -1,0 +1,39 @@
+name: build
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "test"
+    paths:
+      - "src/dapper/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "environment.yml"
+      - ".github/workflows/test.yml"
+jobs:
+  build:
+    name: build (${{ matrix.os }}, Miniforge)
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      matrix:
+        os: ["ubuntu"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: environment.yml
+          miniforge-version: latest
+          activate-environment: dapper
+          channels: conda-forge
+          conda-remove-defaults: "true"
+          auto-activate-base: false
+
+      - name: install dapper
+        run: |
+          pip install pytest
+          pip install .
+
+      - name: run tests
+        run: |
+          python -m pytest
+
