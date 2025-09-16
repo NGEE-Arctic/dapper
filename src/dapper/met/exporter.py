@@ -1,12 +1,11 @@
 # dapper/met/exporter.py
-import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from fastparquet import write
 
+from dapper.met import temporal
 from dapper.met.writers import initialize_met_netcdf, append_met_netcdf
-# from dapper.met.writers import _compute_auto_chunks  # optional: not needed here
 
 
 class Exporter:
@@ -29,15 +28,15 @@ class Exporter:
         self.force_half_hour_for_hourly = force_half_hour_for_hourly
         self.append_attrs = append_attrs or {}
         self.chunks = chunks
-        self.include_vars = set(include_vars) if include_vars else None
-        self.exclude_vars = set(exclude_vars) if exclude_vars else None
+        self.include_vars = set(include_vars) if include_vars else None  # canonical ELM names
+        self.exclude_vars = set(exclude_vars) if exclude_vars else None  # canonical ELM names
 
         self.temp_dir = None
         self.csv_files = None
         self.start_year = None
         self.end_year = None
         self.var_cols = None
-        self.meta_cols = {"gid","time","LONGXY","LATIXY","zone"}
+        self.meta_cols = {"gid", "time", "LONGXY", "LATIXY", "zone"}
         self.dtime_vals = None
         self.dtime_units_out = None
         self.nt = None
@@ -51,17 +50,22 @@ class Exporter:
     def run(self, output_mode, pack_scope=None):
         """
         output_mode : 'sites_file' | 'site_dirs' | 'gridded'
-        pack_scope  : optional. If None, we infer it:
-                      - 'sites_file'  -> 'global'
-                      - 'gridded'     -> 'global'
-                      - 'site_dirs'   -> 'per-site'
+        pack_scope  : optional. If None, inferred:
+                      - 'sites_file' / 'gridded' -> 'global'
+                      - 'site_dirs'              -> 'per-site'
                       If user supplies a conflicting value, we raise.
         """
         effective_pack = self._resolve_pack_scope(output_mode, pack_scope)
 
-        # 0) prep
-        self.df_loc_norm = self.adapter.normalize_locations(self.df_loc, self.nzones)
-        self.csv_files, self.start_year, self.end_year = self.adapter.discover_files(self.csv_directory, self.calendar)
+        # 0) prep (support both adapter normalize signatures)
+        try:
+            self.df_loc_norm = self.adapter.normalize_locations(self.df_loc, self.nzones)
+        except TypeError:
+            self.df_loc_norm = self.adapter.normalize_locations(self.df_loc, self.id_col, self.nzones)
+
+        self.csv_files, self.start_year, self.end_year = self.adapter.discover_files(
+            self.csv_directory, self.calendar
+        )
         self.write_directory.mkdir(parents=True, exist_ok=True)
 
         # 1) shards → parquet
@@ -74,11 +78,20 @@ class Exporter:
             print("No site Parquets to export; exiting.")
             return
 
-        # 2) vars + global DTIME
+        # 2) discover vars (canonical) + global DTIME
+        required = set(self.adapter.required_vars(self.dformat))
         sample_df = pd.read_parquet(parquet_files[0])
-        self.var_cols = [c for c in sample_df.columns if c not in self.meta_cols]
+        # Canonical variables present in the sample (exclude meta)
+        present_required = [v for v in required if v in sample_df.columns and v not in self.meta_cols]
+        # Apply include/exclude (both use canonical names)
+        if self.include_vars is not None:
+            present_required = [v for v in present_required if v in self.include_vars]
+        if self.exclude_vars is not None:
+            present_required = [v for v in present_required if v not in self.exclude_vars]
+
+        self.var_cols = present_required
         if not self.var_cols:
-            print("No data variables found; exiting.")
+            print("No data variables selected after applying required/include/exclude; exiting.")
             _rm(self.temp_dir)
             return
 
@@ -120,7 +133,6 @@ class Exporter:
     # ---------------------- private: branches ----------------------
 
     def _write_sites_file(self, parquet_files, years_span, lats, lons0360):
-        # global packing scan
         packing = self._compute_global_packing(parquet_files)
 
         # initialize one multi-site file per var
@@ -131,17 +143,17 @@ class Exporter:
             initialize_met_netcdf(
                 path_nc=path_nc,
                 var_name=v,
-                dims=('n','DTIME'),
+                dims=('n', 'DTIME'),
                 dim_lengths={'n': len(self.gid_to_isite), 'DTIME': self.nt},
                 dtime_name='DTIME',
                 dtime_vals=self.dtime_vals,
                 dtime_units=self.dtime_units_out,
                 calendar=self.calendar,
                 coord_specs=[
-                    {"name":"LATIXY","dtype":"f4","dims":("n",),"data":lats,
-                     "attrs":{"units":"degrees_north","long_name":"latitude"}},
-                    {"name":"LONGXY","dtype":"f4","dims":("n",),"data":lons0360,
-                     "attrs":{"units":"degrees_east","long_name":"longitude","note":"0–360 convention"}},
+                    {"name": "LATIXY", "dtype": "f4", "dims": ("n",), "data": lats,
+                     "attrs": {"units": "degrees_north", "long_name": "latitude"}},
+                    {"name": "LONGXY", "dtype": "f4", "dims": ("n",), "data": lons0360,
+                     "attrs": {"units": "degrees_east", "long_name": "longitude", "note": "0–360 convention"}},
                 ],
                 add_offset=ao, scale_factor=sf,
                 dtype="i2", fill_value=32767,
@@ -182,8 +194,6 @@ class Exporter:
         print("sites_file export complete.")
 
     def _write_site_dirs(self, parquet_files, years_span):
-        # per-site packing + per-site files
-        # one directory per gid; each contains ERA5_<var>_<years>_zZZ.nc and zone_mappings.txt
         for pf in parquet_files:
             gid = pf.stem
             df0 = pd.read_parquet(pf)
@@ -211,8 +221,9 @@ class Exporter:
             site_dir.mkdir(parents=True, exist_ok=True)
             zm_path = site_dir / "zone_mappings.txt"
             if not zm_path.exists():
-                # minimal one-line mapping (gid \t zone)
-                pd.DataFrame({"gid":[gid], "zone":[zone_str]}).to_csv(zm_path, index=False, header=False, sep="\t")
+                pd.DataFrame({"gid": [gid], "zone": [zone_str]}).to_csv(
+                    zm_path, index=False, header=False, sep="\t"
+                )
 
             # each var: per-site packing + write/append
             for v in self.var_cols:
@@ -232,17 +243,19 @@ class Exporter:
                     initialize_met_netcdf(
                         path_nc=path_nc,
                         var_name=v,
-                        dims=('n','DTIME'),
+                        dims=('n', 'DTIME'),
                         dim_lengths={'n': 1, 'DTIME': self.nt},
                         dtime_name='DTIME',
                         dtime_vals=self.dtime_vals,
                         dtime_units=self.dtime_units_out,
                         calendar=self.calendar,
                         coord_specs=[
-                            {"name":"LATIXY","dtype":"f4","dims":("n",),"data":np.array([lat], dtype="float32"),
-                             "attrs":{"units":"degrees_north","long_name":"latitude"}},
-                            {"name":"LONGXY","dtype":"f4","dims":("n",),"data":np.array([lon0360], dtype="float32"),
-                             "attrs":{"units":"degrees_east","long_name":"longitude","note":"0–360 convention"}},
+                            {"name": "LATIXY", "dtype": "f4", "dims": ("n",),
+                             "data": np.array([lat], dtype="float32"),
+                             "attrs": {"units": "degrees_north", "long_name": "latitude"}},
+                            {"name": "LONGXY", "dtype": "f4", "dims": ("n",),
+                             "data": np.array([lon0360], dtype="float32"),
+                             "attrs": {"units": "degrees_east", "long_name": "longitude", "note": "0–360 convention"}},
                         ],
                         add_offset=float(ao), scale_factor=float(sf),
                         dtype="i2", fill_value=32767,
@@ -260,10 +273,9 @@ class Exporter:
         print("site_dirs export complete.")
 
     def _write_gridded(self, parquet_files, years_span):
-        # global packing scan
         packing = self._compute_global_packing(parquet_files)
 
-        # build grid axes (unique sorted)
+        # grid axes (unique sorted)
         lats_axis = np.unique(self.df_loc_norm["lat"].to_numpy()); lats_axis.sort()
         lons_axis = np.unique(self.df_loc_norm["lon_0-360"].to_numpy()); lons_axis.sort()
 
@@ -273,7 +285,6 @@ class Exporter:
             dups = dup_check[dup_check > 1]
             raise ValueError(f"Duplicate (lat,lon) entries in df_loc for gridded output: {dups.index.tolist()}")
 
-        # index maps (rounded for stability)
         lat_key = {round(float(v), 6): i for i, v in enumerate(lats_axis)}
         lon_key = {round(float(v), 6): j for j, v in enumerate(lons_axis)}
 
@@ -285,17 +296,17 @@ class Exporter:
             initialize_met_netcdf(
                 path_nc=path_nc,
                 var_name=v,
-                dims=('DTIME','lat','lon'),
+                dims=('DTIME', 'lat', 'lon'),
                 dim_lengths={'DTIME': self.nt, 'lat': len(lats_axis), 'lon': len(lons_axis)},
                 dtime_name='DTIME',
                 dtime_vals=self.dtime_vals,
                 dtime_units=self.dtime_units_out,
                 calendar=self.calendar,
                 coord_specs=[
-                    {"name":"lat","dtype":"f4","dims":("lat",),"data":lats_axis,
-                     "attrs":{"units":"degrees_north","long_name":"latitude"}},
-                    {"name":"lon","dtype":"f4","dims":("lon",),"data":lons_axis,
-                     "attrs":{"units":"degrees_east","long_name":"longitude","note":"0–360 convention"}},
+                    {"name": "lat", "dtype": "f4", "dims": ("lat",), "data": lats_axis,
+                     "attrs": {"units": "degrees_north", "long_name": "latitude"}},
+                    {"name": "lon", "dtype": "f4", "dims": ("lon",), "data": lons_axis,
+                     "attrs": {"units": "degrees_east", "long_name": "longitude", "note": "0–360 convention"}},
                 ],
                 add_offset=ao, scale_factor=sf,
                 dtype="i2", fill_value=32767,
@@ -304,11 +315,11 @@ class Exporter:
             )
             self._grid_paths[v] = path_nc
 
-        # write zone mappings (root, gid \t zone)
+        # root zone mappings
         zm_path = self.write_directory / "zone_mappings.txt"
         self.df_loc_norm[["gid", "zone"]].to_csv(zm_path, index=False, header=False, sep="\t")
 
-        # scatter each site into the grid
+        # scatter sites
         for pf in parquet_files:
             gid = pf.stem
             df0 = pd.read_parquet(pf)
@@ -324,7 +335,6 @@ class Exporter:
             iy = lat_key.get(plat, None)
             ix = lon_key.get(plon, None)
             if iy is None or ix is None:
-                # coord not found (shouldn't happen since axes built from df_loc_norm)
                 continue
 
             dvals_site, _, site_df = _create_dtime(
@@ -359,21 +369,23 @@ class Exporter:
         if output_mode in ("sites_file", "gridded") and pack_scope != "global":
             raise ValueError(f"{output_mode} requires pack_scope='global'.")
         if output_mode == "site_dirs" and pack_scope not in ("per-site", "per_site", "site", "local"):
-            # we tolerate synonyms but force to canonical
             return "per-site"
         return pack_scope
 
     def _pass1_to_parquet(self):
+        required = set(self.adapter.required_vars(self.dformat))
+        keep_meta = {"gid", "time", "LONGXY", "LATIXY", "zone"}
+
         for i, f in enumerate(self.csv_files):
             print(f"Processing file {i+1} of {len(self.csv_files)}: {f}")
             df = pd.read_csv(f)
 
-            # Assume CSVs already use 'gid'
+            # CSVs use 'gid'
             if "gid" not in df.columns:
                 raise KeyError("Expected a 'gid' column in CSV input.")
             df["gid"] = df["gid"].astype(str).str.strip()
 
-            merged = df.merge(self.df_loc_norm[["gid","lat","lon","zone"]], on="gid", how="inner")
+            merged = df.merge(self.df_loc_norm[["gid", "lat", "lon", "zone"]], on="gid", how="inner")
             if merged.empty:
                 print("SKIP FILE: merge produced 0 rows.")
                 continue
@@ -382,15 +394,14 @@ class Exporter:
                 merged, self.start_year, self.end_year, self.calendar, self.dformat
             )
 
-            # optional var filtering
-            if self.include_vars is not None or self.exclude_vars is not None:
-                keep_meta = {"gid","time","LONGXY","LATIXY","zone"}
-                cols = set(ppdf.columns)
-                if self.include_vars is not None:
-                    cols = (cols & self.include_vars) | keep_meta
-                if self.exclude_vars is not None:
-                    cols = (cols - self.exclude_vars) | keep_meta
-                ppdf = ppdf[[c for c in ppdf.columns if c in cols]]
+            # Filter to (required ∪ meta), then apply include/exclude, keeping meta
+            cols = set(ppdf.columns)
+            target = (cols & required) | keep_meta
+            if self.include_vars is not None:
+                target = (target & self.include_vars) | keep_meta
+            if self.exclude_vars is not None:
+                target = (target - self.exclude_vars) | keep_meta
+            ppdf = ppdf[[c for c in ppdf.columns if c in target]]
 
             data_cols = [c for c in ppdf.columns if c not in self.meta_cols]
             if not data_cols:
@@ -433,8 +444,7 @@ class Exporter:
 # -------- small local helpers until you wire in your existing ones --------
 
 def _create_dtime(df, calendar, dtime_units, dtime_resolution_hrs, force_half_hour_for_hourly):
-    from dapper.met import met_io as io
-    return io.create_dtime(df, calendar, dtime_units, dtime_resolution_hrs, force_half_hour_for_hourly)
+    return temporal.create_dtime(df, calendar, dtime_units, dtime_resolution_hrs, force_half_hour_for_hourly)
 
 def _rm_and_mkdir(p: Path):
     if p.exists():

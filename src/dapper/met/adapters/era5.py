@@ -1,47 +1,48 @@
 # dapper/met/adapters/era5.py
-import os
-from pathlib import Path
+from __future__ import annotations
 import numpy as np
 import pandas as pd
+from pathlib import Path
 
-from .base import BaseAdapter                      # << avoid circulars
+from dapper.met.adapters.base import BaseAdapter
+from dapper.schemas.elm import elm_required_vars, is_nonnegative
+from dapper.config.metsources.era5 import RAW_TO_ELM
 from dapper.met import met_io as io
-from dapper.utils import elm_utils as eu
+from dapper.utils import elm_utils as eu  # for compute_humidities, packing defaults
 
 
 class ERA5Adapter(BaseAdapter):
     """
-    Adapter for ERA5-Land hourly shards exported from GEE.
-    Assumes CSVs and df_loc both contain a 'gid' column.
+    ERA5-Land adapter that satisfies the BaseAdapter interface.
+    Source-specific logic (unit conversions, renaming) is here.
+    Canonical ELM requirements (vars/units/ranges) live in dapper.schemas.elm.
     """
 
-    # ---------- discovery & locations ----------
+    # ---------------- discovery & locations ----------------
 
     def discover_files(self, csv_directory, calendar):
         csv_directory = Path(csv_directory)
         csv_files = [
             str(csv_directory / f)
-            for f in os.listdir(csv_directory)
-            if os.path.splitext(f)[1].lower() == ".csv"
+            for f in csv_directory.iterdir()
+            if f.suffix.lower() == ".csv"
         ]
         if not csv_files:
             raise FileNotFoundError(f"No .csv files found in {csv_directory}")
         start_year, end_year = io.get_start_end_years(csv_files, calendar=calendar)
         return csv_files, start_year, end_year
 
-    def normalize_locations(self, df_loc, nzones):
-        # We assume 'gid' is present; validate and normalize.
-        if "gid" not in df_loc.columns:
-            raise KeyError("df_loc must contain 'gid'.")
-
-        if not {"lat", "lon"}.issubset(df_loc.columns):
-            missing = {"lat", "lon"} - set(df_loc.columns)
+    def normalize_locations(self, df_loc, id_col, nzones):
+        # Expect 'gid','lat','lon' already present per your latest assumption.
+        required = {"gid", "lat", "lon"}
+        missing = required - set(df_loc.columns)
+        if missing:
             raise KeyError(f"df_loc missing required columns: {sorted(missing)}")
 
         out = df_loc.copy()
         if out["gid"].isna().any():
             bad = int(out["gid"].isna().sum())
-            raise ValueError(f"df_loc has {bad} null gid values.")
+            raise ValueError(f"df_loc has {bad} null gid values. Populate gid before calling.")
 
         out["gid"] = out["gid"].astype(str).str.strip()
         out["lon_0-360"] = np.mod(out["lon"].to_numpy(), 360.0)
@@ -57,12 +58,26 @@ class ERA5Adapter(BaseAdapter):
         out = out.sort_values(["lat", "lon"]).reset_index(drop=True)
         return out
 
-    # ---------- preprocessing & requirements ----------
+    def id_column_for_csv(self, df_csv, id_col):
+        if "gid" not in df_csv.columns:
+            raise KeyError("Expected 'gid' column in input CSV.")
+        return "gid"
+
+    # ---------------- preprocessing & requirements ----------------
 
     def preprocess_shard(self, df_merged, start_year, end_year, calendar, dformat):
+        """
+        1) Filter time & handle no-leap
+        2) Apply ERA5 → ELM unit conversions
+        3) Compute humidities (if columns available)
+        4) Rename columns to canonical ELM names using RAW_TO_ELM
+        5) Clip canonical nonnegative variables
+        6) Return only the canonical vars required by elm_required_vars(dformat),
+           plus LONGXY/LATIXY/time/gid/zone (coords/meta).
+        """
         df = df_merged.copy()
 
-        # ---- time windowing ----
+        # --- time handling ---
         if "date" not in df.columns:
             raise KeyError("Expected 'date' column in the CSV shard.")
         df["date"] = pd.to_datetime(df["date"])
@@ -71,61 +86,58 @@ class ERA5Adapter(BaseAdapter):
         if str(calendar).lower() == "noleap":
             df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
 
-        # ---- ERA5 → ELM unit conversions (your new helper) ----
+        # --- ERA5-specific unit conversions (kept local to adapter) ---
         df = self._unit_conversions(df)
 
-        # ---- derived humidities (if inputs present) ----
-        if all(c in df.columns for c in ["temperature_2m", "dewpoint_temperature_2m", "surface_pressure"]):
-            rh, q = eu.compute_humidities(
+        # --- humidities if possible ---
+        needed = {"temperature_2m", "dewpoint_temperature_2m", "surface_pressure"}
+        if needed.issubset(df.columns):
+            RH, Q = eu.compute_humidities(
                 df["temperature_2m"].values,
                 df["dewpoint_temperature_2m"].values,
                 df["surface_pressure"].values,
             )
-            df["relative_humidity"] = rh
-            df["specific_humidity"] = q
+            df["relative_humidity"] = RH
+            df["specific_humidity"] = Q
 
-        # ---- enforce non-negativity on known flux/rate vars (where present) ----
-        for col in eu.elm_data_dicts()["nonneg"]:
-            if col in df.columns:
+        # --- rename to canonical ELM names based on RAW_TO_ELM ---
+        want_canon = set(elm_required_vars(dformat))  # includes LONGXY/LATIXY/time
+        # keep only mappings that land in required canonical vars
+        rename_map = {src: canon for src, canon in RAW_TO_ELM.items() if canon in want_canon}
+        df = df.rename(columns=rename_map)
+
+        # coords/time to canonical names
+        df = df.rename(columns={"date": "time", "lon": "LONGXY", "lat": "LATIXY"})
+
+        # --- enforce nonnegativity for canonical variables (post-rename) ---
+        for col in list(df.columns):
+            if col in df.columns and is_nonnegative(col):
                 df[col] = df[col].clip(lower=0)
 
-        # ---- rename to ELM short names & select final columns ----
-        mdd = eu.elm_data_dicts()
-        if dformat == "BYPASS":
-            want = [v for v in mdd["elm_req_vars"]["cbypass"] if v not in ["LONGXY", "LATIXY", "time"]]
-        elif dformat == "DATM_MODE":
-            want = [v for v in mdd["elm_req_vars"]["datm"] if v not in ["LONGXY", "LATIXY", "time"]]
-        else:
-            raise KeyError(f"Unsupported dformat: {dformat}")
+        # --- final selection/order ---
+        # Remove coords/meta from the "required data vars" list for column ordering
+        coord_meta = {"LONGXY", "LATIXY", "time", "gid", "zone"}
+        required_data_vars = [v for v in elm_required_vars(dformat) if v not in coord_meta]
+        final_cols = required_data_vars + ["LONGXY", "LATIXY", "time", "gid", "zone"]
 
-        renamer = {src: dst for src, dst in mdd["short_names"].items() if dst in want}
-        renamer.update({"date": "time", "lon": "LONGXY", "lat": "LATIXY"})
-        df = df.rename(columns=renamer)
+        # Keep only those that exist (some formats/inputs may not provide all)
+        final_cols = [c for c in final_cols if c in df.columns]
 
-        # Optionally drop helper-only columns (e.g., 'wind_direction') if they’re not used later
-        drop_maybe = [c for c in ["wind_direction"] if c in df.columns and c not in renamer.values()]
-        if drop_maybe:
-            df = df.drop(columns=drop_maybe)
-
-        final_cols = list(want) + ["LONGXY", "LATIXY", "time", "gid", "zone"]
-        df = df[final_cols].sort_values(["time", "LATIXY", "LONGXY"]).reset_index(drop=True)
-        return df
+        df = df[final_cols]
+        return df.sort_values(["time", "LATIXY", "LONGXY"]).reset_index(drop=True)
 
     def required_vars(self, dformat):
-        mdd = eu.elm_data_dicts()
-        if dformat == "BYPASS":
-            return list(mdd["elm_req_vars"]["cbypass"])
-        elif dformat == "DATM_MODE":
-            return list(mdd["elm_req_vars"]["datm"])
-        else:
-            raise KeyError("Unsupported dformat. Only DATM_MODE and BYPASS are available.")
+        return elm_required_vars(dformat)
 
-    # ---------- packing ----------
+    # ---------------- packing ----------------
+
     def pack_params(self, elm_var, data=None):
-        return eu.elm_var_packing_params(elm_var, data=data)
+        # Delegate to your existing robust packer (range→offset/scale)
+        ao, sf = eu.elm_var_packing_params(elm_var, data=(data if data is not None else []))
+        return float(ao), float(sf)
 
-    
-    # ---------- internal helpers ----------
+    # ---------------- internal: ERA5 unit conversions ----------------
+
     def _unit_conversions(self, df):
         """
         ERA5-Land hourly → ELM unit alignment.
@@ -138,7 +150,7 @@ class ERA5Adapter(BaseAdapter):
             v = out["v_component_of_wind_10m"].values
             out["wind_speed"] = np.sqrt(u**2 + v**2)
 
-            # wind_direction kept if you use it elsewhere; ELM uses magnitude (WIND)
+            # Optional diagnostic (not used by ELM)
             wd = np.degrees(np.arctan2(u, v))
             wd[wd >= 180] -= 180
             wd[wd < 180] += 180
