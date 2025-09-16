@@ -29,6 +29,7 @@ jobs:
 
       - name: install dapper
         run: |
+          pip install pytest
           pip install .
 
       - name: run tests
