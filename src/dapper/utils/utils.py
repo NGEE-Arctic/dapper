@@ -42,7 +42,6 @@ def display_image_gh_notebook(image_file, alt="default"):
     Provide the image name as it appears in the notebooks/notebook_data/images directory.
     """
     import base64
-    from dapper.utils import _ROOT_DIR
 
     image_path = (
         _ROOT_DIR / "docs" / "notebooks" / "notebook_data" / "images" / image_file
