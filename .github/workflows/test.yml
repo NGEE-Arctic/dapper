@@ -25,6 +25,7 @@ jobs:
           miniforge-version: latest
           activate-environment: dapper
           channels: conda-forge
+          conda-remove-defaults: "true"
           auto-activate-base: false
 
       - name: install dapper
