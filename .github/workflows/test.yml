@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "test"
+      - "main"
     paths:
       - "src/dapper/**"
       - "tests/**"
