@@ -317,7 +317,7 @@ def sample_e5lh(params, skip_tasks=False):
           Which ERA5-Land bands to export. One of:
           * ``"all"`` – use all available bands (from ``era5.ALL_BANDS``).
           * ``"elm"`` – only bands required to derive ELM variables
-            (from ``era5.REQUIRED_RAW_COLUMNS``).
+            (from ``era5.REQUIRED_RAW_BANDS``).
           * list of band names – must be valid for the collection; validated via
             ``validate_bands(..., gee_ic="ECMWF/ERA5_LAND/HOURLY")``.
 
@@ -397,7 +397,7 @@ def sample_e5lh(params, skip_tasks=False):
     if params["gee_bands"] == "all":
         params["gee_bands"] = era5.ALL_BANDS
     elif params["gee_bands"] == "elm":
-        params["gee_bands"] = era5.REQUIRED_RAW_COLUMNS
+        params["gee_bands"] = era5.REQUIRED_RAW_BANDS
     else:
         validate_bands(params["gee_bands"], gee_ic="ECMWF/ERA5_LAND/HOURLY")
 

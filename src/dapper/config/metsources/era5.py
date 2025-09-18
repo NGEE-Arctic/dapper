@@ -3,7 +3,7 @@
 ERA5(-Land hourly) → ELM canonical mapping & minimal source config.
 
 Adapters may import this to:
-- Know which raw columns to expect (REQUIRED_RAW_COLUMNS)
+- Know which raw columns to expect (REQUIRED_RAW_BANDS)
 - Map raw names to canonical ELM names (RAW_TO_ELM)
 - Recognize derived columns created during unit conversions / diagnostics
 """
@@ -28,7 +28,7 @@ ALL_BANDS = [    "dewpoint_temperature_2m",    "temperature_2m",    "skin_temper
 
 # Minimal set of raw columns typically required from ERA5-Land hourly
 # to produce the full BYPASS/DATM variable suite (some are derived later).
-REQUIRED_RAW_COLUMNS = [
+REQUIRED_RAW_BANDS = [
     "temperature_2m",
     "dewpoint_temperature_2m",
     "surface_pressure",
@@ -67,7 +67,7 @@ DERIVED_FIELDS = [
 ]
 
 __all__ = [
-    "REQUIRED_RAW_COLUMNS",
+    "REQUIRED_RAW_BANDS",
     "RAW_TO_ELM",
     "DERIVED_FIELDS",
 ]
