@@ -1,4 +1,4 @@
-# Generic dapper functions JPS
+# Generic dapper functions
 import os
 import shutil
 from pathlib import Path
@@ -9,6 +9,20 @@ import dapper
 
 _ROOT_DIR = Path(next(iter(dapper.__path__))).parent.parent
 _DATA_DIR = _ROOT_DIR / "data"
+
+
+def _rm_and_mkdir(p: Path):
+    if p.exists():
+        for f in p.glob("*"):
+            f.unlink()
+    else:
+        p.mkdir(parents=True, exist_ok=True)
+
+def _rm(p: Path):
+    if p.exists():
+        for f in p.glob("*"):
+            f.unlink()
+        p.rmdir()
 
 
 def make_directory(path, delete_all_contents=False):

@@ -5,7 +5,7 @@ import geopandas as gpd
 from importlib import reload
 
 from dapper.utils import utils
-from dapper.met import era5land as e5l
+from dapper.utils import gee_utils as gu
 from dapper.met.adapters.era5 import ERA5Adapter
 from dapper.met.exporter import Exporter
 
@@ -38,9 +38,9 @@ from dapper.met.exporter import Exporter
 #     'gdrive_folder' : 'ngee_test_cells', # Which folder to store on your GDrive; will be created if not exists
 #     'job_name' : 'cell_test',
 # }
-# df_loc = e5l.sample_e5lh(params, skip_tasks=True)
-# import pickle
-# df_loc.to_pickle(r'X:\Research\NGEE Arctic\4. Using Dapper\Rerun all sites (points)\gee_csvs\temp_pickle2.pkl')
+# df_loc = gu.sample_e5lh(params, skip_tasks=True)
+import pickle
+# # df_loc.to_pickle(r'X:\Research\NGEE Arctic\4. Using Dapper\Rerun all sites (points)\gee_csvs\temp_pickle2.pkl')
 df_loc = pd.read_pickle(r'X:\Research\NGEE Arctic\4. Using Dapper\Rerun all sites (points)\gee_csvs\temp_pickle2.pkl')
 
 
