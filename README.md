@@ -2,6 +2,8 @@
   <img src="docs/images/dapper_logo_2.jpg" width="50%" alt="dapper">
 </p>
 
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://<you>.github.io/<repo>/)
+
 ## About
 The E3SM Land Model (ELM) has become useful for a wide range of investigations across a broad array of scales--from single-site to global. Each ELM run requires a hefty set of data formatted in a particular way. Two of the required "types" of data are meteorological data (time series of "met forcings") and parameter files (customizable "surface file"). As ELM capability grows, the complexity of, for example, the surface files grows to accomodate new options and parameters. Additionally, met data is usually sampled at high temporal frequency (daily/subdaily). These data requirements place a large startup burden on (particularly new) users of ELM. 
 

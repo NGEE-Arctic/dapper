@@ -1,14 +1,21 @@
-*.pyc
-
-__pycache__
-batchtesting/
-build
-celltesting/
-cmip_downloads/
 dapper.egg-info/
-dist
-e5lh_centerpoints.*
-e5lh_grid.*
-e5lh_grid_sample.*
-fengming_data/
-tl/
+*.pyc
+__pycache__/
+**/_build/
+docs/_build/
+*.ipynb_checkpoints
+
+# python packaging/build
+*.egg-info/
+build/
+dist/
+.coverage
+.pytest_cache/
+.mypy_cache/
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.venv/
+.env
