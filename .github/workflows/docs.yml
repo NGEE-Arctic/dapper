@@ -2,7 +2,7 @@ name: Build & Deploy Docs
 
 on:
   push:
-    branches: [ dev-met-refactor ]               # change/add branches if you want
+    branches: [ main ]               # change/add branches if you want
     paths:
       - 'docs/**'
       - 'src/**'
