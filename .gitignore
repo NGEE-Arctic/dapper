@@ -1,12 +1,29 @@
 dapper.egg-info/
-e5lh_grid_sample.*
-e5lh_grid.*
-e5lh_centerpoints.*
 *.pyc
-__pycache__
-tl/
-fengming_data/
-batchtesting/
-celltesting/
-cmip_downloads/
-"_build/"
+__pycache__/
+**/_build/
+docs/_build/
+*.ipynb_checkpoints
+
+# python packaging/build
+*.egg-info/
+build/
+dist/
+.coverage
+.pytest_cache/
+.mypy_cache/
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.venv/
+.env
+
+# # keep large data out
+# *.nc
+# *.grib*
+
+# jon-specific stuff
+.batchtesting/
+.celltesting/

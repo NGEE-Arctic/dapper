@@ -14,7 +14,7 @@ def create_dtime(
     dtime_units: str = "days",
     dtime_resolution_hrs: int = 1,
     force_half_hour_for_hourly: bool = True,
-):
+    ):
     """
     Construct a numeric DTIME axis (CF-style) and align/upsample the data onto it.
 
@@ -91,12 +91,12 @@ def create_dtime(
       generated target timestamps. This will raise if duplicates remain or if reindexing
       produced an unexpected index—helpful for catching data irregularities early.
 
-    Examples
-    --------
-    >>> dvals, dattr, dout = create_dtime(df, calendar="noleap",
-    ...                                   dtime_units="days",
-    ...                                   dtime_resolution_hrs=1,
-    ...                                   force_half_hour_for_hourly=True)
+    # Examples
+    # --------
+    # >>> dvals, dattr, dout = create_dtime(df, calendar="noleap",
+    # ...                                   dtime_units="days",
+    # ...                                   dtime_resolution_hrs=1,
+    # ...                                   force_half_hour_for_hourly=True)
 
     Potential Gotchas
     -----------------

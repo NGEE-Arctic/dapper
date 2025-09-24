@@ -12,8 +12,7 @@ from dapper.utils import elm_utils as eu  # for compute_humidities, packing defa
 
 
 class ERA5Adapter(BaseAdapter):
-    """
-    ERA5-Land → ELM adapter.
+    """ERA5-Land → ELM adapter.
 
     This adapter implements the `BaseAdapter` interface for ERA5-Land hourly data.
     It handles source-specific details—file discovery, unit conversions, humidity
