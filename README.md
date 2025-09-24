@@ -1,8 +1,8 @@
-[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://<you>.github.io/<repo>/)
-
 <p align="center">
   <img src="docs/_static/images/dapper_logo_2.jpg" width="50%" alt="dapper">
 </p>
+
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)]([https://<you>.github.io/<repo>/](https://ngee-arctic.github.io/dapper/))
 
 
 ## About
