@@ -1,4 +1,4 @@
-# Generic dapper functions JPS
+# Generic dapper functions
 import os
 import shutil
 from pathlib import Path
@@ -11,6 +11,20 @@ _ROOT_DIR = Path(next(iter(dapper.__path__))).parent.parent
 _DATA_DIR = _ROOT_DIR / "data"
 
 
+def _rm_and_mkdir(p: Path):
+    if p.exists():
+        for f in p.glob("*"):
+            f.unlink()
+    else:
+        p.mkdir(parents=True, exist_ok=True)
+
+def _rm(p: Path):
+    if p.exists():
+        for f in p.glob("*"):
+            f.unlink()
+        p.rmdir()
+
+
 def make_directory(path, delete_all_contents=False):
 
     if os.path.isdir(path) is False:
@@ -21,13 +35,20 @@ def make_directory(path, delete_all_contents=False):
 
 
 def remove_directory_contents(path, remove_directory=False):
-    if any(path.glob("*")):  # Check if directory contains any files
-        for item in path.glob("*"):
-            if item.is_file():
-                item.unlink()  # Delete file
-            elif item.is_dir():
-                shutil.rmtree(item)  # Delete folder and its contents
+    path = Path(path)
 
+    # Bail out if the directory doesn't exist
+    if not path.exists():
+        return
+
+    # Remove children
+    for item in path.glob("*"):
+        if item.is_file():
+            item.unlink()
+        elif item.is_dir():
+            shutil.rmtree(item)
+
+    # Remove the directory itself if requested
     if remove_directory:
         path.rmdir()
 
