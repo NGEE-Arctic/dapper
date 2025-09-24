@@ -19,11 +19,3 @@ Thumbs.db
 .vscode/
 .venv/
 .env
-
-# # keep large data out
-# *.nc
-# *.grib*
-
-# jon-specific stuff
-.batchtesting/
-.celltesting/

@@ -9,7 +9,7 @@ DaPPER provides tools to alleviate these burdens to some degree. DaPPER relies o
 
 DaPPER is under development, which means that you should consider everything *beta* and subject to change daily. We try to alleviate this instability by maintaining a `dev` branch of the repo that can be very dynamic. The `main` branch is intended to be more stable. If you're not sure, just stick to the `main` repo.
 
-DaPPER is developed by Jon Schwenk at LANL, with code contributions from Ryan Crumley (LANL), Cade Trotter (LANL), Rich Fiorella (LANL), and Fengming Yuan (ORNL).
+DaPPER is developed by Jon Schwenk at LANL, with code contributions from Ryan Crumley (LANL), Cade Trotter (LANL), Rich Fiorella (LANL), Jemma Stachelek (LANL), and Fengming Yuan (ORNL).
 
 
 ## Setup and Installation
