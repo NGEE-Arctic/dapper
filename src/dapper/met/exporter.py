@@ -220,6 +220,10 @@ class Exporter:
         """
         output_mode : 'sites_file' | 'site_dirs' | 'gridded' | 'site_parquet' | 'site_csv'
         """
+        possible_output_modes = ['sites_file', 'site_dirs', 'gridded', 'site_parquet', 'site_csv']
+        if output_mode not in possible_output_modes:
+            raise KeyError(f'Your requested output_mode is invalid. Choose from {possible_output_modes}.')
+        
         # 0) prep
         self.df_loc_norm = self.adapter.normalize_locations(self.df_loc, self.nzones)
         self.csv_files, self.start_year, self.end_year = self.adapter.discover_files(self.csv_directory, self.calendar)
