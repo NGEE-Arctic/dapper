@@ -218,13 +218,56 @@ class Exporter:
 
     def run(self, output_mode, pack_scope=None):
         """
-        output_mode : 'sites_file' | 'site_dirs' | 'gridded'
-        pack_scope  : optional. If None, we infer it:
-                      - 'sites_file'  -> 'global'
-                      - 'gridded'     -> 'global'
-                      - 'site_dirs'   -> 'per-site'
-                      If user supplies a conflicting value, we raise.
+        output_mode : 'sites_file' | 'site_dirs' | 'gridded' | 'site_parquet' | 'site_csv'
         """
+        # 0) prep
+        self.df_loc_norm = self.adapter.normalize_locations(self.df_loc, self.nzones)
+        self.csv_files, self.start_year, self.end_year = self.adapter.discover_files(self.csv_directory, self.calendar)
+        self.write_directory.mkdir(parents=True, exist_ok=True)
+
+        # 1) shards → parquet (raw or elm-prep)
+        self.temp_dir = self.write_directory / "temp_parquet"
+        utils._rm_and_mkdir(self.temp_dir)
+
+        # --- raw export if requested ---
+        if output_mode in ("site_parquet", "site_csv"):
+            self._pass1_to_parquet_raw()  # writes temp_parquet/<gid>.parquet (raw columns)
+            parquet_files = list(self.temp_dir.glob("*.parquet"))
+            if not parquet_files:
+                print("No site Parquets to export; exiting.")
+                utils._rm(self.temp_dir)
+                return
+
+            # destination folder
+            out_sub = "sites_parquet" if output_mode == "site_parquet" else "sites_csv"
+            dest_dir = self.write_directory / out_sub
+            dest_dir.mkdir(parents=True, exist_ok=True)
+
+            # zone mapping once at root of dest folder
+            zm_path = dest_dir / "zone_mappings.txt"
+            self.df_loc_norm[["gid", "zone"]].to_csv(zm_path, index=False, header=False, sep="\t")
+
+            # write one file per gid
+            for pf in parquet_files:
+                gid = pf.stem
+                if output_mode == "site_parquet":
+                    # move/rename is fast; fallback to copy if cross-device issues
+                    try:
+                        pf.rename(dest_dir / f"{gid}.parquet")
+                    except OSError:
+                        df = pd.read_parquet(pf)
+                        df.to_parquet(dest_dir / f"{gid}.parquet", index=False)
+                else:  # site_csv
+                    df = pd.read_parquet(pf)
+                    # ensure stable column order and ISO dates
+                    if "date" in df.columns:
+                        df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
+                    df.to_csv(dest_dir / f"{gid}.csv", index=False)
+
+            utils._rm(self.temp_dir)
+            print(f"{output_mode} export complete → {dest_dir}")
+            return
+        
         effective_pack = self._resolve_pack_scope(output_mode, pack_scope)
 
         # 0) prep
@@ -581,6 +624,58 @@ class Exporter:
                     write(out, gdf, append=True)
                 else:
                     write(out, gdf)
+
+    def _pass1_to_parquet_raw(self):
+        """
+        Read all source CSV shards, merge in canonical site metadata from df_loc_norm,
+        and write raw per-site Parquet files to temp_parquet/<gid>.parquet.
+        No renaming, no conversions; preserves original column names (including 'date').
+        """
+        raw_cols = None  # capture schema from first shard to keep order consistent
+
+        for i, f in enumerate(self.csv_files):
+            print(f"Processing file {i+1} of {len(self.csv_files)}: {f}")
+            df = pd.read_csv(f)
+
+            # must have 'gid' and 'date' in the source CSVs
+            if "gid" not in df.columns:
+                raise KeyError("Expected a 'gid' column in CSV input.")
+            if "date" not in df.columns:
+                raise KeyError("Expected a 'date' column in CSV input.")
+
+            df["gid"] = df["gid"].astype(str).str.strip()
+            df["date"] = pd.to_datetime(df["date"])
+
+            # Prefer canonical site metadata from df_loc_norm (avoid conflicts)
+            df = df.drop(columns=[c for c in ("lat", "lon", "zone") if c in df.columns])
+
+            merged = df.merge(
+                self.df_loc_norm[["gid", "lat", "lon", "zone"]],
+                on="gid",
+                how="inner",
+            )
+            if merged.empty:
+                print("SKIP FILE: merge produced 0 rows.")
+                continue
+
+            # enforce consistent column order across shards
+            if raw_cols is None:
+                # put id/date first, then the rest
+                front = [c for c in ["gid", "date", "lat", "lon", "zone"] if c in merged.columns]
+                rest = [c for c in merged.columns if c not in front]
+                raw_cols = front + rest
+
+            merged = merged.reindex(columns=raw_cols)
+
+            # append rows grouped by gid
+            for gid, gdf in merged.groupby("gid", sort=False):
+                gdf = gdf.sort_values("date").drop_duplicates(subset="date", keep="last")
+                out = self.temp_dir / f"{gid}.parquet"
+                if out.exists():
+                    write(out, gdf, append=True)
+                else:
+                    write(out, gdf)
+
 
     def _compute_global_packing(self, parquet_files):
         vmin = {v: np.inf for v in self.var_cols}

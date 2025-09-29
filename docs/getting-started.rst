@@ -36,6 +36,7 @@ The following commands are for a Terminal/Command (or Anaconda) Prompt.
    pip install -e .           # Live-install the repo as an importable package
 
 **Step 4**  
+
 Test that your install works. Again, in a Terminal/Command Prompt shell:
 
 .. code-block:: bash
@@ -48,7 +49,7 @@ Test that your install works. Again, in a Terminal/Command Prompt shell:
 If you can import from the ``dapper`` package without error, you're good to go (but don't skip the next step).
 
 **Step 5** 
- 
+
 If you haven't used the GEE API before, you'll need to authenticate before you can interact with GEE via Python. For more details, or if you get stuck, check out the `official guidance <https://developers.google.com/earth-engine/guides/auth>`_. However, it's likely the following code will work for you:
 
 .. code-block:: bash
