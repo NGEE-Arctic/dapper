@@ -68,7 +68,7 @@ exp = Exporter(
     exclude_vars=None
 )
 
-exp.run(output_mode='sites_file', pack_scope='global')
+exp.run(output_mode='elm-combined', pack_scope='global')
 print("Smoke test done. Check files in:", write_dir)
 
 
@@ -77,13 +77,13 @@ df_loc_small = df_loc.iloc[:3].copy()  # or pick specific gids
 exp = Exporter(
     adapter=ERA5Adapter(),
     csv_directory=r"X:\Research\NGEE Arctic\dapper\data\celltesting",
-    write_directory=r"X:\Research\NGEE Arctic\dapper\data\celltesting\out_site_dirs",
+    write_directory=r"X:\Research\NGEE Arctic\dapper\data\celltesting\out_elm-sites",
     df_loc=df_loc_small,
     calendar='noleap',
     dtime_resolution_hrs=1,
     dtime_units='days',
     dformat="BYPASS",
-    append_attrs={"note":"site_dirs smoke test"},
+    append_attrs={"note":"elm-sites smoke test"},
     include_vars={"PRECTmms"},   # a couple vars to keep it quick
 )
 

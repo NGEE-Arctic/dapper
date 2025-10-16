@@ -44,7 +44,7 @@ csv_directory = r'X:\Research\NGEE Arctic\dapper\data\celltesting'
 write_directory = r'X:\Research\NGEE Arctic\dapper\data\celltesting\elm_formatted3'
 append_attrs= {'note' : 'testing for bugs'}
 exp = gridded.e5lh_to_elm_class(csv_directory, write_directory, df_loc, append_attrs=append_attrs)
-exp.run(output_mode='site_dirs', pack_scope='global')
+exp.run(output_mode='elm-sites', pack_scope='global')
 # gridded.e5lh_to_elm_gridded(csv_directory, write_directory, df_loc, append_attrs=append_attrs)
 
 # import xarray as xr

@@ -105,13 +105,17 @@ class ERA5Adapter(BaseAdapter):
 
     def discover_files(self, csv_directory, calendar):
         csv_directory = Path(csv_directory)
+
+        # ignore directories; only pick real files that end with .csv (case-insensitive)
         csv_files = [
-            str(csv_directory / f)
-            for f in csv_directory.iterdir()
-            if f.suffix.lower() == ".csv"
+            str(p)
+            for p in csv_directory.iterdir()
+            if p.is_file() and p.suffix.lower() == ".csv"
         ]
+
         if not csv_files:
             raise FileNotFoundError(f"No .csv files found in {csv_directory}")
+
         start_year, end_year = dt.get_start_end_years(csv_files, calendar=calendar)
         return csv_files, start_year, end_year
 

@@ -56,6 +56,9 @@ def parse_geometry_objects(geom, geometry_id_field=None):
             )
         geom_field = gdf_reduced.geometry.name
         gdf_reduced = gdf_reduced[[geometry_id_field, geom_field]]
+        # force string IDs (preserve leading zeros)
+        gdf_reduced[geometry_id_field] = gdf_reduced[geometry_id_field].astype(str).str.strip()
+        gdf_reduced = gdf_reduced.rename(columns={geometry_id_field: "gid"})
         geojson_str = gdf_reduced.to_json()
         geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
 
@@ -273,7 +276,8 @@ def featurecollection_to_df_loc(fc):
         geometry=gpd.points_from_xy(df_loc.lon, df_loc.lat),
         crs="EPSG:4326"
     )
-
+    gdf_loc["gid"] = gdf_loc["gid"].astype(str).str.strip()
+    
     return gdf_loc
 
 
@@ -444,10 +448,13 @@ def sample_e5lh(params, skip_tasks=False):
     elif isinstance(params["geometries"], gpd.GeoDataFrame):
         gdf_reduced = params["geometries"].copy()
         gdf_reduced = gdf_reduced[[params["geometry_id_field"], "geometry"]]
+        # force string IDs
+        gdf_reduced[params["geometry_id_field"]] = (
+            gdf_reduced[params["geometry_id_field"]].astype(str).str.strip()
+        )
         gdf_reduced = gdf_reduced.rename(columns={params["geometry_id_field"]: "gid"})
         geojson_str = gdf_reduced.to_json()
         geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
-
     # If the provided polygons do not overlap a pixel center of the native image (ERA5L) resolution,
     # no data will be sampled. Here, we ensure that at least one pixel center is included.
     # If not, we convert the polygon to a point, as points do return data even if they're not
@@ -462,7 +469,7 @@ def sample_e5lh(params, skip_tasks=False):
     # make sure every feature has 'gid' set from the chosen id_field
     id_field = params.get("geometry_id_field", "gid")
     def _ensure_gid(f):
-        return ee.Feature(f).set("gid", f.get(id_field))
+        return ee.Feature(f).set("gid", ee.String(f.get(id_field)))    
     
     geometries_fc = ensure_pixel_centers_within_geometries(geometries_fc, sample_img, scale)
     geometries_fc = geometries_fc.map(_ensure_gid)

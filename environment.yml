@@ -15,4 +15,7 @@ dependencies:
   - netcdf4
   - intake-esm # for Pangeo CMIP access
   - gcsfs # for Pangeo CMIP downloading
+  - folium # interactive mapping
+  - contextily # static mapping
+  - xyzservices # basemaps
 
