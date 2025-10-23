@@ -520,3 +520,62 @@ def sample_e5lh(params, skip_tasks=False):
         print("All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion.")
 
     return df_loc
+
+
+def masks_to_featurecollection(mask_entries, region, export_scale, extra_image_props=None):
+    """
+    mask_entries: list of {'band_name','mask','meta'}
+    Returns ee.FeatureCollection with metadata as properties.
+    One feature per band (union of all polygons for that band).
+    """
+    features = []
+    for entry in mask_entries:
+        vectors = entry['mask'].reduceToVectors(
+            geometry=region,
+            scale=export_scale,
+            geometryType='polygon',
+            eightConnected=False,
+            bestEffort=True,
+            maxPixels=1e13
+        )
+        geom = vectors.geometry()  # union geometry of all parts; may be empty
+        # Skip empty geometries (optional)
+        feature = ee.Feature(geom, {
+            'band_name': entry['band_name'],
+            'schema': entry['meta'].get('topounit_schema'),
+            'source_ids': entry['meta'].get('source_ids'),
+            'labels': entry['meta'].get('labels'),
+            'bin_bounds': entry['meta'].get('bin_bounds'),
+            'bin_method': entry['meta'].get('bin_method'),
+        })
+        if extra_image_props:
+            feature = feature.setMulti(extra_image_props)
+        features.append(feature)
+    return ee.FeatureCollection(features)
+
+
+def try_to_download_featurecollection(fc, verbose=True):
+    """Attempt to load FeatureCollection as a GeoDataFrame; else return None."""
+    try:
+        fc_geojson = fc.getInfo()  # May raise EEException on large/complex geoms
+        gdf = gpd.GeoDataFrame.from_features(fc_geojson['features'])
+        gdf.set_crs(epsg=4326, inplace=True)
+        if verbose:
+            print("Success! FeatureCollection loaded as GeoDataFrame.")
+        return gdf
+    except Exception as e:
+        if verbose:
+            print("Direct download failed. Reason:", e)
+        return None
+
+def _geom_from_any(x):
+    """Return ee.Geometry from ee.Feature, ee.FeatureCollection, or ee.Geometry."""
+    if isinstance(x, ee.Feature):
+        return x.geometry()
+    if isinstance(x, ee.FeatureCollection):
+        return x.geometry()
+    return x  # assume ee.Geometry
+
+def _nominal_scale_m(image):
+    """Return nominal scale in meters for an ee.Image."""
+    return float(image.projection().nominalScale().getInfo())

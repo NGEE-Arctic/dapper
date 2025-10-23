@@ -10,6 +10,7 @@ _PRETTY_SOURCE = {
     "elev": "Elev",
     "hand": "HAND",
     "aspect": "Aspect",
+    "cti": "CTI",    
 }
 
 _UNITS = {
@@ -109,7 +110,6 @@ def prepare_for_plot(
     df[area_col] = df_proj.geometry.area / 1e6
     return df
 
-# --- replace your plot_static with this version ---
 def plot_static(
     gdf: gpd.GeoDataFrame,
     basemap: str = "positron",
@@ -118,10 +118,13 @@ def plot_static(
     edgecolor: str = "black",
     linewidth: float = 0.7,
     legend: bool = True,
+    cmap=None,
+    ax=None,                      # <-- NEW: allow injecting an axes
 ):
     """
     Static plot with contextily basemap.
     basemap options: 'positron', 'dark', 'osm', 'terrain', 'satellite'
+    If `ax` is provided, draw into that axes (and do not create a new figure).
     """
     try:
         import matplotlib.pyplot as plt
@@ -134,7 +137,13 @@ def plot_static(
     # reproject to Web Mercator for tiles
     gdf_3857 = gdf.to_crs(3857)
 
-    fig, ax = plt.subplots(figsize=figsize)
+    created_fig = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+        created_fig = True
+    else:
+        fig = ax.figure
+
     gdf_3857.plot(
         ax=ax,
         column="legend_label",
@@ -142,10 +151,13 @@ def plot_static(
         linewidth=linewidth,
         edgecolor=edgecolor,
         alpha=alpha,
+        cmap=cmap,
     )
     ctx.add_basemap(ax, source=provider)
     ax.set_axis_off()
-    return fig, ax
+    ax.margins(0)
+
+    return (fig, ax) if created_fig else (ax.figure, ax)
 
 def plot_interactive(
     gdf: gpd.GeoDataFrame,

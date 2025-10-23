@@ -6,32 +6,34 @@ from dapper.utils import gee_utils as gu
 # Utilities
 # ----------------------------
 
-def try_to_download_featurecollection(fc, verbose=True):
-    """Attempt to load FeatureCollection as a GeoDataFrame; else return None."""
+def _require_single_band_image(img, sid):
+    """
+    Ensure 'img' behaves like an ee.Image with exactly one band.
+    We do not try to guess the band; users should select/mosaic beforehand.
+    """
+    if not hasattr(img, 'bandNames') or not hasattr(img, 'select'):
+        raise TypeError(
+            f"binning['{sid}']['image'] must be an ee.Image (single band). "
+            f"Pass an ee.Image you've already prepared with .mosaic()/.select()."
+        )
     try:
-        fc_geojson = fc.getInfo()  # May raise EEException on large/complex geoms
-        gdf = gpd.GeoDataFrame.from_features(fc_geojson['features'])
-        gdf.set_crs(epsg=4326, inplace=True)
-        if verbose:
-            print("Success! FeatureCollection loaded as GeoDataFrame.")
-        return gdf
-    except Exception as e:
-        if verbose:
-            print("Direct download failed. Reason:", e)
-        return None
+        band_names = img.bandNames().getInfo()  # tiny request; returns a small list
+    except Exception:
+        # If the server call fails, fall back to trying to select(0) and hope it errors if invalid
+        band_names = None
 
-def _geom_from_any(x):
-    """Return ee.Geometry from ee.Feature, ee.FeatureCollection, or ee.Geometry."""
-    if isinstance(x, ee.Feature):
-        return x.geometry()
-    if isinstance(x, ee.FeatureCollection):
-        return x.geometry()
-    return x  # assume ee.Geometry
+    if band_names is None:
+        # try select(0) to trip a clear error message if multiple bands
+        _ = img.select(0)
+        # don't rename here; we rename after clipping
+        return img
 
-def _nominal_scale_m(image):
-    """Return nominal scale in meters for an ee.Image."""
-    return float(image.projection().nominalScale().getInfo())
-
+    if len(band_names) != 1:
+        raise ValueError(
+            f"Custom image for source '{sid}' must have exactly one band. "
+            f"Please do something like: myimg = ee.Image(path_or_ic).mosaic().select('band')."
+        )
+    return img
 
 # -----------------------------------
 # Multi-scale HAND auto-selection
@@ -49,9 +51,9 @@ def choose_hand_image(desired_scale=None, hand_edges=None, verbose=False):
     hand90_1000 = ee.Image("users/gena/GlobalHAND/90m-global/hand-1000")             # up to 1000 m
 
     cand = [
-        {"name": "hand30_1000", "img": hand30_1000, "scale": _nominal_scale_m(hand30_1000), "maxval": 1000},
-        {"name": "hand90_1000", "img": hand90_1000, "scale": _nominal_scale_m(hand90_1000), "maxval": 1000},
-        {"name": "hand30_100",  "img": hand30_100,  "scale": _nominal_scale_m(hand30_100),  "maxval": 100},
+        {"name": "hand30_1000", "img": hand30_1000, "scale": gu._nominal_scale_m(hand30_1000), "maxval": 1000},
+        {"name": "hand90_1000", "img": hand90_1000, "scale": gu._nominal_scale_m(hand90_1000), "maxval": 1000},
+        {"name": "hand30_100",  "img": hand30_100,  "scale": gu._nominal_scale_m(hand30_100),  "maxval": 100},
     ]
 
     # If user-provided edges exceed 100 m, prefer *_1000 products
@@ -83,36 +85,87 @@ def choose_hand_image(desired_scale=None, hand_edges=None, verbose=False):
 def build_source(source_id, feature, desired_scale_hint, binning_spec, dem_source='arcticdem', verbose=False):
     """
     Returns (single-band ee.Image renamed to 'v', native_scale_m, meta dict).
-    source_id in {'elev','hand','aspect'}.
-    """
-    region = _geom_from_any(feature)
 
+    Built-in source_ids:
+      - 'elev'   : ArcticDEM elevation (meters)
+      - 'hand'   : multi-scale HAND auto-selection (meters)
+      - 'aspect' : Aspect (degrees) derived from DEM
+      - 'cti'    : Compound Topographic Index (dimensionless), mosaicked & scaled
+
+    Custom image:
+      If binning[source_id] contains key 'image', that value MUST be a single-band ee.Image
+      (already mosaicked/selected/masked as needed). We validate single-band and use it.
+      If the image advertises a degree-based/undefined native scale (~111,319 m), we coerce
+      the native scale to desired_scale_hint (if provided) or 90 m to avoid over-clamping.
+    """
+    def _coerce_native_scale_m(img, fallback_m=90.0):
+        """Return a reasonable native scale in meters; fix ~1° (≈111 km) projections."""
+        try:
+            s = float(gu._nominal_scale_m(img))
+        except Exception:
+            s = float(fallback_m)
+        # If scale looks like degrees/undefined (> ~5 km), trust the hint or fallback
+        if s > 5000.0:
+            return float(desired_scale_hint) if (desired_scale_hint is not None) else float(fallback_m)
+        return s
+
+    region = gu._geom_from_any(feature)
+
+    # --- 0) Generic custom image (takes precedence if provided) ---
+    if isinstance(binning_spec, dict) and ('image' in binning_spec):
+        img = _require_single_band_image(binning_spec['image'], source_id)
+        img = img.clip(region).select(0).rename('v')
+        scale = _coerce_native_scale_m(img, fallback_m=90.0)
+        meta = {
+            "units": binning_spec.get("units", ""),                 # cosmetic
+            "name":  binning_spec.get("name", str(source_id).upper())
+        }
+        if verbose:
+            print(f"[SRC {source_id}] custom image, native_scale≈{scale:.1f} m")
+        return img, scale, meta
+
+    # --- 1) Elevation (ArcticDEM) ---
     if source_id == 'elev':
-        if dem_source == 'arcticdem':
-            img = ee.Image("UMN/PGC/ArcticDEM/V4/2m_mosaic").select('elevation').rename('v').clip(region)
-        else:
+        if dem_source != 'arcticdem':
             raise KeyError(f"DEM source '{dem_source}' not supported.")
-        scale = _nominal_scale_m(img)
+        img = ee.Image("UMN/PGC/ArcticDEM/V4/2m_mosaic").select('elevation').rename('v').clip(region)
+        scale = _coerce_native_scale_m(img, fallback_m=2.0)
+        if verbose:
+            print(f"[SRC elev] native_scale≈{scale:.1f} m")
         return img, scale, {"units": "m", "name": "Elevation"}
 
+    # --- 2) HAND (auto-pick scale/product) ---
     if source_id == 'hand':
-        hand_edges = None
-        if binning_spec.get('strategy') == 'fixed':
-            hand_edges = binning_spec.get('edges')
-        img, scale = choose_hand_image(desired_scale=desired_scale_hint, hand_edges=hand_edges, verbose=verbose)
-        # Keep 0 as valid (channel), only mask nodata by existing mask
-        img = img.updateMask(img.mask()).clip(region)
+        hand_edges = binning_spec.get('edges') if binning_spec.get('strategy') == 'fixed' else None
+        img, scale_native = choose_hand_image(desired_scale=desired_scale_hint, hand_edges=hand_edges, verbose=verbose)
+        img = img.updateMask(img.mask()).rename('v').clip(region)
+        scale = _coerce_native_scale_m(img, fallback_m=scale_native)
+        if verbose:
+            print(f"[SRC hand] native_scale≈{scale:.1f} m")
         return img, scale, {"units": "m", "name": "HAND"}
 
+    # --- 3) Aspect (from DEM) ---
     if source_id == 'aspect':
-        # Compute aspect from DEM (same DEM source); keep band name 'v'
         if dem_source != 'arcticdem':
             raise KeyError(f"DEM source '{dem_source}' not supported for aspect.")
         dem = ee.Image("UMN/PGC/ArcticDEM/V4/2m_mosaic").select('elevation').clip(region)
         aspect = ee.Terrain.aspect(dem).rename('v')
-        scale = _nominal_scale_m(dem)  # native DEM scale
+        scale = _coerce_native_scale_m(dem, fallback_m=2.0)  # use DEM’s native scale
+        if verbose:
+            print(f"[SRC aspect] derived from DEM, native_scale≈{scale:.1f} m")
         return aspect, scale, {"units": "deg", "name": "Aspect", "from_dem": True}
 
+    # --- 4) CTI (flow index) — unitless with scale factor 1e8 ---
+    if source_id == 'cti':
+        img = (ee.ImageCollection("projects/sat-io/open-datasets/HYDROGRAPHY90/flow_index/cti")
+               .mosaic().select(0).toFloat().divide(1e8)   # apply 1e8 scale factor
+               .rename('v').clip(region))
+        scale = _coerce_native_scale_m(img, fallback_m=90.0)  # many tiles advertise ~1°; coerce to 90 m
+        if verbose:
+            print(f"[SRC cti] scaled by 1e8, native_scale≈{scale:.1f} m")
+        return img, scale, {"units": "", "name": "CTI"}       # unitless
+
+    # Unknown source id
     raise ValueError(f"Unknown source_id: {source_id}")
 
 
@@ -355,46 +408,8 @@ def _combine_hierarchical(order, bin_masks_by_source, max_topounits=None, min_pa
     _recurse(0, None, {}, [])
     return combined
 
-
-
 # -----------------------------------------
-# Vectorization & export
-# -----------------------------------------
-
-def masks_to_featurecollection(mask_entries, region, export_scale, extra_image_props=None):
-    """
-    mask_entries: list of {'band_name','mask','meta'}
-    Returns ee.FeatureCollection with metadata as properties.
-    One feature per band (union of all polygons for that band).
-    """
-    features = []
-    for entry in mask_entries:
-        vectors = entry['mask'].reduceToVectors(
-            geometry=region,
-            scale=export_scale,
-            geometryType='polygon',
-            eightConnected=False,
-            bestEffort=True,
-            maxPixels=1e13
-        )
-        geom = vectors.geometry()  # union geometry of all parts; may be empty
-        # Skip empty geometries (optional)
-        feature = ee.Feature(geom, {
-            'band_name': entry['band_name'],
-            'schema': entry['meta'].get('topounit_schema'),
-            'source_ids': entry['meta'].get('source_ids'),
-            'labels': entry['meta'].get('labels'),
-            'bin_bounds': entry['meta'].get('bin_bounds'),
-            'bin_method': entry['meta'].get('bin_method'),
-        })
-        if extra_image_props:
-            feature = feature.setMulti(extra_image_props)
-        features.append(feature)
-    return ee.FeatureCollection(features)
-
-
-# -----------------------------------------
-# Main flexible API (v2)
+# Main API 
 # -----------------------------------------
 
 def make_topounits(
@@ -415,10 +430,229 @@ def make_topounits(
     verbose=False
 ):
     """
-    Flexible topounit generator with multi-source + multi-strategy binning.
-    No global image reprojection; GEE handles alignment implicitly.
+    Generate “topounits” (topographic units) by binning one or more raster sources
+    (elevation, HAND, aspect, CTI, or a user-supplied image) and combining the
+    resulting classes into polygons.
+
+    This function **does not** globally reproject rasters. Instead it:
+    1) chooses an **analysis scale** from the AOI area and planned bin count,
+    2) clamps that scale to be **no finer than the coarsest source’s native scale**,
+    3) runs all sampling, statistics, and vectorization with `scale=analysis_scale`
+    while letting Earth Engine handle per-pixel alignment internally.
+
+    The output is **one feature per bin** (i.e., the union geometry of all patches
+    that belong to that bin), with rich metadata describing how each bin was formed.
+
+    Args:
+        feature (ee.Feature | ee.FeatureCollection | ee.Geometry):
+            The area of interest (AOI). If a FeatureCollection is passed, its
+            `.geometry()` (union) is used as the AOI. Geodesic area is used to
+            pick an analysis scale that avoids oversampling large polygons.
+
+        sources (list[str]):
+            Source identifiers to bin and (optionally) combine. Supported built-ins:
+            - 'elev'   : ArcticDEM elevation (meters).
+            - 'hand'   : Height Above Nearest Drainage; automatically selects an
+                        appropriate HAND product (30m/90m; 0–100 or 0–1000 range).
+            - 'aspect' : Aspect (degrees) derived from the DEM.
+            - 'cti'    : Compound Topographic Index (dimensionless), mosaicked.
+            Custom source via user-supplied image is also supported: pick any unique
+            key (e.g., 'myvar') and provide `binning['myvar']['image'] = ee.Image(...)`
+            (single-band, already mosaicked/selected). See `binning` below.
+
+        binning (dict[str, dict]):
+            Per-source binning specification. For each `sid in sources`, provide a
+            dictionary describing *how* to make bins for that source. Common keys:
+
+            For **numeric** sources ('elev', 'hand', 'cti', or a custom image):
+            - 'strategy' (str, required): one of
+                    'percentiles'   # equal-area bins over the AOI (empirical quantiles)
+                    'equalwidth'    # equal-width bins between min/max in the AOI
+                    'fixed'         # user-specified edges (monotonic list of floats)
+            - if 'percentiles' or 'equalwidth':
+                    'n_bins' (int): number of bins (default 5)
+            - if 'fixed':
+                    'edges' (list[float]): bin breakpoints; length = n_bins + 1
+                    Example: [0, 1, 2, 5, 10, 100, 1000]  → 6 bins
+            - Optional cosmetics:
+                    'label_prefix' (str): short prefix used in labels (e.g., 'ELEV', 'HAND')
+                    'units' (str): only for *custom* images; used in plotting labels
+                    'name' (str): only for *custom* images; human-readable source name
+            - For **custom image** only:
+                    'image' (ee.Image, single-band): pre-prepared raster. You must
+                    handle `.mosaic()` (if coming from an ImageCollection) and `.select(...)`
+                    yourself **before** passing it in. The function validates it is single-band.
+
+            For **aspect** (circular data):
+            - 'strategy' must be 'fixed'.
+            - 'ranges' (list[tuple]): list of (start_deg, end_deg, label) ranges; wrap
+                across 360→0 is supported by letting start > end.
+                Example (N/S):
+                    [(270, 90, 'N'), (90.01, 269.99, 'S')]
+                Example (4 winds):
+                    [(315, 45, 'N'), (45, 135, 'E'), (135, 225, 'S'), (225, 315, 'W')]
+            - Optional: 'label_prefix' (e.g., 'ASP').
+
+        combine (str, default 'cartesian'):
+            How to combine per-source bins into final topounits:
+            - 'cartesian'    : full cross-product of bins across sources
+                                (e.g., 3 elev × 2 aspect = 6 units).
+            - 'hierarchical' : apply bins in a priority order; each level further
+                                subdivides only where the parent has pixels. Useful
+                                when the cartesian product would explode.
+
+        combine_order (list[str] | None, default None):
+            Required when `combine='hierarchical'`. The ordered list of `sources`
+            to apply (e.g., ['elev', 'hand'] means “bin elevation, then within each
+            elevation bin, subdivision by HAND”). Ignored for 'cartesian'.
+
+        max_topounits (int, default 256):
+            Safety cap on the number of combined bins emitted. For 'cartesian', if the
+            theoretical product exceeds this, only the first `max_topounits` are materialized.
+            For 'hierarchical', recursion stops once the cap is reached.
+
+        dem_source (str, default 'arcticdem'):
+            DEM used for 'elev' and 'aspect'. Currently only 'arcticdem' is supported.
+
+        return_as (str, default 'gdf'):
+            What to return:
+            - 'gdf'   : a `geopandas.GeoDataFrame` with one row per **bin** (unioned
+                        geometry of all patches in that bin). If direct download via
+                        `FeatureCollection.getInfo()` fails, the function triggers an
+                        export to Drive and returns `None`.
+            - 'asset' : trigger export to Google Drive using `gu.export_fc(...)` and
+                        return `None`.
+
+        export_scale (str | float, default 'native'):
+            Pixel scale (meters) used for vectorization (`reduceToVectors`). If 'native',
+            uses the chosen `analysis_scale` (see below). You may pass a numeric meter
+            value to override.
+
+        asset_name (str, default 'topounits'):
+            Name used when exporting (folder is 'topotest' via `gu.export_fc`).
+
+        asset_ftype (str, default 'GeoJSON'):
+            Export file type passed through to `gu.export_fc`. (E.g., 'GeoJSON', 'SHP'.)
+
+        min_patch_pixels (int | None, default None):
+            If set, tiny slivers are dropped before vectorization by requiring each
+            connected component to have at least this many pixels (in the analysis
+            scale grid). Example: 9 retains components ≥ 3×3 pixels.
+
+        target_pixels_per_topounit (int, default 500):
+            Controls how coarse the **analysis scale** will be when it is auto-selected
+            from AOI area. Roughly, the AOI is divided into `planned_bins × target_pixels_per_topounit`
+            pixels; the square root of that per-bin area yields the scale in meters.
+            Larger values → coarser analysis.
+
+        target_scale (float | None, default None):
+            If set (meters), directly influences the **analysis scale**; the final
+            scale becomes `max(target_scale, coarsest_native_scale_across_sources)`.
+            Use this to keep large AOIs manageable (e.g., 90 or 120 m).
+
+        verbose (bool, default False):
+            Print diagnostics, including the chosen `analysis_scale`.
+
+    How sources are built:
+        - 'elev'   : ArcticDEM V4 2 m mosaic, band 'elevation'.
+        - 'hand'   : Chooses among 30m/100m and 30m/1000m or 90m/1000m HAND products.
+                    If you use fixed edges with values >100, a *_1000 product is preferred.
+                    If `target_scale` is set, we prefer a product that is not finer than it.
+        - 'aspect' : Computed from the DEM (degrees 0–360).
+        - 'cti'    : `projects/sat-io/open-datasets/HYDROGRAPHY90/flow_index/cti` (mosaicked).
+        - custom   : If `binning[sid]['image']` is present, it must be a **single-band ee.Image**.
+                    You must `.mosaic()` and `.select(...)` yourself beforehand. We only validate
+                    it is single-band and rename that band to 'v'.
+
+    Scale selection (important):
+        - Let A be AOI area (m²) and B be the **planned** number of bins
+        (product of per-source bin counts; for aspect, number of ranges).
+        - If `target_scale` is None:
+            analysis_scale ≈ sqrt( A / (B × target_pixels_per_topounit) )
+        Then: analysis_scale = max(analysis_scale, coarsest_native_source_scale).
+        - If `target_scale` is provided:
+            analysis_scale = max(target_scale, coarsest_native_source_scale).
+        - This scale is used in `sample`, `reduceRegion`, and `reduceToVectors`.
+
+    Output:
+        If `return_as='gdf'`, a GeoDataFrame with (at minimum) these columns:
+        - geometry                  : union geometry for the bin.
+        - band_name                 : stable ID like 'topounit_elev1__aspect2'.
+        - schema                    : 'cartesian' or 'hierarchical'.
+        - source_ids (list[str])    : sources used for this bin (e.g., ['elev','aspect']).
+        - labels (dict)             : per-source human labels (e.g., {'elev': 'ELEV_0-100', 'aspect': 'ASP_N'}).
+        - bin_bounds (dict)         : per-source numeric bounds or angular ranges.
+        - bin_method (dict)         : per-source method (e.g., 'percentiles', 'fixed').
+        - analysis_scale_m (float)  : the final analysis scale used for the run.
+        - planned_counts (dict)     : planned #bins per source (before combination).
+        - combine, max_topounits, target_pixels_per_topounit, target_scale.
+
+    Raises:
+        ValueError:
+            - Unknown `combine` strategy.
+            - `combine='hierarchical'` without `combine_order`.
+            - Unsupported binning strategy for a source.
+            - Fixed-edge binning without ≥ 2 edges.
+            - Aspect given a non-'fixed' strategy.
+            - Custom image provided with multiple bands.
+        KeyError:
+            - Unsupported `dem_source` for 'elev'/'aspect'.
+
+    Notes:
+        • One row per **bin** (union of all patches for that bin). If you prefer one
+        feature per *patch*, vectorization logic would need to keep all polygons
+        from `reduceToVectors` instead of the union geometry.
+        • For large AOIs, use `target_scale` and/or `min_patch_pixels` to balance
+        performance and polygon cleanliness.
+        • HAND auto-selection is heuristic and aims to avoid oversampling; you can
+        still override the scale via `target_scale`.
+
+    Examples (not-exhaustive):
+        # Elevation percentiles (equal-area):
+        gdf = make_topounits(
+            feature=feature,
+            sources=['elev'],
+            binning={'elev': {'strategy': 'percentiles', 'n_bins': 5, 'label_prefix': 'ELEV'}},
+            combine='cartesian',
+            target_scale=90,
+            return_as='gdf'
+        )
+
+        # HAND with fixed hydrologic thresholds (meters):
+        gdf = make_topounits(
+            feature=feature,
+            sources=['hand'],
+            binning={'hand': {'strategy': 'fixed', 'edges': [0,1,2,5,10,100,1000], 'label_prefix': 'HAND'}},
+            combine='cartesian',
+            return_as='gdf'
+        )
+
+        # Elevation × Aspect (N/S), Cartesian:
+        aspects = [(270, 90, 'N'), (90.01, 269.99, 'S')]
+        gdf = make_topounits(
+            feature=feature,
+            sources=['elev','aspect'],
+            binning={
+                'elev':   {'strategy': 'percentiles', 'n_bins': 4, 'label_prefix': 'ELEV'},
+                'aspect': {'strategy': 'fixed', 'ranges': aspects, 'label_prefix': 'ASP'}
+            },
+            combine='cartesian',
+            max_topounits=20,
+            target_scale=90,
+            return_as='gdf'
+        )
+
+        # Custom user image (single-band, already prepared):
+        my_img = ee.Image('users/me/mystack').mosaic().select('band_of_interest')
+        gdf = make_topounits(
+            feature=feature,
+            sources=['myvar'],
+            binning={'myvar': {'image': my_img, 'strategy': 'equalwidth', 'n_bins': 6, 'label_prefix': 'MYVAR'}},
+            combine='cartesian',
+            return_as='gdf'
+        )
     """
-    region = _geom_from_any(feature)
+    region = gu._geom_from_any(feature)
 
     # 1) Planned total bins (product across sources)
     def _planned_bins_for_source(sid):
@@ -540,7 +774,7 @@ def make_topounits(
     }
 
     # 8) Vectorize to polygons
-    polygons_fc = masks_to_featurecollection(
+    polygons_fc = gu.masks_to_featurecollection(
         combined_entries,
         region=region,
         export_scale=export_scale,
@@ -549,7 +783,7 @@ def make_topounits(
 
     # 9) Return or export
     if return_as == 'gdf':
-        gdf = try_to_download_featurecollection(polygons_fc, verbose=verbose)
+        gdf = gu.try_to_download_featurecollection(polygons_fc, verbose=verbose)
         if gdf is None:
             print("Could not return as GeoDataFrame; exporting to Google Drive. Check Tasks in your GEE browser.")
             gu.export_fc(polygons_fc, f'{asset_name}', asset_ftype, folder='topotest', verbose=True)
