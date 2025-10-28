@@ -12,7 +12,12 @@ copyright = f"{date.today().year}, {author}"
 
 html_theme = "furo"
 templates_path = ["_templates"]
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = [
+    "tutorials/met_data/deleteme*.ipynb",
+    "tutorials/olmt/README.md",
+    "usage.rst",                  
+    "api/modules.rst",            
+]
 html_static_path = ["_static"]
 
 extensions = [

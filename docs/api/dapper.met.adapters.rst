@@ -1,29 +1,12 @@
-dapper.met.adapters package
-===========================
-
-Submodules
-----------
-
-dapper.met.adapters.base module
--------------------------------
-
-.. automodule:: dapper.met.adapters.base
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-dapper.met.adapters.era5 module
--------------------------------
-
-.. automodule:: dapper.met.adapters.era5
-   :members:
-   :show-inheritance:
-   :undoc-members:
-
-Module contents
----------------
+dapper.met.adapters
+===================
 
 .. automodule:: dapper.met.adapters
-   :members:
-   :show-inheritance:
-   :undoc-members:
+   :no-members:            # important: prevents duplicate object docs
+
+.. autosummary::
+   :toctree: generated
+   :recursive:
+
+   dapper.met.adapters.base.BaseAdapter
+   dapper.met.adapters.era5.ERA5Adapter
