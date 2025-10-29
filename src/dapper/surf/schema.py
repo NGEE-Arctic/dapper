@@ -3,6 +3,71 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Tuple, Iterable
 
+
+"""
+dapper.surf.schema
+==================
+
+Purpose
+-------
+Single source of truth for ELM/CLM *surface-file* structure used by Dapper.
+This module **does not read any NetCDF**. Instead, it hard-codes what a
+surface file *should* look like so other modules can build, write, and
+validate files consistently.
+
+What this module defines
+------------------------
+- VarDef: a compact schema record for one variable (dims, dtype, units, attrs).
+- REGISTRY: dict[str, VarDef]
+    Canonical list of surface variables with their expected dimension
+    signatures and basic metadata. Think of this as the variable “spec.”
+- SCHEMA: dict[str, Any]
+    Tiered rules for presence/formatting:
+      * "required": must exist
+      * "optional": may exist
+      * "choose_one_of": at least one of the group must exist
+      * "conditional": if driver var is present (or nonzero in practice),
+        then dependent vars must also be present
+
+Conventions
+-----------
+- Spatial dims use ELM naming and appear **last** in variables: (..., lsmlat, lsmlon).
+- Common non-spatial dims (typical defaults):
+    time=12, nlevsoi=10, natpft=17, nlevslp=11, numurbl=3, numrad=2, nlevurb=5.
+  (These are expectations for formatting/validation; datasets may omit some dims.)
+- Units are simple strings ('' or 'varies' means “not enforced by validator”).
+- Dtypes: use integer types for IDs/indices (e.g., URBAN_REGION_ID, GLC_MEC),
+  floats for fractions/percents/continuous fields.
+
+How other modules use this
+--------------------------
+- dapper.surf.sample: point/polygon sampling uses REGISTRY dims to shape outputs.
+- dapper.surf.write: formats sampled arrays into an ELM-style NetCDF using REGISTRY.
+- dapper.surf.validate: checks a produced NetCDF against REGISTRY/SCHEMA (presence,
+  dim order/lengths, dtype/units, and conditional relationships).
+
+Extending / editing
+-------------------
+- To add a new variable, add a VarDef in REGISTRY with its **full dim tuple**
+  (including spatial dims if it is spatial), its dtype, and units.
+- Prefer grouped/compact registration helpers (if present) over one-var-per-line.
+- When changing dims or semantics for an existing variable, update REGISTRY here
+  first—writers and validators derive expectations from this module.
+- Add presence rules (required/optional/choose_one_of/conditional) in SCHEMA to
+  influence validation behavior without touching code elsewhere.
+
+Scope
+-----
+This module captures **formatting/structure** (dims, units, dtype, presence rules).
+Numeric ranges, aggregation choices, and scientific provenance live in sampling
+and validation layers, not here.
+
+"""
+
+
+
+
+
 # --------- Compact helpers so you don't write one-var-per-line ----------
 
 @dataclass(frozen=True)
@@ -48,7 +113,7 @@ REGISTRY.update(register_many(["PCT_SAND","PCT_CLAY","ORGANIC","PCT_GRVL"], vdef
 
 # Topography / terrain
 REGISTRY.update({
-    "SLOPE":          vdef(DIMS_2D, units="unitless"),
+    "SLOPE":          vdef(DIMS_2D, units="degrees"),
     "STDEV_ELEV":     vdef(DIMS_2D, units="m"),
     "STD_ELEV":       vdef(DIMS_2D, units="m"),   # alias seen in some files
     "TOPO":           vdef(DIMS_2D, units="m"),
