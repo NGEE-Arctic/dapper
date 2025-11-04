@@ -241,13 +241,13 @@ class Exporter:
         packing = self._compute_global_packing(parquet_files)
 
         # lat/lon axes (sparse allowed)
-        lats_axis = np.unique(self.df_loc_norm["lat"].to_numpy()); lats_axis.sort()
-        lons_axis = np.unique(self.df_loc_norm["lon_0-360"].to_numpy()); lons_axis.sort()
+        lats_axis = np.unique(self.df_loc_norm["lat"].to_numpy().round(6)); lats_axis.sort()
+        lons_axis = np.unique(self.df_loc_norm["lon_0-360"].to_numpy().round(6)); lons_axis.sort()
 
         # index maps (rounded for stability)
         lat_key = {round(float(v), 6): i for i, v in enumerate(lats_axis)}
         lon_key = {round(float(v), 6): j for j, v in enumerate(lons_axis)}
-
+        
         # initialize one lat/lon file per var
         self._grid_paths = {}
         for v in self.var_cols:
