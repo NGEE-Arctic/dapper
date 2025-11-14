@@ -1,4 +1,4 @@
-﻿dapper.schemas.elm
+dapper.schemas.elm
 ==================
 
 .. automodule:: dapper.schemas.elm

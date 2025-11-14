@@ -1,4 +1,4 @@
-﻿dapper.met.temporal
+dapper.met.temporal
 ===================
 
 .. automodule:: dapper.met.temporal
