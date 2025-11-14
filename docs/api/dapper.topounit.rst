@@ -4,10 +4,10 @@ dapper.topounit package
 Submodules
 ----------
 
-dapper.topounit.gen\_topounits module
+dapper.topounit.topomake module
 -------------------------------------
 
-.. automodule:: dapper.topounit.gen_topounits
+.. automodule:: dapper.topounit.topomake
    :members:
    :show-inheritance:
    :undoc-members:

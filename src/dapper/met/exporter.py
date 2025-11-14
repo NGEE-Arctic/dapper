@@ -1,7 +1,8 @@
 # dapper/met/exporter.py
-import os
+import warnings
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 from pathlib import Path
 from fastparquet import write
 
@@ -104,7 +105,7 @@ class Exporter:
         self.adapter = adapter
         self.csv_directory = Path(csv_directory)
         self.write_directory = Path(write_directory)
-        self.df_loc = df_loc
+        self.df_loc = self._ensure_lon_lat(df_loc)
         self.id_col = id_col
         self.calendar = calendar
         self.dtime_resolution_hrs = dtime_resolution_hrs
@@ -165,9 +166,12 @@ class Exporter:
             dest_dir = self.write_directory / out_sub
             dest_dir.mkdir(parents=True, exist_ok=True)
 
-            # zone mapping once at root of dest folder
+            # zone mapping once at root of dest folder: lon, lat, zone, id
             zm_path = dest_dir / "zone_mappings.txt"
-            self.df_loc_norm[["gid", "zone"]].to_csv(zm_path, index=False, header=False, sep="\t")
+            zm = self._zone_mappings_table()
+            zm[["lon", "lat", "zone_str", "id"]].to_csv(
+                zm_path, index=False, header=False, sep="\t"
+            )
 
             # write one file per gid
             for pf in parquet_files:
@@ -235,6 +239,89 @@ class Exporter:
         utils._rm(self.temp_dir)
 
     # ---------------------- private: branches ----------------------
+    # ---------------------- private: helpers ----------------------
+    def _ensure_lon_lat(self, df_loc, geom_col="geometry"):
+        """
+        Ensure df_loc has lon/lat. If missing and a geometry column is present,
+        derive lon/lat from the geometry.
+
+        - Points: use x/y directly
+        - Polygons/MultiPolygons: use representative_point()
+        """
+        df_loc = df_loc.copy()
+
+        # If lon/lat already present, don't touch them
+        if {"lon", "lat"}.issubset(df_loc.columns):
+            return df_loc
+
+        # Need geometry to derive lon/lat
+        if geom_col not in df_loc.columns:
+            raise ValueError(
+                "df_loc must contain 'lon' and 'lat' columns or a geometry column "
+                f"('{geom_col}') to write zone_mappings."
+            )
+
+        geom = df_loc[geom_col]
+
+        # If it's a GeoDataFrame, you can sanity-check CRS
+        if isinstance(df_loc, gpd.GeoDataFrame) and df_loc.crs is not None:
+            try:
+                epsg = df_loc.crs.to_epsg()
+            except Exception:
+                epsg = None
+            if epsg is not None and epsg != 4326:
+                warnings.warn(
+                    f"df_loc.crs is {df_loc.crs}, not EPSG:4326. "
+                    "Computed lon/lat will be in that CRS.",
+                    UserWarning,
+                )
+
+        def rep_point(g):
+            if g.geom_type == "Point":
+                p = g
+            else:
+                p = g.representative_point()
+            return p.x, p.y
+
+        lons, lats = zip(*geom.apply(rep_point))
+        df_loc["lon"] = lons
+        df_loc["lat"] = lats
+
+        warnings.warn(
+            "df_loc was missing lon/lat; derived them from geometry "
+            "(Point coordinates or representative_point for polygons).",
+            UserWarning,
+        )
+
+        return df_loc
+
+    def _zone_mappings_table(self):
+        """
+        Build a table for zone_mappings.txt with columns:
+        lon, lat, zone_str (\"01\"), id (1..N per zone).
+
+        Keeps gid in the DataFrame for filtering, but it is not written to file.
+        """
+        required = {"gid", "lat", "lon", "zone"}
+        missing = required - set(self.df_loc_norm.columns)
+        if missing:
+            raise KeyError(
+                f"df_loc_norm is missing columns required for zone_mappings: {missing}"
+            )
+
+        df = self.df_loc_norm.copy()
+
+        # Stable ordering: by zone, then gid (or you could use lat/lon)
+        df = df.sort_values(["zone", "gid"]).reset_index(drop=True)
+
+        # 1..N per zone
+        df["id"] = df.groupby("zone").cumcount() + 1
+
+        # "01", "02", ...
+        df["zone_str"] = df["zone"].astype(int).astype(str).str.zfill(2)
+
+        # Keep gid for filtering, but it won't get written to the file
+        return df[["gid", "lon", "lat", "zone_str", "id"]]
 
     def _write_elm_combined(self, parquet_files, years_span, nc_attrs):
         # global packing scan
@@ -275,9 +362,12 @@ class Exporter:
             )
             self._grid_paths[v] = path_nc
 
-        # zone mappings at root (gid \t zone)
+        # zone mappings at root: lon, lat, zone, id
         zm_path = self.write_directory / "zone_mappings.txt"
-        self.df_loc_norm[["gid", "zone"]].to_csv(zm_path, index=False, header=False, sep="\t")
+        zm = self._zone_mappings_table()
+        zm[["lon", "lat", "zone_str", "id"]].to_csv(
+            zm_path, index=False, header=False, sep="\t"
+        )
 
         # scatter each site into lat/lon
         for pf in parquet_files:
@@ -339,15 +429,24 @@ class Exporter:
             if row.empty:
                 continue
             lat = float(row["lat"].iloc[0])
+            lon = float(row["lon"].iloc[0])
             lon0360 = float(row["lon_0-360"].iloc[0])
-            zone_str = str(int(row["zone"].iloc[0])).zfill(2)
+            zone_val = row["zone"].iloc[0]
+            zone_str = str(int(zone_val)).zfill(2)
 
-            # site dir + zone mapping
+            # site dir + zone mapping (lon, lat, zone, id for this gid)
             site_dir = self.write_directory / gid
             site_dir.mkdir(parents=True, exist_ok=True)
             zm_path = site_dir / "zone_mappings.txt"
             if not zm_path.exists():
-                pd.DataFrame({"gid":[gid], "zone":[zone_str]}).to_csv(zm_path, index=False, header=False, sep="\t")
+                zm = self._zone_mappings_table()
+                row_zm = zm[zm["gid"] == gid]
+                if row_zm.empty:
+                    # shouldn't happen, but don't crash if df_loc_norm is out of sync
+                    continue
+                row_zm[["lon", "lat", "zone_str", "id"]].to_csv(
+                    zm_path, index=False, header=False, sep="\t"
+                )
 
             # each var: per-site packing + write/append
             for v in self.var_cols:
