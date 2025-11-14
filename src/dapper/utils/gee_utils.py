@@ -238,7 +238,13 @@ def export_fc(
 def featurecollection_to_df_loc(fc):
     """
     Converts an ee.FeatureCollection object to a GeoDataFrame
-    and includes WKT representations of the sampled geometry.
+    with one row per feature and representative lon/lat.
+
+    - Points         → lon/lat from the point.
+    - Polygons       → lon/lat from a representative interior point.
+    - MultiPolygons  → same as polygons.
+
+    Also stores the original geometry as WKT in 'sampled_geometry'.
     """
     geojson = fc.getInfo()
 
@@ -251,33 +257,30 @@ def featurecollection_to_df_loc(fc):
         if geom_type == "Point":
             lon, lat = geom.x, geom.y
             method = "sampled at provided coordinate"
-        elif geom_type == "Polygon":
-            centroid = geom.centroid
-            lat, lon = centroid.y, centroid.x
-            method = "sampled across provided polygon"
-        elif geom_type == "MultiPolygon":
-            centroid = geom.centroid
-            lat, lon = centroid.y, centroid.x
-            method = "sampled across provided multipolygon"
+        elif geom_type in ("Polygon", "MultiPolygon"):
+            rp = geom.representative_point()
+            lon, lat = rp.x, rp.y
+            method = f"sampled across provided {geom_type.lower()}"
         else:
             raise ValueError(f"Unsupported geometry type: {geom_type}")
 
-        rows.append({
-            "gid": gid,
-            "lat": lat,
-            "lon": lon,
-            "method": method,
-            "sampled_geometry": geom.wkt  # WKT representation
-        })
+        rows.append(
+            {
+                "gid": gid,
+                "lon": lon,
+                "lat": lat,
+                "method": method,
+                "sampled_geometry": geom.wkt,
+            }
+        )
 
     df_loc = pd.DataFrame(rows)
     gdf_loc = gpd.GeoDataFrame(
         df_loc,
         geometry=gpd.points_from_xy(df_loc.lon, df_loc.lat),
-        crs="EPSG:4326"
+        crs="EPSG:4326",
     )
     gdf_loc["gid"] = gdf_loc["gid"].astype(str).str.strip()
-    
     return gdf_loc
 
 
