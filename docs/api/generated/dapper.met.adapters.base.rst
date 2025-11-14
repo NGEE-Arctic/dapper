@@ -1,4 +1,4 @@
-﻿dapper.met.adapters.base
+dapper.met.adapters.base
 ========================
 
 .. automodule:: dapper.met.adapters.base

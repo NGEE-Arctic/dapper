@@ -1,7 +1,5 @@
 ## Pangeo approach - https://pangeo-data.github.io/pangeo-cmip6-cloud/accessing_data.html
 import os
-import gcsfs
-import intake
 import fsspec
 import numpy as np
 import pandas as pd
@@ -13,7 +11,10 @@ from pathlib import Path
 from dapper.utils import elm_utils as eu
 
 # Need a smarter way to import this
-col = intake.open_esm_datastore("https://storage.googleapis.com/cmip6/pangeo-cmip6.json")
+def open_cmip6_catalog(url="https://storage.googleapis.com/cmip6/pangeo-cmip6.json"):
+    import intake_esm  # local import to avoid docs/CI side effects
+    return intake_esm.open_esm_datastore(url)
+
 
 def find_available_data(params):
 
@@ -37,6 +38,7 @@ def find_available_data(params):
     }
 
     # Perform the search
+    col = open_cmip6_catalog()
     matches = col.search(**search_args)
 
     df = matches.df.copy()

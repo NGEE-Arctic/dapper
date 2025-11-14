@@ -1,4 +1,4 @@
-﻿dapper.met.writers
+dapper.met.writers
 ==================
 
 .. automodule:: dapper.met.writers

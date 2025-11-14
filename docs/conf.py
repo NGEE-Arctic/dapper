@@ -1,54 +1,68 @@
-# docs/conf.py
-import os
-import sys
-from datetime import date
+# -- Path setup --------------------------------------------------------------
+from pathlib import Path
+import os, sys
 
-# Make src/ importable (src layout)
-sys.path.insert(0, os.path.abspath("../src"))
+# Import your package from src/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-project = "dapper"
-author = "NGEE Arctic"
-copyright = f"{date.today().year}, {author}"
+# -- Project info ------------------------------------------------------------
+project = "Dapper"
+author = "Dapper contributors"
+copyright = "exists"
 
-html_theme = "furo"
-templates_path = ["_templates"]
-exclude_patterns = [
-    "tutorials/met_data/deleteme*.ipynb",
-    "tutorials/olmt/README.md",
-    "usage.rst",                  
-    "api/modules.rst",            
-]
-html_static_path = ["_static"]
-
+# -- General config ----------------------------------------------------------
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
-    "myst_nb",  # <-- keep
+    "myst_nb",
 ]
 
-# Don’t execute notebooks during doc build (CI-friendly)
+# Don’t execute notebooks in docs builds
 nb_execution_mode = "off"
 
+# Autosummary: generate API pages automatically
 autosummary_generate = True
-autosummary_imported_members = False   # don’t document re-exports
-autodoc_typehints = "description"
-autodoc_default_options = {
-    "members": True,
-    "undoc-members": False,
-    "show-inheritance": True,
-}
+
+# Google/Numpy docstrings
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
-napoleon_include_init_with_doc = True
-napoleon_use_param = True
-napoleon_use_rtype = True
 
+# MyST: add anchors to headings so {ref} links resolve
+myst_heading_anchors = 3
+
+# Mock heavy/optional deps so CI can import your package
+autodoc_mock_imports = [
+    "numpy","pandas","xarray","numexpr","netCDF4","scipy","dask",
+    "geopandas","shapely","rasterio","pyproj","ee"
+]
+# Can fix these with code changes
+autodoc_mock_imports += [
+    "fastparquet",
+    "intake", "intake_esm", "xarray",
+]
+
+# Quiet noisy MyST cross-ref warnings from notebooks (optional)
+suppress_warnings = ["myst.xref_missing"]
+
+
+templates_path = ["_templates"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    # toss scratch/tutorials we don’t want in nav
+    "tutorials/met_data/deleteme*.ipynb",
+]
+
+# Intersphinx (optional)
 intersphinx_mapping = {
-    "python": ("https://docs.python.org/3/", None),
+    "python": ("https://docs.python.org/3", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
 }
 
-suppress_warnings = ["myst.header"]
+# -- HTML output -------------------------------------------------------------
+html_theme = "furo"
+html_static_path = ["_static"]
