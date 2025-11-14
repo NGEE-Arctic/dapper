@@ -10,6 +10,9 @@ from dapper.utils import utils
 import dapper.met.temporal as dt  # assumes your helpers live here
 from dapper.met.writers import initialize_met_netcdf, append_met_netcdf
 
+# Rounding precision for lat/lon axes and lookups.
+# 1e-6 deg ~ 0.11 m at the equator, which is far below any grid we're using.
+LATLON_DECIMALS = 6
 
 class Exporter:
     """
@@ -327,13 +330,18 @@ class Exporter:
         # global packing scan
         packing = self._compute_global_packing(parquet_files)
 
-        # lat/lon axes (sparse allowed)
-        lats_axis = np.unique(self.df_loc_norm["lat"].to_numpy()); lats_axis.sort()
-        lons_axis = np.unique(self.df_loc_norm["lon_0-360"].to_numpy()); lons_axis.sort()
+        # lat/lon axes (sparse allowed; rounded to kill float jitter)
+        lats_axis = self.df_loc_norm["lat"].to_numpy(dtype="float64").round(LATLON_DECIMALS)
+        lats_axis = np.unique(lats_axis)
+        lats_axis.sort()
 
-        # index maps (rounded for stability)
-        lat_key = {round(float(v), 6): i for i, v in enumerate(lats_axis)}
-        lon_key = {round(float(v), 6): j for j, v in enumerate(lons_axis)}
+        lons_axis = self.df_loc_norm["lon_0-360"].to_numpy(dtype="float64").round(LATLON_DECIMALS)
+        lons_axis = np.unique(lons_axis)
+        lons_axis.sort()
+
+        # index maps (consistent rounding)
+        lat_key = {round(float(v), LATLON_DECIMALS): i for i, v in enumerate(lats_axis)}
+        lon_key = {round(float(v), LATLON_DECIMALS): j for j, v in enumerate(lons_axis)}
 
         # initialize one lat/lon file per var
         self._grid_paths = {}
@@ -350,9 +358,9 @@ class Exporter:
                 dtime_units=self.dtime_units_out,
                 calendar=self.calendar,
                 coord_specs=[
-                    {"name":"lat","dtype":"f4","dims":("lat",),"data":lats_axis,
+                    {"name":"lat","dtype":"f4","dims":("lat",),"data":lats_axis.astype("float32"),
                      "attrs":{"units":"degrees_north","long_name":"latitude"}},
-                    {"name":"lon","dtype":"f4","dims":("lon",),"data":lons_axis,
+                    {"name":"lon","dtype":"f4","dims":("lon",),"data":lons_axis.astype("float32"),
                      "attrs":{"units":"degrees_east","long_name":"longitude","note":"0–360 convention"}},
                 ],
                 add_offset=ao, scale_factor=sf,
@@ -362,10 +370,12 @@ class Exporter:
             )
             self._grid_paths[v] = path_nc
 
-        # zone mappings at root: lon, lat, zone, id
+        # zone mappings at root (lon \t lat \t gid \t zone)
+        zm_df = self.df_loc_norm.copy()
+        zm_df["lon"] = zm_df["lon"].round(LATLON_DECIMALS)
+        zm_df["lat"] = zm_df["lat"].round(LATLON_DECIMALS)
         zm_path = self.write_directory / "zone_mappings.txt"
-        zm = self._zone_mappings_table()
-        zm[["lon", "lat", "zone_str", "id"]].to_csv(
+        zm_df[["lon", "lat", "gid", "zone"]].to_csv(
             zm_path, index=False, header=False, sep="\t"
         )
 
@@ -380,11 +390,12 @@ class Exporter:
             if row.empty:
                 continue
 
-            plat = round(float(row["lat"].iloc[0]), 6)
-            plon = round(float(row["lon_0-360"].iloc[0]), 6)
+            plat = round(float(row["lat"].iloc[0]), LATLON_DECIMALS)
+            plon = round(float(row["lon_0-360"].iloc[0]), LATLON_DECIMALS)
             iy = lat_key.get(plat, None)
             ix = lon_key.get(plon, None)
             if iy is None or ix is None:
+                # could warn here if you want to catch weird cases
                 continue
 
             dvals_site, _, site_df = dt.create_dtime(
