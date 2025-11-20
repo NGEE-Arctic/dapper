@@ -114,6 +114,34 @@ def compute_humidities(temp, dewpoint_temp, surf_pressure):
     return RH, Q
 
 
+def compute_specific_humidity_from_rh(temp_c, rh_percent, surf_pressure_pa):
+    """
+    Compute specific humidity (kg/kg) from:
+        temp_c           : air temperature in °C
+        rh_percent       : relative humidity in %
+        surf_pressure_pa : surface pressure in Pa
+    """
+    temp_c = np.asarray(temp_c, dtype=float)
+    rh = np.asarray(rh_percent, dtype=float)
+    p = np.asarray(surf_pressure_pa, dtype=float)
+
+    # Saturation vapor pressure over water (Pa)
+    es = 611.2 * np.exp((17.67 * temp_c) / (temp_c + 243.5))
+
+    # Actual vapor pressure (Pa)
+    e = (rh / 100.0) * es
+
+    # Mixing ratio (kg/kg)
+    epsilon = 0.622
+    denom = np.maximum(p - e, 1.0)  # avoid divide-by-zero
+    w = epsilon * e / denom
+
+    # Specific humidity (kg/kg)
+    q = w / (1.0 + w)
+    return q
+
+
+
 def elm_data_dicts():
     """
     Defines some dictionaries for ELM-expected variables.

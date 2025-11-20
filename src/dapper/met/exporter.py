@@ -526,9 +526,24 @@ class Exporter:
             print(f"Processing file {i+1} of {len(self.csv_files)}: {f}")
             df = pd.read_csv(f, dtype={"gid": "string"})
 
-            # Assume CSVs already use 'gid'
+            # Handle 'gid' column
             if "gid" not in df.columns:
-                raise KeyError("Expected a 'gid' column in CSV input.")
+                # Single-site convenience: infer gid from df_loc_norm
+                unique_gids = self.df_loc_norm["gid"].unique()
+                if len(unique_gids) == 1:
+                    single_gid = str(unique_gids[0])
+                    df["gid"] = single_gid
+                    warnings.warn(
+                        "Source CSV has no 'gid' column; treating it as single-site and "
+                        f"assigning gid='{single_gid}' to all rows.",
+                        UserWarning,
+                    )
+                else:
+                    raise KeyError(
+                        "Expected a 'gid' column in CSV input, and df_loc_norm has "
+                        f"{len(unique_gids)} distinct gids; cannot infer site key."
+                    )
+
             df["gid"] = df["gid"].astype(str).str.strip()
 
             merged = df.merge(self.df_loc_norm[["gid","lat","lon","zone"]], on="gid", how="inner")
@@ -579,11 +594,23 @@ class Exporter:
 
             # must have 'gid' and 'date' in the source CSVs
             if "gid" not in df.columns:
-                raise KeyError("Expected a 'gid' column in CSV input.")
+                unique_gids = self.df_loc_norm["gid"].unique()
+                if len(unique_gids) == 1:
+                    single_gid = str(unique_gids[0])
+                    df["gid"] = single_gid
+                    warnings.warn(
+                        "Source CSV has no 'gid' column; treating it as single-site and "
+                        f"assigning gid='{single_gid}' to all rows (raw export).",
+                        UserWarning,
+                    )
+                else:
+                    raise KeyError(
+                        "Expected a 'gid' column in CSV input, and df_loc_norm has "
+                        f"{len(unique_gids)} distinct gids; cannot infer site key."
+                    )
+
             if "date" not in df.columns:
                 raise KeyError("Expected a 'date' column in CSV input.")
-
-            df["gid"] = df["gid"].astype(str).str.strip()
 
             # Prefer canonical site metadata from df_loc_norm (avoid conflicts)
             df = df.drop(columns=[c for c in ("lat", "lon", "zone") if c in df.columns])
