@@ -2,6 +2,7 @@
 import warnings
 import numpy as np
 import pandas as pd
+import datetime as _dt
 import geopandas as gpd
 from pathlib import Path
 from fastparquet import write
@@ -221,7 +222,9 @@ class Exporter:
         # stable site order (used for mapping & attrs in some tools)
         site_order = self.df_loc_norm["gid"].tolist()
         self.gid_to_isite = {g: i for i, g in enumerate(site_order)}
-        years_span = f"ERA5_{self.start_year}-{self.end_year}"
+
+        source_tag = getattr(self.adapter, "DRIVER_TAG", "ERA5")
+        years_span = f"{self.start_year}-{self.end_year}"
 
         # file-level attrs with provenance
         nc_attrs = self._file_attrs(output_mode, effective_pack)
@@ -347,7 +350,8 @@ class Exporter:
         self._grid_paths = {}
         for v in self.var_cols:
             ao, sf = packing[v]
-            path_nc = self.write_directory / f"ERA5_{v}_{self.start_year}-{self.end_year}.nc"
+            source_tag = getattr(self.adapter, "DRIVER_TAG", "ERA5")
+            path_nc = self.write_directory / f"{source_tag}_{v}_{years_span}.nc"
             initialize_met_netcdf(
                 path_nc=path_nc,
                 var_name=v,
@@ -472,7 +476,8 @@ class Exporter:
                     rep = float(np.nanmin(vals)) if np.isfinite(vals).any() else 0.0
                     ao, sf = float(rep), 1.0
 
-                path_nc = site_dir / f"ERA5_{v}_{years_span.split('_')[1]}_z{zone_str}.nc"
+                source_tag = getattr(self.adapter, "DRIVER_TAG", "ERA5")
+                path_nc = site_dir / f"{source_tag}_{v}_{years_span}_z{zone_str}.nc"
                 if not path_nc.exists():
                     initialize_met_netcdf(
                         path_nc=path_nc,
@@ -517,8 +522,32 @@ class Exporter:
 
     def _file_attrs(self, output_mode: str, pack_scope: str) -> dict:
         """Merge user attrs with exporter provenance and return a new dict."""
-        attrs = dict(self.append_attrs)  # copy
-        attrs.update({"export_mode": output_mode, "pack_scope": pack_scope})
+        attrs = dict(self.append_attrs)  # copy user attrs if provided
+
+        # Basic exporter provenance
+        attrs.update({
+            "export_mode": output_mode,
+            "pack_scope": pack_scope,
+        })
+
+        # Adapter-driven provenance
+        source_name = getattr(self.adapter, "SOURCE_NAME", None)
+        driver_tag  = getattr(self.adapter, "DRIVER_TAG", None)
+
+        if source_name and "met_source" not in attrs:
+            attrs["met_source"] = source_name
+        if driver_tag and "met_driver" not in attrs:
+            attrs["met_driver"] = driver_tag
+
+        # Helpful extras (won't override user-provided keys)
+        attrs.setdefault("dapper_adapter", self.adapter.__class__.__name__)
+        attrs.setdefault(
+            "dapper_note",
+            f"Created by dapper.met.exporter using {self.adapter.__class__.__name__} "
+            f"with dtime_resolution_hrs={self.dtime_resolution_hrs}."
+        )
+        attrs.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
+
         return attrs
 
     def _pass1_to_parquet(self):
@@ -526,9 +555,24 @@ class Exporter:
             print(f"Processing file {i+1} of {len(self.csv_files)}: {f}")
             df = pd.read_csv(f, dtype={"gid": "string"})
 
-            # Assume CSVs already use 'gid'
+            # Handle 'gid' column
             if "gid" not in df.columns:
-                raise KeyError("Expected a 'gid' column in CSV input.")
+                # Single-site convenience: infer gid from df_loc_norm
+                unique_gids = self.df_loc_norm["gid"].unique()
+                if len(unique_gids) == 1:
+                    single_gid = str(unique_gids[0])
+                    df["gid"] = single_gid
+                    warnings.warn(
+                        "Source CSV has no 'gid' column; treating it as single-site and "
+                        f"assigning gid='{single_gid}' to all rows.",
+                        UserWarning,
+                    )
+                else:
+                    raise KeyError(
+                        "Expected a 'gid' column in CSV input, and df_loc_norm has "
+                        f"{len(unique_gids)} distinct gids; cannot infer site key."
+                    )
+
             df["gid"] = df["gid"].astype(str).str.strip()
 
             merged = df.merge(self.df_loc_norm[["gid","lat","lon","zone"]], on="gid", how="inner")
@@ -579,11 +623,23 @@ class Exporter:
 
             # must have 'gid' and 'date' in the source CSVs
             if "gid" not in df.columns:
-                raise KeyError("Expected a 'gid' column in CSV input.")
+                unique_gids = self.df_loc_norm["gid"].unique()
+                if len(unique_gids) == 1:
+                    single_gid = str(unique_gids[0])
+                    df["gid"] = single_gid
+                    warnings.warn(
+                        "Source CSV has no 'gid' column; treating it as single-site and "
+                        f"assigning gid='{single_gid}' to all rows (raw export).",
+                        UserWarning,
+                    )
+                else:
+                    raise KeyError(
+                        "Expected a 'gid' column in CSV input, and df_loc_norm has "
+                        f"{len(unique_gids)} distinct gids; cannot infer site key."
+                    )
+
             if "date" not in df.columns:
                 raise KeyError("Expected a 'date' column in CSV input.")
-
-            df["gid"] = df["gid"].astype(str).str.strip()
 
             # Prefer canonical site metadata from df_loc_norm (avoid conflicts)
             df = df.drop(columns=[c for c in ("lat", "lon", "zone") if c in df.columns])

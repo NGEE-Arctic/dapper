@@ -100,6 +100,9 @@ class ERA5Adapter(BaseAdapter):
     - The wind vector → speed diagnostic is included; ELM typically consumes the
       magnitude (``WIND``) after short-name remapping.
     """
+    # These are just for netCDF metadata
+    SOURCE_NAME = "ERA5-Land hourly reanalysis"
+    DRIVER_TAG  = "ERA5"
 
     # ---------------- discovery & locations ----------------
 
