@@ -5,6 +5,7 @@ from typing import List, Optional
 
 import numpy as np
 import pandas as pd
+import warnings
 
 from dapper.met.adapters.base import BaseAdapter
 from dapper.schemas.elm import elm_required_vars, is_nonnegative
@@ -23,6 +24,9 @@ class FluxnetAdapter(BaseAdapter):
     - Exporter supplies df_merged with ['gid','lat','lon','zone', ...] already
       merged in from df_loc.
     """
+    # These are just for netCDF metadata
+    SOURCE_NAME = "FLUXNET (AmeriFlux ONEFlux) tower data"
+    DRIVER_TAG  = "FLUXNET"
 
     def __init__(self) -> None:
         # Native FLUXNET resolution (hours, e.g. 0.5, 1, 24, 168, …)
@@ -59,20 +63,18 @@ class FluxnetAdapter(BaseAdapter):
 
         csv_file = csv_files[0]
 
-        # Keep filename-based resolution only as a weak hint
+        # keep filename-based flag as metadata only
         self.resolution = self._infer_resolution_from_filename(csv_file)
 
-        # Read a small sample of timestamp columns
-        df_ts = pd.read_csv(
-            csv_file,
-            usecols=lambda c: c.startswith("TIMESTAMP"),
-            nrows=5000,
-        )
+        # --- read ONLY timestamp columns, but read the WHOLE column ---
+        # (this is cheap even for a 0.5 GB file because it's a single column)
+        df_ts = pd.read_csv(csv_file, usecols=lambda c: c.startswith("TIMESTAMP"))
 
-        # Infer native timestep (hours) from the timestamps themselves
-        self.native_dt_hours = infer_fluxnet_dt_hours(df_ts)
+        # infer native dt from a small sample of the timestamp table
+        # (first few thousand rows are enough)
+        self.native_dt_hours = infer_fluxnet_dt_hours(df_ts.iloc[:5000])
 
-        # Infer start/end years from timestamps (handle TIMESTAMP vs START/END)
+        # choose which timestamp column we'll use for year min/max
         ts_col = None
         for c in ("TIMESTAMP_END", "TIMESTAMP_START", "TIMESTAMP"):
             if c in df_ts.columns:
@@ -81,22 +83,26 @@ class FluxnetAdapter(BaseAdapter):
         if ts_col is None:
             raise KeyError("No TIMESTAMP_* column found in FLUXNET CSV.")
 
+        vals = df_ts[ts_col].astype(str)
+
+        # parse with formats that match FLUXNET conventions
         if ts_col in ("TIMESTAMP_START", "TIMESTAMP_END"):
-            times = pd.to_datetime(
-                df_ts[ts_col].astype(str), format="%Y%m%d%H%M", errors="coerce"
-            )
-        else:  # TIMESTAMP (daily/monthly/yearly, truncated)
-            times = pd.to_datetime(
-                df_ts[ts_col].astype(str), format="%Y%m%d", errors="coerce"
-            )
+            # half-hourly / hourly / weekly: YYYYMMDDHHMM
+            times = pd.to_datetime(vals, format="%Y%m%d%H%M", errors="coerce")
+        else:
+            # daily / monthly / yearly: TIMESTAMP is truncated (YYYYMMDD or shorter)
+            times = pd.to_datetime(vals, format="%Y%m%d%H%M", errors="coerce")
             if times.isna().all():
-                times = pd.to_datetime(df_ts[ts_col].astype(str), errors="coerce")
+                times = pd.to_datetime(vals, format="%Y%m%d", errors="coerce")
+            if times.isna().all():
+                times = pd.to_datetime(vals, errors="coerce")
 
         if times.isna().all():
             raise ValueError("Could not parse any timestamps from FLUXNET CSV.")
 
         start_year = int(times.dt.year.min())
         end_year = int(times.dt.year.max())
+
         return [csv_file], start_year, end_year
 
     # ------------------------------------------------------------------
@@ -303,13 +309,45 @@ class FluxnetAdapter(BaseAdapter):
         """
         out = df.copy()
 
+        # Track which raw columns actually contributed to each coalesced output
+        #   coalesced_info[out_name] = {src_col: count_of_values}
+        coalesced_info: dict[str, dict[str, int]] = {}
+
         def coalesce_priority(cols, out_name):
+            """
+            Take the first non-NaN among cols (in priority order) and store as out_name.
+
+            Also record how many values came from each source; if more than one source
+            actually contributed, we will emit a warning at the end of this function.
+            """
+            nonlocal coalesced_info
+
             cols = [c for c in cols if c in out.columns]
             if not cols:
                 return
-            stacked = pd.concat([out[c] for c in cols], axis=1)
-            out[out_name] = stacked.bfill(axis=1).iloc[:, 0]
 
+            # Stack and forward-fill across columns to get first non-NaN
+            stacked = pd.concat([out[c] for c in cols], axis=1)
+            stacked.columns = cols  # ensure col names match
+            result = stacked.bfill(axis=1).iloc[:, 0]
+            out[out_name] = result
+
+            # Figure out which col was the first non-NaN at each row
+            used_counts: dict[str, int] = {}
+            for i, c in enumerate(cols):
+                col_vals = stacked[c]
+                if i == 0:
+                    contrib_mask = col_vals.notna()
+                else:
+                    contrib_mask = col_vals.notna() & stacked[cols[:i]].isna().all(axis=1)
+                if contrib_mask.any():
+                    used_counts[c] = int(contrib_mask.sum())
+
+            # Only log as "coalesced" if more than one source actually contributed
+            if len(used_counts) > 1:
+                coalesced_info[out_name] = used_counts
+
+        # -------------------- coalescing raw met variables --------------------
         # Core meteorology
         coalesce_priority(["TA_F_MDS", "TA_F", "TA_ERA", "TA"], "TA_C")
         coalesce_priority(["VPD_F_MDS", "VPD_F", "VPD_ERA", "VPD"], "VPD_hPa")
@@ -320,7 +358,8 @@ class FluxnetAdapter(BaseAdapter):
         coalesce_priority(["LW_IN_F_MDS", "LW_IN_F", "LW_IN_ERA", "LW_IN"], "LW_IN")
         coalesce_priority(["P_F", "P", "P_ERA"], "P_mm")
 
-        # Temperature: C → K for TBOT
+        # -------------------- unit conversions --------------------
+        # Temperature: C → K
         if "TA_C" in out.columns:
             out["TA"] = out["TA_C"].astype(float) + 273.15
 
@@ -336,29 +375,35 @@ class FluxnetAdapter(BaseAdapter):
         # Precip → PRECTmms (mm/s)
         if "P_mm" in out.columns:
             p_vals = out["P_mm"].astype(float)
-
-            # Prefer dt from timestamps; fall back to filename flag if needed
-            dt_hours = self.native_dt_hours
-            if dt_hours is None:
-                try:
-                    dt_hours = infer_fluxnet_dt_hours(out)
-                except Exception:
-                    dt_hours = None
-
-            if dt_hours is not None and dt_hours < 24.0:
-                # High-frequency (half-hourly / hourly / maybe sub-daily):
-                # P is mm over the step → mm/s
-                dt_sec = dt_hours * 3600.0
-                out["PRECTmms"] = p_vals / dt_sec
-            else:
-                # Coarser files: DD / WW / MM: mm d-1, YY: mm y-1
-                if dt_hours is not None and dt_hours >= 360.0:
-                    # ~>15 days between records → treat as yearly rate
-                    dt_sec = 365.0 * 86400.0
+            res = (self.resolution or "").upper()
+            if res in ("HH", "HR"):
+                # mm over step → mm/s using step length
+                if "TIMESTAMP_START" in out.columns and "TIMESTAMP_END" in out.columns:
+                    t0 = pd.to_datetime(
+                        out["TIMESTAMP_START"].astype(str).iloc[0],
+                        format="%Y%m%d%H%M",
+                        errors="coerce",
+                    )
+                    t1 = pd.to_datetime(
+                        out["TIMESTAMP_END"].astype(str).iloc[0],
+                        format="%Y%m%d%H%M",
+                        errors="coerce",
+                    )
+                    dt_sec = (t1 - t0).total_seconds()
+                    if not np.isfinite(dt_sec) or dt_sec <= 0:
+                        dt_sec = 1800.0  # fallback for half-hourly
                 else:
-                    # daily / weekly / monthly → mm d-1
-                    dt_sec = 86400.0
+                    dt_sec = 1800.0
                 out["PRECTmms"] = p_vals / dt_sec
+            elif res in ("DD", "MM", "WW"):
+                # mm d-1 → mm/s
+                out["PRECTmms"] = p_vals / 86400.0
+            elif res == "YY":
+                # mm y-1 → mm/s (assume 365-day year)
+                out["PRECTmms"] = p_vals / (365.0 * 86400.0)
+            else:
+                # Unknown resolution: assume half-hourly
+                out["PRECTmms"] = p_vals / 1800.0
 
         # Fill RH from VPD if available
         if ("TA_C" in out.columns) and ("VPD_hPa" in out.columns):
@@ -377,6 +422,21 @@ class FluxnetAdapter(BaseAdapter):
                 out["RH"] = rh
             else:
                 out["RH"] = rh_from_vpd
+
+        # -------------------- report coalescing to the user --------------------
+        if coalesced_info:
+            lines = []
+            for out_name, counts in coalesced_info.items():
+                parts = [f"{src}={n}" for src, n in counts.items()]
+                lines.append(f"{out_name}: " + ", ".join(parts))
+            msg = (
+                "FluxnetAdapter coalesced the following variables "
+                "(source_column=number_of_values_used):\n  " +
+                "\n  ".join(lines)
+            )
+            warnings.warn(msg, UserWarning)
+            # If you prefer stdout instead:
+            # print(msg)
 
         return out
 

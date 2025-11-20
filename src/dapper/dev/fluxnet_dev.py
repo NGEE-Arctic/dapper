@@ -26,6 +26,10 @@ exp = Exporter(
 
 exp.run("elm-sites")   # or "elm-combined"
 
+from dapper.met import validation
+validation.make_quicklooks(exp)
 
-# df = pd.read_csv(r"X:\Research\NGEE Arctic\8. add flux_tower data option\AMF_US-ICh_FLUXNET_FULLSET_2007-2023_4-6\AMF_US-ICh_FLUXNET_FULLSET_HH_2007-2023_4-6.csv")
-# print([c for c in df.columns if 'TA' in c])
+import xarray as xr
+ds = xr.open_dataset(r"X:\Research\NGEE Arctic\8. add flux_tower data option\out\US-ICh\FLUXNET_PRECTmms_2007-2024_z01.nc")
+# Global attributes
+ds.attrs
