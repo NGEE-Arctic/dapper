@@ -9,6 +9,8 @@ from shapely.geometry import Polygon, shape
 from dateutil.relativedelta import relativedelta
 
 from dapper.config.metsources import era5
+from dapper.domain import Domain
+
 
 # Pathing for convenience
 import dapper
@@ -235,16 +237,22 @@ def export_fc(
     ).start()
 
 
-def featurecollection_to_df_loc(fc):
+def featurecollection_to_domain(fc, name="gee", domain_nc=None):
     """
-    Converts an ee.FeatureCollection object to a GeoDataFrame
-    with one row per feature and representative lon/lat.
+    Converts an ee.FeatureCollection object to a Domain with one row per feature
+    and representative lon/lat.
 
     - Points         → lon/lat from the point.
     - Polygons       → lon/lat from a representative interior point.
     - MultiPolygons  → same as polygons.
 
-    Also stores the original geometry as WKT in 'sampled_geometry'.
+    The Domain's underlying GeoDataFrame has:
+      - 'gid'   : copied from feature properties
+      - 'lon'   : representative longitude (EPSG:4326)
+      - 'lat'   : representative latitude (EPSG:4326)
+      - 'method': how sampling was interpreted
+      - 'sampled_geometry': WKT of the original geometry
+      - 'geometry': Point at (lon, lat)
     """
     geojson = fc.getInfo()
 
@@ -281,10 +289,21 @@ def featurecollection_to_df_loc(fc):
         crs="EPSG:4326",
     )
     gdf_loc["gid"] = gdf_loc["gid"].astype(str).str.strip()
-    return gdf_loc
+
+    return Domain.from_gdf(gdf_loc, name=name, domain_nc=domain_nc)
 
 
-def sample_e5lh(params, skip_tasks=False):
+def featurecollection_to_df_loc(fc, name="gee"):
+    """
+    Legacy wrapper: convert a FeatureCollection to a df_loc-style GeoDataFrame.
+
+    Prefer `featurecollection_to_domain(fc).gdf` in new code.
+    """
+    dom = featurecollection_to_domain(fc, name=name)
+    return dom.gdf
+
+
+def sample_e5lh(params, domain_name=None, skip_tasks=False):
     """
     Submit Google Earth Engine (GEE) export tasks for ERA5-Land Hourly time series
     over many geometries (polygons or points), chunked by year range, and return a
@@ -349,11 +368,10 @@ def sample_e5lh(params, skip_tasks=False):
 
     Returns
     -------
-    pandas.DataFrame
-        A small locations table derived from the final FeatureCollection, as returned
-        by ``featurecollection_to_df_loc(geometries_fc)``. Typically contains at least
-        a ``"gid"`` column and may include coordinates/metadata depending on your
-        helper’s implementation.
+    dapper.domain.Domain
+        Domain describing the sampling locations. The underlying GeoDataFrame
+        (``domain.gdf``) contains at least ``"gid"``, ``"lon"``, ``"lat"``, plus
+        metadata columns such as ``"method"`` and ``"sampled_geometry"``.
 
     Notes
     -----
@@ -490,7 +508,13 @@ def sample_e5lh(params, skip_tasks=False):
 
         return values.map(lambda f: f.set("date", date))  # Attach date to results
 
-    df_loc = featurecollection_to_df_loc(geometries_fc)
+    # Build Domain from the final FeatureCollection
+    domain = featurecollection_to_domain(
+        geometries_fc,
+        name=domain_name or params.get("job_name", "era5_gee"),
+        domain_nc=None,
+    )
+
 
     # Fire off the Tasks
     if skip_tasks is False:
@@ -522,7 +546,7 @@ def sample_e5lh(params, skip_tasks=False):
             print(f"GEE Export task submitted: {export_filename}")
         print("All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion.")
 
-    return df_loc
+    return domain
 
 
 def masks_to_featurecollection(mask_entries, region, export_scale, extra_image_props=None):

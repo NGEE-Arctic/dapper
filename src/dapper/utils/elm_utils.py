@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+
+from dapper.domain import Domain
 from dapper.utils.utils import _DATA_DIR
 
 def validate_met_vars(df):
@@ -264,30 +266,44 @@ def elm_data_dicts():
             }
 
 
-def gen_zone_mappings(df_loc, site=False):
+def gen_zone_mappings(domain_or_df, site: bool = False):
     """
-    Creates a dataframe of zone mappings.
-    
-    If site=False:
-        Returns a DataFrame with columns ['lon', 'lat', 'zone', 'id'].
-    If site=True:
-        Returns a dictionary: {gid: single-row DataFrame}.
+    Create a dataframe of zone mappings.
+
+    Parameters
+    ----------
+    domain_or_df : Domain or (geo)DataFrame
+        - Preferred: a ``dapper.domain.Domain`` instance whose ``gdf`` has
+          at least ['gid','lon','lat','zone'].
+        - Legacy: a df_loc-style (geo)DataFrame with the same columns.
+
+    site : bool, default False
+        If False:
+            Returns a DataFrame with columns ['lon', 'lat', 'zone', 'id'].
+        If True:
+            Returns a dictionary: {gid: single-row DataFrame}.
     """
+
+    # Accept either Domain or raw df_loc for backward compatibility
+    if isinstance(domain_or_df, Domain):
+        df_loc = domain_or_df.gdf
+    else:
+        df_loc = domain_or_df
 
     # Base mapping
-    zone_mapping = df_loc[['lon', 'lat', 'zone']].copy()
-    zone_mapping['lon'] = zone_mapping['lon'] % 360  # ELM uses 0–360 longitudes
-    zone_mapping['id'] = np.arange(1, len(zone_mapping) + 1)
-    zone_mapping['zone'] = zone_mapping['zone'].astype(int).astype(str).str.zfill(2)
+    zone_mapping = df_loc[["lon", "lat", "zone"]].copy()
+    zone_mapping["lon"] = zone_mapping["lon"] % 360  # ELM uses 0–360 longitudes
+    zone_mapping["id"] = np.arange(1, len(zone_mapping) + 1)
+    zone_mapping["zone"] = zone_mapping["zone"].astype(int).astype(str).str.zfill(2)
 
-    if site is True:
+    if site:
         # Override ID and zone to just "01"
-        zone_mapping['id'] = 1
-        zone_mapping['zone'] = '01'
-        
+        zone_mapping["id"] = 1
+        zone_mapping["zone"] = "01"
+
         # Export a dictionary of single-row DataFrames
         zone_mapping_site = {
-            gid: zone_mapping.iloc[[i]] for i, gid in enumerate(df_loc['gid'].values)
+            gid: zone_mapping.iloc[[i]] for i, gid in enumerate(df_loc["gid"].values)
         }
         return zone_mapping_site
 

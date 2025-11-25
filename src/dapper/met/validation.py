@@ -95,7 +95,8 @@ def make_quicklooks(
     ----------
     exporter : Exporter or None
         Optionally pass the Exporter instance you used for `run(...)`.
-        REQUIRED for 'elm-combined' (to map gids to lat/lon via df_loc_norm).
+        REQUIRED for 'elm-combined' (to map gids to lat/lon via the normalized
+        domain geometry, i.e. ``exporter.domain_norm`` or ``exporter.df_loc_norm``).
     write_directory : path-like or None
         Where the export outputs live. If omitted and `exporter` is given,
         uses `exporter.write_directory`.
@@ -156,13 +157,28 @@ def make_quicklooks(
         return
 
     if mode_eff == "elm-combined":
-        if exporter is None or exporter.df_loc_norm is None:
-            raise ValueError("For 'elm-combined', pass the Exporter used for the run (needs df_loc_norm).")
+        if exporter is None:
+            raise ValueError(
+                "For 'elm-combined', pass the Exporter used for the run "
+                "(needs domain geometry to map gids to lat/lon)."
+            )
+
+        # Prefer the Domain-based geometry; fall back to legacy df_loc_norm
+        if getattr(exporter, "domain_norm", None) is not None:
+            df_loc_norm = exporter.domain_norm.gdf
+        elif getattr(exporter, "df_loc_norm", None) is not None:
+            df_loc_norm = exporter.df_loc_norm
+        else:
+            raise ValueError(
+                "Exporter has neither 'domain_norm' nor 'df_loc_norm'. "
+                "Did you run Exporter.run(...) first?"
+            )
+
         _quicklooks_elm_combined(
             wd=wd,
             out_dir=out_dir,
             vars=list(vars) if vars else DEFAULT_ELM_VARS,
-            df_loc_norm=exporter.df_loc_norm,
+            df_loc_norm=df_loc_norm,
             gids=list(map(str, gids)) if gids else None,
         )
         return

@@ -1,18 +1,18 @@
 
 from dapper.surf.sample import sample_point_values
-from dapper.utils.pathing import SURFDATA_HALFDEGREE_TOP
+from dapper.surf.write import build_surface_dataset, write_surface_nc
 
-# Existing global surface file
-nc_in = SURFDATA_HALFDEGREE_TOP / "surfdata_0.5x0.5_SOMETHING.nc"
+nc_in = "/path/to/global/surfdata_0.5x0.5.nc"
 
-sampled = sample_point_values(
-    nc_in,
-    lat=40.0,
-    lon=-106.0,
-    # optional filters:
-    # include={"PCT_NATVEG", "PCT_NAT_PFT", "PCT_SAND", "PCT_CLAY"},
-    # exclude={"APATITE_P", "LABILE_P"},
-)
+# 1) Sample
+sampled = sample_point_values(nc_in, lat=40.0, lon=-106.0)
+
+# 2) Build 1x1 Dataset
+ds_pt = build_surface_dataset(sampled)
+
+# 3) Write to NetCDF
+out_path = write_surface_nc(ds_pt, "surfdata_1x1_40N_106W.nc")
+print("Wrote:", out_path)
 
 
 

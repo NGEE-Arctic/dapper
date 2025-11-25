@@ -8,7 +8,8 @@ from pathlib import Path
 from fastparquet import write
 
 from dapper.utils import utils
-import dapper.met.temporal as dt  # assumes your helpers live here
+import dapper.met.temporal as dt 
+from dapper.domain import Domain
 from dapper.met.writers import initialize_met_netcdf, append_met_netcdf
 
 # Rounding precision for lat/lon axes and lookups.
@@ -101,15 +102,65 @@ class Exporter:
       sorted lat/lon from ``df_loc`` (sparse OK).
     """
 
-    def __init__(self, adapter, csv_directory, write_directory, df_loc,
-                 id_col=None, calendar='noleap', dtime_resolution_hrs=1,
-                 dtime_units='days', nzones=1, dformat="BYPASS",
-                 append_attrs=None, chunks=None, include_vars=None, exclude_vars=None):
+    def __init__(
+        self,
+        adapter,
+        csv_directory,
+        write_directory,
+        domain,
+        id_col=None,
+        calendar="noleap",
+        dtime_resolution_hrs=1,
+        dtime_units="days",
+        nzones=1,
+        dformat="BYPASS",
+        append_attrs=None,
+        chunks=None,
+        include_vars=None,
+        exclude_vars=None,
+    ):
+        """
+        Parameters
+        ----------
+        adapter : BaseAdapter
+            Implements: ``discover_files``, ``normalize_locations``,
+            ``preprocess_shard``, ``required_vars``, and ``pack_params``.
 
+        csv_directory : str or pathlib.Path
+            Directory containing time-sharded CSV files for all sites/cells.
+
+        write_directory : str or pathlib.Path
+            Destination directory for NetCDF outputs and temporary parquet shards.
+
+        domain : Domain or (Geo)DataFrame
+            Canonical spatial domain. Preferred is a ``dapper.domain.Domain``
+            instance. For convenience, you may also pass a df_loc-style
+            (geo)DataFrame with at least ``["gid", "lon", "lat"]`` (and
+            optionally ``"geometry"`` and ``"zone"``); it will be wrapped via
+            ``Domain.from_gdf(...)``.
+
+        id_col : str, optional
+            Only used when ``domain`` is a DataFrame and does not yet have a
+            ``"gid"`` column; in that case, ``id_col`` will be renamed to
+            ``"gid"``.
+        """
         self.adapter = adapter
         self.csv_directory = Path(csv_directory)
         self.write_directory = Path(write_directory)
-        self.df_loc = self._ensure_lon_lat(df_loc)
+
+        # ---- normalize / wrap into Domain ----
+        if isinstance(domain, Domain):
+            dom = domain
+        else:
+            # Backward-compat convenience: accept df_loc-like tables
+            dom = Domain.from_gdf(domain, name="from_exporter", id_col=id_col)
+
+        # Ensure lon/lat exist (derived from geometry if needed)
+        dom = dom.ensure_lon_lat()
+
+        self.domain = dom
+        self.domain_norm = None  # will hold adapter-normalized Domain
+
         self.id_col = id_col
         self.calendar = calendar
         self.dtime_resolution_hrs = dtime_resolution_hrs
@@ -126,10 +177,23 @@ class Exporter:
         self.start_year = None
         self.end_year = None
         self.var_cols = None
-        self.meta_cols = {"gid","time","LONGXY","LATIXY","zone","lat","lon","lon_0-360"}
+
+        # Meta columns we expect after preprocess
+        self.meta_cols = {
+            "gid",
+            "time",
+            "LONGXY",
+            "LATIXY",
+            "zone",
+            "lat",
+            "lon",
+            "lon_0-360",
+        }
         self.dtime_vals = None
         self.dtime_units_out = None
         self.nt = None
+
+        # Normalized location table (as DataFrame) – filled in run()
         self.df_loc_norm = None
 
         # derived
@@ -145,8 +209,11 @@ class Exporter:
         if output_mode not in possible_output_modes:
             raise KeyError(f'Your requested output_mode is invalid. Choose from {possible_output_modes}.')
 
-        # 0) prep
-        self.df_loc_norm = self.adapter.normalize_locations(self.df_loc, self.nzones)
+        # 0) prep – adapter-normalized locations
+        self.df_loc_norm = self.adapter.normalize_locations(self.domain.gdf, self.nzones)
+        # keep a normalized Domain alongside the raw Domain
+        self.domain_norm = self.domain.with_gdf(self.df_loc_norm)
+
         self.csv_files, self.start_year, self.end_year = self.adapter.discover_files(
             self.csv_directory, self.calendar
         )
@@ -244,63 +311,7 @@ class Exporter:
         # 4) cleanup
         utils._rm(self.temp_dir)
 
-    # ---------------------- private: branches ----------------------
     # ---------------------- private: helpers ----------------------
-    def _ensure_lon_lat(self, df_loc, geom_col="geometry"):
-        """
-        Ensure df_loc has lon/lat. If missing and a geometry column is present,
-        derive lon/lat from the geometry.
-
-        - Points: use x/y directly
-        - Polygons/MultiPolygons: use representative_point()
-        """
-        df_loc = df_loc.copy()
-
-        # If lon/lat already present, don't touch them
-        if {"lon", "lat"}.issubset(df_loc.columns):
-            return df_loc
-
-        # Need geometry to derive lon/lat
-        if geom_col not in df_loc.columns:
-            raise ValueError(
-                "df_loc must contain 'lon' and 'lat' columns or a geometry column "
-                f"('{geom_col}') to write zone_mappings."
-            )
-
-        geom = df_loc[geom_col]
-
-        # If it's a GeoDataFrame, you can sanity-check CRS
-        if isinstance(df_loc, gpd.GeoDataFrame) and df_loc.crs is not None:
-            try:
-                epsg = df_loc.crs.to_epsg()
-            except Exception:
-                epsg = None
-            if epsg is not None and epsg != 4326:
-                warnings.warn(
-                    f"df_loc.crs is {df_loc.crs}, not EPSG:4326. "
-                    "Computed lon/lat will be in that CRS.",
-                    UserWarning,
-                )
-
-        def rep_point(g):
-            if g.geom_type == "Point":
-                p = g
-            else:
-                p = g.representative_point()
-            return p.x, p.y
-
-        lons, lats = zip(*geom.apply(rep_point))
-        df_loc["lon"] = lons
-        df_loc["lat"] = lats
-
-        warnings.warn(
-            "df_loc was missing lon/lat; derived them from geometry "
-            "(Point coordinates or representative_point for polygons).",
-            UserWarning,
-        )
-
-        return df_loc
-
     def _zone_mappings_table(self):
         """
         Build a table for zone_mappings.txt with columns:
@@ -333,18 +344,11 @@ class Exporter:
         # global packing scan
         packing = self._compute_global_packing(parquet_files)
 
-        # lat/lon axes (sparse allowed; rounded to kill float jitter)
-        lats_axis = self.df_loc_norm["lat"].to_numpy(dtype="float64").round(LATLON_DECIMALS)
-        lats_axis = np.unique(lats_axis)
-        lats_axis.sort()
-
-        lons_axis = self.df_loc_norm["lon_0-360"].to_numpy(dtype="float64").round(LATLON_DECIMALS)
-        lons_axis = np.unique(lons_axis)
-        lons_axis.sort()
-
-        # index maps (consistent rounding)
-        lat_key = {round(float(v), LATLON_DECIMALS): i for i, v in enumerate(lats_axis)}
-        lon_key = {round(float(v), LATLON_DECIMALS): j for j, v in enumerate(lons_axis)}
+        # lat/lon axes and gid→(iy,ix) from the normalized Domain
+        lats_axis, lons_axis, gid_to_ij = self.domain_norm.elm_latlon_layout(
+            decimals=LATLON_DECIMALS,
+            use_lon_0360=True,
+        )
 
         # initialize one lat/lon file per var
         self._grid_paths = {}
@@ -390,17 +394,11 @@ class Exporter:
             if df0.empty:
                 continue
 
-            row = self.df_loc_norm[self.df_loc_norm["gid"] == gid]
-            if row.empty:
+            ij = gid_to_ij.get(gid)
+            if ij is None:
+                # no matching geometry in Domain; skip
                 continue
-
-            plat = round(float(row["lat"].iloc[0]), LATLON_DECIMALS)
-            plon = round(float(row["lon_0-360"].iloc[0]), LATLON_DECIMALS)
-            iy = lat_key.get(plat, None)
-            ix = lon_key.get(plon, None)
-            if iy is None or ix is None:
-                # could warn here if you want to catch weird cases
-                continue
+            iy, ix = ij
 
             dvals_site, _, site_df = dt.create_dtime(
                 df0, self.calendar, self.dtime_units, self.dtime_resolution_hrs

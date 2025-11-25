@@ -1,6 +1,9 @@
 import ee
 import geopandas as gpd
+
+from dapper.domain import Domain
 from dapper.utils import gee_utils as gu
+
 
 # ----------------------------
 # Utilities
@@ -411,7 +414,6 @@ def _combine_hierarchical(order, bin_masks_by_source, max_topounits=None, min_pa
 # -----------------------------------------
 # Main API 
 # -----------------------------------------
-
 def make_topounits(
     feature,
     sources,                      # e.g., ['elev'] or ['elev','hand'] or ['elev','aspect']
@@ -652,7 +654,19 @@ def make_topounits(
             return_as='gdf'
         )
     """
-    region = gu._geom_from_any(feature)
+    # --- Normalize AOI: Domain or raw feature/geometry ---
+    #
+    # If a Domain is passed, use the union of its cell geometries as the AOI.
+    # Otherwise, keep the existing behavior (let gee_utils._geom_from_any handle it).
+    if isinstance(feature, Domain):
+        if feature.gdf.empty:
+            raise ValueError("Domain has no geometries; cannot build topounits.")
+        aoi_geom = feature.gdf.unary_union  # shapely geometry in EPSG:4326
+        feature_for_gee = aoi_geom
+    else:
+        feature_for_gee = feature
+
+    region = gu._geom_from_any(feature_for_gee)
 
     # 1) Planned total bins (product across sources)
     def _planned_bins_for_source(sid):
@@ -682,7 +696,7 @@ def make_topounits(
     for sid in sources:
         img, nat_scale, meta = build_source(
             sid,
-            feature=feature,
+            feature=feature_for_gee,   # <-- changed from 'feature'
             desired_scale_hint=desired_scale_hint,
             binning_spec=binning[sid],
             dem_source=dem_source,
@@ -792,3 +806,4 @@ def make_topounits(
     else:
         gu.export_fc(polygons_fc, f'{asset_name}', asset_ftype, folder='topotest', verbose=True)
         return None
+
