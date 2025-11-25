@@ -10,7 +10,7 @@ from shapely.geometry import base as shapely_base
 from shapely.geometry import Point
 from pathlib import Path
 
-from dapper.domain import Domain
+from dapper.domains import Domain
 
 
 GeometryLike = Union[shapely_base.BaseGeometry, Point]
@@ -47,6 +47,26 @@ class AOI:
             ids = [f"aoi_{i:04d}" for i in range(len(geoms))]
         df = pd.DataFrame({"gid": list(ids)})
         gdf = gpd.GeoDataFrame(df, geometry=geoms, crs=crs)
+        return cls(name=name, gdf=gdf)
+    
+    @classmethod
+    def from_point(
+        cls,
+        lon: float,
+        lat: float,
+        *,
+        name: str = "aoi_point",
+        gid: str = "site_0000",
+        crs: str = "EPSG:4326",
+    ) -> "AOI":
+        """
+        Convenience constructor for a single-point AOI.
+        """
+        gdf = gpd.GeoDataFrame(
+            {"gid": [gid]},
+            geometry=[Point(lon, lat)],
+            crs=crs,
+        )
         return cls(name=name, gdf=gdf)
 
     @classmethod

@@ -9,7 +9,7 @@ from shapely.geometry import Polygon, shape
 from dateutil.relativedelta import relativedelta
 
 from dapper.config.metsources import era5
-from dapper.domain import Domain
+from dapper.domains import Domain
 
 
 # Pathing for convenience

@@ -1,7 +1,7 @@
 import ee
 import geopandas as gpd
 
-from dapper.domain import Domain
+from dapper.domains import Domain
 from dapper.utils import gee_utils as gu
 
 
