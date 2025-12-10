@@ -430,4 +430,135 @@ SURFACE_VAR_SPECS = {
         ),
         "required_level": "optional",
     },
+    # Below here I am not sure about...
+    "AREA": {
+        "dims": "lsmlat,lsmlon",
+        "doc": (
+            "Area (m2) of each land grid cell; used to weight land-surface "
+            "properties and to compare with domain/topography."
+        ),
+        "required_level": "required",
+    },
+    "LANDFRAC_PFT": {
+        "dims": "lsmlat,lsmlon",
+        "doc": (
+            "Fraction (0–1) of the global gridcell that is land in the PFT landunit; "
+            "used to weight PFT tiles relative to the gridcell."
+        ),
+        "required_level": "required",
+    },
+    "SLOPE": {
+        "dims": "lsmlat,lsmlon",
+        "doc": (
+            "Mean surface slope (degrees) for each land grid cell; used in "
+            "topographic and hydrologic parameterizations."
+        ),
+        "required_level": "required",
+    },
+    "PCT_SAND": {
+        "dims": "nlevsoi,lsmlat,lsmlon",
+        "doc": (
+            "Soil sand percentage by mass (0–100) in each soil layer; controls "
+            "hydraulic and thermal properties."
+        ),
+        "required_level": "required",
+    },
+    "PCT_CLAY": {
+        "dims": "nlevsoi,lsmlat,lsmlon",
+        "doc": (
+            "Soil clay percentage by mass (0–100) in each soil layer; controls "
+            "hydraulic and thermal properties."
+        ),
+        "required_level": "required",
+    },
+    "ORGANIC": {
+        "dims": "nlevsoi,lsmlat,lsmlon",
+        "doc": (
+            "Soil organic matter or organic carbon per layer; used in biogeochemical "
+            "and thermal calculations."
+        ),
+        "required_level": "optional",
+    },
+    "PCT_GRVL": {
+        "dims": "nlevsoi,lsmlat,lsmlon",
+        "doc": (
+            "Percent gravel content (0–100) in each soil layer; affects soil water "
+            "storage and hydraulic conductivity."
+        ),
+        "required_level": "optional",
+    },
+    "GLC_MEC": {
+        "dims": "lsmlat,lsmlon",
+        "doc": (
+            "Integer glacier elevation-class index for each grid cell when using "
+            "mechanistic glacier (MEC) landunits."
+        ),
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": (
+                "Required when glacier MEC landunits are used; optional otherwise"
+            ),
+        },
+    },
+    "MONTHLY_LAI": {
+        "dims": "time,lsmlat,lsmlon",
+        "doc": (
+            "Leaf area index (LAI; m2 leaf per m2 ground) monthly climatology; "
+            "time is typically 12 months."
+        ),
+        "required_level": "optional",
+    },
+    "MONTHLY_SAI": {
+        "dims": "time,lsmlat,lsmlon",
+        "doc": (
+            "Stem area index (SAI) monthly climatology; time is typically 12 months."
+        ),
+        "required_level": "optional",
+    },
+    "MONTHLY_HEIGHT_TOP": {
+        "dims": "time,lsmlat,lsmlon",
+        "doc": (
+            "Monthly climatology of canopy top height (m) for vegetated landunits."
+        ),
+        "required_level": "optional",
+    },
+    "MONTHLY_HEIGHT_BOT": {
+        "dims": "time,lsmlat,lsmlon",
+        "doc": (
+            "Monthly climatology of canopy bottom height (m) for vegetated landunits."
+        ),
+        "required_level": "optional",
+    },
+    "APATITE_P": {
+        "dims": "lsmlat,lsmlon",
+        "doc": (
+            "Soil phosphorus pool in apatite (primary mineral) form; used by "
+            "phosphorus biogeochemistry when enabled."
+        ),
+        "required_level": "optional",
+    },
+    "LABILE_P": {
+        "dims": "lsmlat,lsmlon",
+        "doc": (
+            "Soil labile (readily available) phosphorus pool; used by P-cycle "
+            "parameterizations."
+        ),
+        "required_level": "optional",
+    },
+    "OCCLUDED_P": {
+        "dims": "lsmlat,lsmlon",
+        "doc": (
+            "Soil occluded phosphorus pool (sorbed or otherwise inaccessible); "
+            "part of multi-pool P parameterization."
+        ),
+        "required_level": "optional",
+    },
+    "SECONDARY_P": {
+        "dims": "lsmlat,lsmlon",
+        "doc": (
+            "Soil secondary mineral phosphorus pool; intermediate in reactivity "
+            "between apatite and labile pools."
+        ),
+        "required_level": "optional",
+    },
 }

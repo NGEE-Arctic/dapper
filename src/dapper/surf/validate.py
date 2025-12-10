@@ -7,7 +7,7 @@ import pandas as pd
 import xarray as xr
 
 # Your hard-coded schema/registry module
-from dapper.surf import schema as SC  # expects REGISTRY (VarDef map), SCHEMA (tiers)
+from dapper.surf import schema as SC  # expects REGISTRY (ParDef map), SCHEMA (tiers)
 
 @dataclass
 class CheckResult:

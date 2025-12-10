@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Tuple, Iterable, Optional
 
+from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
 
 """
 dapper.surf.schema
@@ -17,13 +18,13 @@ validate files consistently.
 
 What this module defines
 ------------------------
-- VarDef: schema record for one variable (dims, dtype, units, doc, attrs).
-- REGISTRY: dict[str, VarDef]
+- ParDef: schema record for one variable (dims, dtype, units, doc, attrs).
+- REGISTRY: dict[str, ParDef]
     Canonical list of surface variables with their expected dimension
     signatures and basic metadata. Think of this as the variable “spec.”
 - SCHEMA: dict[str, Any]
     Tiered rules for presence/formatting:
-      * per-variable requirement lives in VarDef.required_level
+      * per-variable requirement lives in ParDef.required_level
       * "choose_one_of": at least one of the group must exist
       * "conditional": if driver var is present (or nonzero in practice),
         then dependent vars must also be present
@@ -47,9 +48,9 @@ How other modules use this
 
 Extending / editing
 -------------------
-- To add a new variable, add a VarDef in REGISTRY with its **full dim tuple**
+- To add a new variable, add a ParDef in REGISTRY with its **full dim tuple**
   (including spatial dims if it is spatial), its dtype, units, and doc.
-- Per-variable requirement level should be set in VarDef.required_level
+- Per-variable requirement level should be set in ParDef.required_level
   (e.g., "required", "optional", "recommended"). The validator uses this.
 - Add presence rules in SCHEMA only for cross-variable relationships
   (choose-one groups, conditionals, logical tiers).
@@ -65,12 +66,12 @@ and validation layers, not here.
 """
 
 
-# --------- Compact helpers so you don't write one-var-per-line ----------
+# --------- Compact helpers so we don't write one-var-per-line ----------
 
 @dataclass(frozen=True)
-class VarDef:
+class ParDef:
     """
-    Schema record for one surface variable.
+    Schema record for one surface parameter.
 
     dims:
         Tuple of dimension names in model order (non-spatial first,
@@ -96,16 +97,16 @@ class VarDef:
     attrs: Optional[Dict[str, str]] = None
 
 
-def vdef(
+def pdef(
     dims,
     dtype: str = "float32",
     units: str = "",
     doc: str = "",
     required_level: str = "",
     **attrs,
-) -> VarDef:
+) -> ParDef:
     """
-    Convenience constructor for VarDef.
+    Convenience constructor for ParDef.
 
     dims can be a comma-separated string ("lsmlat,lsmlon") or an
     iterable of dim names. Any extra keyword args become NetCDF
@@ -115,7 +116,7 @@ def vdef(
         dims_tuple = tuple(d.strip() for d in dims.split(",") if d.strip())
     else:
         dims_tuple = tuple(dims)
-    return VarDef(
+    return ParDef(
         dims=dims_tuple,
         dtype=str(dtype),
         units=units,
@@ -125,8 +126,8 @@ def vdef(
     )
 
 
-def register_many(names: Iterable[str], v: VarDef) -> Dict[str, VarDef]:
-    """Register many variables with the same VarDef in one call."""
+def register_many(names: Iterable[str], v: ParDef) -> Dict[str, ParDef]:
+    """Register many variables with the same ParDef in one call."""
     return {name: v for name in names}
 
 
@@ -142,235 +143,24 @@ DIMS_SLOPE  = "nlevslp,lsmlat,lsmlon"
 # This is the single source of truth. A small subset is populated now;
 # additional entries from report.rst can be merged here later.
 
-REGISTRY: Dict[str, VarDef] = {
-    # Core coords/mask/area
-    "LATIXY": vdef(
-        DIMS_2D,
-        units="degrees_north",
-        doc="Latitude of land grid cell centers.",
-        required_level="required",
-        long_name="latitude of land gridcell centers",
-    ),
-    "LONGXY": vdef(
-        DIMS_2D,
-        units="degrees_east",
-        doc="Longitude of land grid cell centers.",
-        required_level="required",
-        long_name="longitude of land gridcell centers",
-    ),
-    "AREA": vdef(
-        DIMS_2D,
-        units="m2",
-        doc="Area of land grid cells.",
-        required_level="required",
-        long_name="area of land gridcell",
-    ),
-    "LANDFRAC_PFT": vdef(
-        DIMS_2D,
-        units="1",
-        doc="Fraction of global gridcell that is land (PFT tile).",
-        required_level="required",
-        long_name="land fraction for PFT landunit",
-    ),
-    "PFTDATA_MASK": vdef(
-        DIMS_2D,
-        dtype="int16",
-        units="1",
-        doc="Mask for valid PFT data (1=valid land; 0=invalid).",
-        required_level="optional",
-        long_name="mask for valid pftdata",
-    ),
-}
+REGISTRY: Dict[str, ParDef] = {}
 
-# Land cover
-REGISTRY.update({
-    "PCT_NATVEG": vdef(
-        DIMS_2D,
-        units="%",
-        doc="Percent of landunit that is natural vegetation.",
-        required_level="",  # enforced via choose_one_of with PCT_NAT_PFT
-        long_name="percent natural vegetation landunit",
-    ),
-    "PCT_CROP": vdef(
-        DIMS_2D,
-        units="%",
-        doc="Percent of landunit that is crops.",
-        required_level="optional",
-        long_name="percent crop landunit",
-    ),
-})
-REGISTRY.update({
-    "PCT_NAT_PFT": vdef(
-        DIMS_PFT,
-        units="%",
-        doc="Percent of landunit in each natural plant functional type (PFT).",
-        required_level="",  # enforced via choose_one_of with PCT_NATVEG
-        long_name="percent natural vegetation per PFT",
+for name, spec in SURFACE_VAR_SPECS.items():
+    attrs = spec.get("attrs", {})
+    REGISTRY[name] = pdef(
+        spec["dims"],
+        # you can add "units" to SURFACE_VAR_SPECS later if you want:
+        units=spec.get("units", ""),
+        doc=spec.get("doc", ""),
+        required_level=spec.get("required_level", ""),
+        **attrs,
     )
-})
-
-# Soil (layered)
-REGISTRY.update({
-    "PCT_SAND": vdef(
-        DIMS_SOIL,
-        units="%",
-        doc="Soil sand percentage by mass in each soil layer.",
-        required_level="required",
-        long_name="percent sand by mass",
-    ),
-    "PCT_CLAY": vdef(
-        DIMS_SOIL,
-        units="%",
-        doc="Soil clay percentage by mass in each soil layer.",
-        required_level="required",
-        long_name="percent clay by mass",
-    ),
-    "ORGANIC": vdef(
-        DIMS_SOIL,
-        units="kg/m2",
-        doc="Soil organic matter (or carbon) content per layer.",
-        required_level="optional",
-        long_name="soil organic material",
-    ),
-    "PCT_GRVL": vdef(
-        DIMS_SOIL,
-        units="%",
-        doc="Percent gravel content in each soil layer.",
-        required_level="optional",
-        long_name="percent gravel by volume",
-    ),
-})
-
-# Topography / terrain
-REGISTRY.update({
-    "SLOPE": vdef(
-        DIMS_2D,
-        units="degrees",
-        doc="Mean surface slope per gridcell.",
-        required_level="required",
-        long_name="mean topographic slope",
-    ),
-    "STDEV_ELEV": vdef(
-        DIMS_2D,
-        units="m",
-        doc="Standard deviation of elevation within each gridcell.",
-        required_level="optional",
-        long_name="standard deviation of elevation",
-    ),
-    "STD_ELEV": vdef(
-        DIMS_2D,
-        units="m",
-        doc="Alias for STDEV_ELEV in some datasets.",
-        required_level="optional",
-        long_name="standard deviation of elevation (alias)",
-    ),
-    "TOPO": vdef(
-        DIMS_2D,
-        units="m",
-        doc="Mean surface elevation per gridcell.",
-        required_level="optional",
-        long_name="mean elevation of land gridcell",
-    ),
-    "TERRAIN_CONFIG": vdef(
-        DIMS_2D,
-        units="1",
-        doc="Terrain configuration index used in radiative transfer.",
-        required_level="optional",
-        long_name="terrain configuration factor",
-    ),
-    "SKY_VIEW": vdef(
-        DIMS_2D,
-        units="1",
-        doc="Sky view factor (0–1), accounting for topographic obstruction.",
-        required_level="optional",
-        long_name="sky view factor",
-    ),
-})
-
-# Water / ice / urban (+ conditionals)
-REGISTRY.update({
-    "PCT_WETLAND": vdef(
-        DIMS_2D,
-        units="%",
-        doc="Percent of landunit that is wetland.",
-        required_level="optional",
-        long_name="percent wetland landunit",
-    ),
-    "PCT_LAKE": vdef(
-        DIMS_2D,
-        units="%",
-        doc="Percent of landunit that is lake.",
-        required_level="optional",
-        long_name="percent lake landunit",
-    ),
-    "PCT_GLACIER": vdef(
-        DIMS_2D,
-        units="%",
-        doc="Percent of landunit that is glacier.",
-        required_level="optional",
-        long_name="percent glacier landunit",
-    ),
-    "PCT_URBAN": vdef(
-        DIMS_2D,
-        units="%",
-        doc="Percent of landunit that is urban.",
-        required_level="optional",
-        long_name="percent urban landunit",
-    ),
-    "URBAN_REGION_ID": vdef(
-        DIMS_2D,
-        dtype="int16",
-        units="1",
-        doc="Urban region index for parameter lookup.",
-        required_level="conditional",
-        long_name="urban region identifier",
-    ),
-    "GLC_MEC": vdef(
-        DIMS_2D,
-        dtype="int16",
-        units="1",
-        doc="Glacier elevation class index for each gridcell.",
-        required_level="conditional",
-        long_name="glacier elevation class index",
-    ),
-    "PCT_GLC_MEC": vdef(
-        DIMS_2D,
-        units="%",
-        doc="Percent of gridcell area for each glacier elevation class.",
-        required_level="conditional",
-        long_name="percent glacier area by elevation class",
-    ),
-})
-
-# Monthly canopy structure (12)
-REGISTRY.update(register_many(
-    ["MONTHLY_LAI", "MONTHLY_SAI", "MONTHLY_HEIGHT_TOP", "MONTHLY_HEIGHT_BOT"],
-    vdef(
-        DIMS_TIME2D,
-        units="varies",
-        doc="Monthly climatology (12 months) for canopy structural properties.",
-        required_level="optional",
-        long_name="monthly climatology",
-    ),
-))
-
-# Phosphorus pools (optional group)
-REGISTRY.update(register_many(
-    ["APATITE_P", "LABILE_P", "OCCLUDED_P", "SECONDARY_P"],
-    vdef(
-        DIMS_2D,
-        units="gP/m2",
-        doc="Soil phosphorus pools by geochemical form.",
-        required_level="optional",
-        long_name="soil phosphorus pool",
-    ),
-))
 
 
 # ------------- Minimal Schema (rules, not per-var lines) ----------------
 # SCHEMA now just organizes variables into logical tiers and handles
 # cross-variable rules. Per-variable "requiredness" is stored in
-# VarDef.required_level inside REGISTRY.
+# ParDef.required_level inside REGISTRY.
 
 SCHEMA: Dict[str, Dict] = {
     "TIER0_CORE_COORD_MASK": {
@@ -468,7 +258,7 @@ def validate_against_schema(present_vars: Iterable[str]) -> Dict[str, List[str]]
     """
     Validate a set of variable names against SCHEMA rules.
 
-    - Per-variable requirement is taken from VarDef.required_level
+    - Per-variable requirement is taken from ParDef.required_level
       (currently only 'required' is treated as hard-required).
     - 'choose_one_of' groups are enforced at the tier level.
     - 'conditional' rules are enforced as warnings when violated.
@@ -482,10 +272,10 @@ def validate_against_schema(present_vars: Iterable[str]) -> Dict[str, List[str]]
 
         # required vars in this tier: those with required_level == "required"
         for vname in tier_vars:
-            vdef_obj = REGISTRY.get(vname)
-            if not vdef_obj:
+            pdef_obj = REGISTRY.get(vname)
+            if not pdef_obj:
                 continue  # allow schema to reference vars not yet in registry
-            if vdef_obj.required_level.lower() == "required" and vname not in present:
+            if pdef_obj.required_level.lower() == "required" and vname not in present:
                 errors.append(f"{tier}: missing required var '{vname}'")
 
         # choose_one_of groups
@@ -511,7 +301,7 @@ def validate_against_schema(present_vars: Iterable[str]) -> Dict[str, List[str]]
     return {"errors": errors, "warnings": warnings}
 
 
-def propose_export_policy(var: str, sizes: Dict[str, int], vardef: VarDef | None = None):
+def propose_export_policy(var: str, sizes: Dict[str, int], ParDef: ParDef | None = None):
     """Return a compact policy dict for a variable, based on its dims and overrides."""
     # override first
     ov = EXPORT_POLICIES["overrides"].get(var)
@@ -523,7 +313,7 @@ def propose_export_policy(var: str, sizes: Dict[str, int], vardef: VarDef | None
             "bands": ov.get("band_keep", []),
         }
 
-    dims = tuple(vardef.dims if vardef else ())
+    dims = tuple(ParDef.dims if ParDef else ())
     for rule in EXPORT_POLICIES["rules"]:
         if dims == tuple(rule["when"]["dims"]):
             bands = (

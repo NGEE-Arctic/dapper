@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional, Tuple, Union
 import numpy as np
 import xarray as xr
 from pathlib import Path
-from dapper.surf import schema as SC  # expects REGISTRY (name -> VarDef), VarDef
+from dapper.surf import schema as SC  # expects REGISTRY (name -> ParDef), ParDef
 
 ArrayLike = Union[np.ndarray, "xr.DataArray", float, int]
 
@@ -189,7 +189,7 @@ def _build_template_da_for_new_var(ds: xr.Dataset, var: str) -> xr.DataArray:
     """
     if var not in SC.REGISTRY:
         raise CustomizeError(f"unknown variable {var!r}; not found in registry (set strict_registry=False to bypass).")
-    spec: SC.VarDef = SC.REGISTRY[var]  # dims, dtype, units, attrs
+    spec: SC.ParDef = SC.REGISTRY[var]  # dims, dtype, units, attrs
     reg_dims = list(spec.dims)
 
     # Map registry dim names -> dataset dim names (handle aliases)
@@ -392,7 +392,7 @@ def customize_surface(
 
         # Attributes: registry wins, then user overrides; keep encoding
         if var in SC.REGISTRY:
-            specv: SC.VarDef = SC.REGISTRY[var]
+            specv: SC.ParDef = SC.REGISTRY[var]
             attrs = dict(specv.attrs or {})
             if specv.units:
                 attrs["units"] = specv.units
