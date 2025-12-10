@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from dapper.domains import Domain
+from dapper.domains.domain import Domain
 from dapper.utils.utils import _DATA_DIR
 
 def validate_met_vars(df):

@@ -1,7 +1,8 @@
 import ee
+import math
 import geopandas as gpd
 
-from dapper.domains import Domain
+from dapper.domains.domain import Domain
 from dapper.utils import gee_utils as gu
 
 
@@ -412,6 +413,102 @@ def _combine_hierarchical(order, bin_masks_by_source, max_topounits=None, min_pa
     return combined
 
 # -----------------------------------------
+# Topounit characteristics sampling 
+# -----------------------------------------
+def _attach_topounit_terrain_stats(
+    polygons_fc,
+    feature_for_gee,
+    dem_source,
+    analysis_scale,
+    verbose=False,
+):
+    """
+    Attach per-topounit terrain properties needed for topounit-enabled surface files:
+
+        - TopounitAveElv  : mean elevation    [m]
+        - TopounitSlope   : mean slope        [deg]
+        - TopounitAspect  : mean aspect       [deg, 0–360, cw from north]
+
+    Parameters
+    ----------
+    polygons_fc : ee.FeatureCollection
+        One feature per topounit (unioned geometry).
+    feature_for_gee :
+        Same AOI object given to make_topounits (ee.Feature/Geometry/etc.).
+    dem_source : str
+        DEM source used by 'elev' (currently 'arcticdem').
+    analysis_scale : float
+        Scale in meters at which to compute zonal statistics.
+    verbose : bool
+        If True, prints a short status message.
+    """
+    # Reuse the same DEM source as the 'elev' topounit source.
+    dem_img, _native_scale, _meta = build_source(
+        source_id='elev',
+        feature=feature_for_gee,
+        desired_scale_hint=analysis_scale,
+        binning_spec={},      # not used for 'elev'
+        dem_source=dem_source,
+        verbose=verbose,
+    )
+
+    # Elevation band (meters)
+    dem = dem_img.rename('elev')
+
+    # Slope in degrees
+    slope_deg = ee.Terrain.slope(dem).rename('slope_deg')
+
+    # Aspect in degrees (0–360, clockwise from north)
+    aspect_deg = ee.Terrain.aspect(dem).rename('aspect_deg')
+
+    # For a proper mean aspect, use circular mean of sin/cos
+    aspect_rad = aspect_deg.multiply(math.pi / 180.0)
+    aspect_sin = aspect_rad.sin().rename('aspect_sin')
+    aspect_cos = aspect_rad.cos().rename('aspect_cos')
+
+    # Multi-band image for one-shot reduceRegion
+    stats_image = (
+        dem
+        .addBands(slope_deg)
+        .addBands(aspect_deg)
+        .addBands(aspect_sin)
+        .addBands(aspect_cos)
+    )
+
+    def _add_stats(feat):
+        geom = feat.geometry()
+
+        stats = stats_image.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=geom,
+            scale=analysis_scale,
+            maxPixels=1e13,
+            tileScale=2,
+        )
+
+        elev_mean      = stats.get('elev')         # m
+        slope_mean_deg = stats.get('slope_deg')    # deg
+        mean_sin       = stats.get('aspect_sin')
+        mean_cos       = stats.get('aspect_cos')
+
+        # Circular mean of aspect (degrees 0–360)
+        aspect_mean_rad = ee.Number(mean_sin).atan2(ee.Number(mean_cos))
+        aspect_mean_deg = aspect_mean_rad.multiply(180.0 / math.pi).mod(360.0)
+
+        return feat.set({
+            'TopounitAveElv': elev_mean,
+            'TopounitSlope':  slope_mean_deg,
+            'TopounitAspect': aspect_mean_deg,
+        })
+
+    fc_with_stats = polygons_fc.map(_add_stats)
+
+    if verbose:
+        print("[topounits] Attached terrain stats: TopounitAveElv, TopounitSlope, TopounitAspect.")
+
+    return fc_with_stats
+
+# -----------------------------------------
 # Main API 
 # -----------------------------------------
 def make_topounits(
@@ -795,6 +892,14 @@ def make_topounits(
         extra_image_props=extra_props
     )
 
+    # Compute DEM-based terrain stats for each topounit and append
+    polygons_fc = _attach_topounit_terrain_stats(
+        polygons_fc=polygons_fc,
+        feature_for_gee=feature_for_gee,
+        dem_source=dem_source,
+        analysis_scale=analysis_scale,
+    )
+
     # 9) Return or export
     if return_as == 'gdf':
         gdf = gu.try_to_download_featurecollection(polygons_fc, verbose=verbose)
@@ -807,3 +912,109 @@ def make_topounits(
         gu.export_fc(polygons_fc, f'{asset_name}', asset_ftype, folder='topotest', verbose=True)
         return None
 
+
+def add_topounit_image_samples(
+    topounits_gdf,
+    sampling_specs,
+    default_scale=None,
+    ensure_pixel_centers=True,
+    verbose=False,
+):
+    """
+    Attach additional sampled properties from arbitrary GEE images to each
+    topounit.
+
+    Parameters
+    ----------
+    topounits_gdf : GeoDataFrame
+        Output from make_topounits(return_as='gdf'). Must contain 'band_name'.
+    sampling_specs : list[dict]
+        Each dict describes one sampled variable with keys:
+            - 'image'   : ee.Image or image ID string
+            - 'band'    : optional band name (if omitted, image must be single-band)
+            - 'reducer' : str {'mean','min','max','std'} or ee.Reducer
+            - 'out_name': name of the column to add
+            - 'scale'   : optional scale [m]; overrides default_scale
+    default_scale : float, optional
+        Default scale [m] for specs that do not define 'scale'. If None, uses
+        topounits_gdf['analysis_scale_m'].iloc[0] if present; otherwise the
+        nominal scale of each image.
+    ensure_pixel_centers : bool, default True
+        If True, guard against polygons with no pixel centers.
+    verbose : bool, default False
+        Print which variables were attached.
+
+    Returns
+    -------
+    GeoDataFrame
+        Copy of topounits_gdf with new columns added.
+    """
+    if not sampling_specs:
+        return topounits_gdf
+
+    gdf = topounits_gdf.copy()
+
+    # Default scale: prefer analysis_scale_m if no explicit default
+    if default_scale is None and "analysis_scale_m" in gdf.columns:
+        default_scale = float(gdf["analysis_scale_m"].iloc[0])
+
+    attached_names = []
+
+    for spec in sampling_specs:
+        if "image" not in spec:
+            raise KeyError("Each sampling spec must include an 'image' key.")
+
+        img_spec = spec["image"]
+        if isinstance(img_spec, ee.Image):
+            img = img_spec
+        elif isinstance(img_spec, str):
+            img = ee.Image(img_spec)
+        else:
+            raise TypeError(
+                f"sampling_specs['image'] must be an ee.Image or image ID string; got {type(img_spec)}"
+            )
+
+        band = spec.get("band")
+        reducer = spec.get("reducer", "mean")
+        out_name = spec.get("out_name")
+        scale = spec.get("scale", default_scale)
+
+        # If still None, fall back to image's native scale
+        if scale is None:
+            scale = gu._nominal_scale_m(img)
+
+        gdf = gu.sample_image_over_polygons(
+            gdf,
+            image=img,
+            geometry_id_field="band_name",
+            band=band,
+            reducer=reducer,
+            out_name=out_name,
+            scale=scale,
+            ensure_pixel_centers=ensure_pixel_centers,
+            verbose=verbose,
+        )
+        # sample_image_over_polygons returns the final out_name it used
+        if out_name is None:
+            # If user didn't set out_name, recompute default name
+            if isinstance(reducer, str):
+                key = reducer.lower()
+            else:
+                key = "custom"
+            if band is None:
+                # This is rare (single-band images), but be robust
+                band_names = img.bandNames().getInfo()
+                band_used = band_names[0]
+            else:
+                band_used = band
+            out_name = f"{band_used}_{key}"
+
+        attached_names.append(out_name)
+
+    if verbose:
+        print(
+            "[topounits] Attached sampled properties: "
+            + ", ".join(attached_names)
+        )
+
+    return gdf

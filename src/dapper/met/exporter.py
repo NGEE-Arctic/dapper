@@ -9,7 +9,7 @@ from fastparquet import write
 
 from dapper.utils import utils
 import dapper.met.temporal as dt 
-from dapper.domains import Domain
+from dapper.domains.domain import Domain
 from dapper.met.writers import initialize_met_netcdf, append_met_netcdf
 
 # Rounding precision for lat/lon axes and lookups.

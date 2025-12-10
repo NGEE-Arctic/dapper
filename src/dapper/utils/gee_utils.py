@@ -8,8 +8,9 @@ from datetime import datetime
 from shapely.geometry import Polygon, shape
 from dateutil.relativedelta import relativedelta
 
+from dapper.domains.aoi import AOI
+from dapper.domains.domain import Domain
 from dapper.config.metsources import era5
-from dapper.domains import Domain
 
 
 # Pathing for convenience
@@ -37,34 +38,66 @@ def parse_geometry_object(geom, name):
 
 def parse_geometry_objects(geom, geometry_id_field=None):
     """
-    Translates gdf geometries to ee geometries.
+    Translates geometry containers to an ee.FeatureCollection.
+
     If geom is a string, it's interpreted as a path to an available GEE asset.
-    If geom is a GeoDataFrame, the geometries for each are interpreted.
-    geometry_id_field is the column that contains the unique identifier for each geometry/row in the GeoDataFrame.
+    If geom is a GeoDataFrame, the geometries for each row are interpreted.
+    geometry_id_field is the column that contains the unique identifier for each
+    geometry/row in the GeoDataFrame.
+
     Returns a FeatureCollection, even if a single feature is present.
     """
-    # Convert geometries to GEE FeatureCollection (supports dict input OR pre-loaded FeatureCollection)
+
+    # AOI -> underlying GeoDataFrame (['gid', 'geometry'])
+    if isinstance(geom, AOI):
+        # AOI always has a 'gid' column; fall back to that if no id provided
+        return parse_geometry_objects(
+            geom.to_geometries_gdf(),
+            geometry_id_field=geometry_id_field or "gid",
+        )
+
+    # Domain -> GeoDataFrame (['gid', 'geometry'])
+    if isinstance(geom, Domain):
+        return parse_geometry_objects(
+            geom.to_geometries(),
+            geometry_id_field=geometry_id_field or "gid",
+        )
+
+    # String = GEE asset ID
     if isinstance(geom, str):
-        geometries_fc = ee.FeatureCollection(geom)  # Directly use pre-loaded GEE asset
-    elif isinstance(geom, ee.FeatureCollection):
-        geometries_fc = ee.FeatureCollection(
-            geom
-        )  # re-casting; should already be correct type but this fixes weird errors
-    elif isinstance(geom, gpd.GeoDataFrame):
+        return ee.FeatureCollection(geom)
+
+    # Already a FeatureCollection
+    if isinstance(geom, ee.FeatureCollection):
+        # re-casting; should already be correct type but this fixes weird errors
+        return ee.FeatureCollection(geom)
+
+    # GeoDataFrame
+    if isinstance(geom, gpd.GeoDataFrame):
         gdf_reduced = geom.copy()
         if geometry_id_field is None:
             raise KeyError(
-                "No geometry id field was provided, but it is required. Ensure your GeoDataFrame has a unique identifier column."
+                "No geometry id field was provided, but it is required. "
+                "Ensure your GeoDataFrame has a unique identifier column."
             )
+
         geom_field = gdf_reduced.geometry.name
         gdf_reduced = gdf_reduced[[geometry_id_field, geom_field]]
-        # force string IDs (preserve leading zeros)
-        gdf_reduced[geometry_id_field] = gdf_reduced[geometry_id_field].astype(str).str.strip()
-        gdf_reduced = gdf_reduced.rename(columns={geometry_id_field: "gid"})
-        geojson_str = gdf_reduced.to_json()
-        geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
 
-    return geometries_fc
+        # force string IDs (preserve leading zeros)
+        gdf_reduced[geometry_id_field] = (
+            gdf_reduced[geometry_id_field].astype(str).str.strip()
+        )
+        gdf_reduced = gdf_reduced.rename(columns={geometry_id_field: "gid"})
+
+        geojson_str = gdf_reduced.to_json()
+        return ee.FeatureCollection(json.loads(geojson_str))
+
+    # If we get here, the type is unsupported
+    raise ValueError(
+        f"Unsupported geometries type: {type(geom)}; "
+        "expected str, ee.FeatureCollection, GeoDataFrame, AOI, or Domain."
+    )
 
 
 def validate_bands(bandlist, gee_ic):
@@ -328,12 +361,13 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
         - **end_date** : str  
           End date in ``"YYYY-MM-DD"``.
 
-        - **geometries** : Union[str, ee.FeatureCollection, geopandas.GeoDataFrame]  
-          One of:
-          * **str**: GEE asset ID for a FeatureCollection (e.g., ``"users/me/my_fc"``).  
-          * **ee.FeatureCollection**: a pre-constructed collection.  
-          * **GeoDataFrame**: must contain the geometry column and an ID column (see
-            ``geometry_id_field``).
+        - **geometries** : Union[str, ee.FeatureCollection, geopandas.GeoDataFrame, AOI, Domain]
+        One of:
+        * **str**: GEE asset ID for a FeatureCollection (e.g., "users/me/my_fc").
+        * **ee.FeatureCollection**: a pre-constructed collection.
+        * **GeoDataFrame**: must contain the geometry column and an ID column (see ``geometry_id_field``).
+        * **AOI**: ``dapper.domains.aoi.AOI`` instance; uses its internal GeoDataFrame (``gid`` + geometry).
+        * **Domain**: ``dapper.domains.domain.Domain`` instance; uses ``Domain.to_geometries()`` to get ``gid`` + geometry.
 
         - **geometry_id_field** : str, optional  
           Name of the ID column in the provided geometries. Defaults to ``"gid"``.
@@ -457,25 +491,12 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
     if "geometry_id_field" not in params:
         params["geometry_id_field"] = "gid"
 
-    # Convert geometries to GEE FeatureCollection (supports dict input OR pre-loaded FeatureCollection)
-    if isinstance(params["geometries"], str):
-        geometries_fc = ee.FeatureCollection(
-            params["geometries"]
-        )  # Directly use pre-loaded GEE asset
-    elif isinstance(params["geometries"], ee.FeatureCollection):
-        geometries_fc = ee.FeatureCollection(
-            params["geometries"]
-        )  # re-casting; should already be correct type but this fixes weird errors
-    elif isinstance(params["geometries"], gpd.GeoDataFrame):
-        gdf_reduced = params["geometries"].copy()
-        gdf_reduced = gdf_reduced[[params["geometry_id_field"], "geometry"]]
-        # force string IDs
-        gdf_reduced[params["geometry_id_field"]] = (
-            gdf_reduced[params["geometry_id_field"]].astype(str).str.strip()
-        )
-        gdf_reduced = gdf_reduced.rename(columns={params["geometry_id_field"]: "gid"})
-        geojson_str = gdf_reduced.to_json()
-        geometries_fc = ee.FeatureCollection(json.loads(geojson_str))
+    # Convert various geometry containers (asset id, AOI, Domain, GeoDataFrame, FeatureCollection)
+    geometries_fc = parse_geometry_objects(
+        params["geometries"],
+        geometry_id_field=params["geometry_id_field"],
+    )
+
     # If the provided polygons do not overlap a pixel center of the native image (ERA5L) resolution,
     # no data will be sampled. Here, we ensure that at least one pixel center is included.
     # If not, we convert the polygon to a point, as points do return data even if they're not
@@ -606,3 +627,143 @@ def _geom_from_any(x):
 def _nominal_scale_m(image):
     """Return nominal scale in meters for an ee.Image."""
     return float(image.projection().nominalScale().getInfo())
+
+def sample_image_over_polygons(
+    gdf,
+    image,
+    geometry_id_field,
+    band=None,
+    reducer="mean",
+    out_name=None,
+    scale=None,
+    ensure_pixel_centers=True,
+    verbose=True,
+):
+    """
+    Sample a single-band ee.Image over polygons in a GeoDataFrame.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Input geometries; must have a geometry column in EPSG:4326.
+    image : ee.Image
+        Image to sample. Must be single-band unless 'band' is specified.
+    geometry_id_field : str
+        Column in gdf containing unique IDs for each geometry.
+    band : str, optional
+        Band name to sample. If None, image must have exactly one band.
+    reducer : str or ee.Reducer, default 'mean'
+        Spatial aggregator. Strings: 'mean', 'min', 'max', 'std'.
+    out_name : str, optional
+        Name of the output column. If None, uses '<band>_<reducer>'.
+    scale : float, optional
+        Pixel scale in meters. If None, uses the image's nominal scale.
+    ensure_pixel_centers : bool, default True
+        If True, tiny polygons with no pixel centers inside will be sampled at
+        their centroid instead (see ensure_pixel_centers_within_geometries).
+    verbose : bool, default True
+        Print basic status.
+
+    Returns
+    -------
+    geopandas.GeoDataFrame
+        Copy of gdf with a new column 'out_name' added.
+    """
+    if geometry_id_field not in gdf.columns:
+        raise KeyError(
+            f"geometry_id_field '{geometry_id_field}' not found in GeoDataFrame."
+        )
+
+    # Determine scale
+    if scale is None:
+        scale = _nominal_scale_m(image)
+
+    # Determine band
+    if band is None:
+        band_names = image.bandNames().getInfo()
+        if len(band_names) != 1:
+            raise ValueError(
+                f"Image has {len(band_names)} bands; please specify 'band' explicitly."
+            )
+        band = band_names[0]
+
+    # Determine reducer
+    if isinstance(reducer, str):
+        key = reducer.lower()
+        if key == "mean":
+            reducer_obj = ee.Reducer.mean()
+        elif key == "min":
+            reducer_obj = ee.Reducer.min()
+        elif key == "max":
+            reducer_obj = ee.Reducer.max()
+        elif key in ("std", "stddev", "stdev"):
+            reducer_obj = ee.Reducer.stdDev()
+        else:
+            raise ValueError(
+                f"Unknown reducer '{reducer}'. "
+                "Use: 'mean', 'min', 'max', 'std', or pass an ee.Reducer."
+            )
+    elif isinstance(reducer, ee.Reducer):
+        reducer_obj = reducer
+        key = "custom"
+    else:
+        raise TypeError("reducer must be a string or an ee.Reducer instance.")
+
+    if out_name is None:
+        out_name = f"{band}_{key}"
+
+    gdf_out = gdf.copy()
+    # Normalize ID field to string (parse_geometry_objects does this too)
+    gdf_out[geometry_id_field] = gdf_out[geometry_id_field].astype(str).str.strip()
+
+    # Build FeatureCollection (ID + geometry)
+    fc = parse_geometry_objects(gdf_out, geometry_id_field=geometry_id_field)
+
+    # Optionally fix tiny polygons with no pixel centers
+    if ensure_pixel_centers:
+        fc = ensure_pixel_centers_within_geometries(fc, image, scale)
+
+    def _add_sample(feat):
+        geom = feat.geometry()
+        d = image.reduceRegion(
+            reducer=reducer_obj,
+            geometry=geom,
+            scale=scale,
+            maxPixels=1e13,
+            tileScale=2,
+        )
+        value = ee.Dictionary(d).get(band)
+        return feat.set(out_name, value)
+
+    fc_with = fc.map(_add_sample)
+
+    stats_gdf = try_to_download_featurecollection(fc_with, verbose=verbose)
+    if stats_gdf is None:
+        raise RuntimeError(
+            "Failed to download sampled FeatureCollection; try coarser 'scale' or smaller AOI."
+        )
+
+    # parse_geometry_objects renames ID column to 'gid'
+    if "gid" not in stats_gdf.columns:
+        raise KeyError(
+            "Expected 'gid' column in sampled FeatureCollection; "
+            "parse_geometry_objects may have changed."
+        )
+
+    stats_gdf = stats_gdf[["gid", out_name]].drop_duplicates(subset="gid")
+    stats_gdf["gid"] = stats_gdf["gid"].astype(str).str.strip()
+
+    merged = gdf_out.merge(
+        stats_gdf,
+        left_on=geometry_id_field,
+        right_on="gid",
+        how="left",
+    ).drop(columns=["gid"])
+
+    if verbose:
+        print(
+            f"Attached sampled column '{out_name}' using band '{band}' "
+            f"with reducer '{key}' at scale {scale} m."
+        )
+
+    return merged

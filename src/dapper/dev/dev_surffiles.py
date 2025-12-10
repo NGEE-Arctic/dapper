@@ -1,8 +1,10 @@
 
+from dapper.utils import pathing
 from dapper.surf.sample import sample_point_values
 from dapper.surf.write import build_surface_dataset, write_surface_nc
 
-nc_in = "/path/to/global/surfdata_0.5x0.5.nc"
+nc_in = pathing.SURFDATA_HALFDEGREE
+nc_out = r'X:\Research\NGEE Arctic\3. Surface Files\out\test.nc'
 
 # 1) Sample
 sampled = sample_point_values(nc_in, lat=40.0, lon=-106.0)
@@ -11,7 +13,7 @@ sampled = sample_point_values(nc_in, lat=40.0, lon=-106.0)
 ds_pt = build_surface_dataset(sampled)
 
 # 3) Write to NetCDF
-out_path = write_surface_nc(ds_pt, "surfdata_1x1_40N_106W.nc")
+out_path = write_surface_nc(ds_pt, nc_out)
 print("Wrote:", out_path)
 
 

@@ -10,11 +10,9 @@ from shapely.geometry import base as shapely_base
 from shapely.geometry import Point
 from pathlib import Path
 
-from dapper.domains import Domain
-
+from dapper.domains.domain import Domain
 
 GeometryLike = Union[shapely_base.BaseGeometry, Point]
-
 
 @dataclass
 class AOI:

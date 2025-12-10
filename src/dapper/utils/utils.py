@@ -8,7 +8,7 @@ import subprocess
 import dapper
 
 _ROOT_DIR = Path(next(iter(dapper.__path__))).parent.parent
-_DATA_DIR = _ROOT_DIR / "data"
+_DATA_DIR = _ROOT_DIR / "docs" / "data"
 
 
 def _rm_and_mkdir(p: Path):
