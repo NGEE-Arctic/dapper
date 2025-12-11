@@ -1,6 +1,5 @@
 import ee
 import math
-import geopandas as gpd
 
 from dapper.domains.domain import Domain
 from dapper.utils import gee_utils as gu
