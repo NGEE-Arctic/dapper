@@ -11,7 +11,9 @@
    :recursive:
 
    config
+   domains
    met
    schemas
+   surf
    topounit
    utils

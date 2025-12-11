@@ -5,18 +5,12 @@ from typing import Iterable, Optional, Dict, List
 
 import numpy as np
 import pandas as pd
+from netCDF4 import Dataset, num2date
 
 # matplotlib (headless)
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
-# netCDF is only needed for NetCDF modes
-try:
-    from netCDF4 import Dataset, num2date
-except Exception:  # pragma: no cover
-    Dataset = None
-    num2date = None
 
 
 # ----------------------- plotting defaults & units -----------------------

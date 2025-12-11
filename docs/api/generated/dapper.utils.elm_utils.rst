@@ -9,6 +9,7 @@ dapper.utils.elm\_utils
    .. autosummary::
    
       compute_humidities
+      compute_specific_humidity_from_rh
       elm_data_dicts
       elm_var_packing_params
       gen_zone_mappings

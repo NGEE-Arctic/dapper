@@ -19,3 +19,9 @@ Dapper Documentation
    :caption: API
 
    api/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Reference
+
+   surface-variables

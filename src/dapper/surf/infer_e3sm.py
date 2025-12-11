@@ -263,17 +263,17 @@ rows = pd.DataFrame(find_surface_vars_v3(r"X:\Research\NGEE Arctic\E3SM\E3SM"))
 rows.query("object_kind == 'variable' and required_inferred == 'required'").shape[0]
 
 
-call getfil( lfsurdat, locfn, 0 )
-call ncd_pio_openfile (ncid, trim(locfn), 0)
-(L. 600 surfrdMod.F90)
+# call getfil( lfsurdat, locfn, 0 )
+# call ncd_pio_openfile (ncid, trim(locfn), 0)
+# (L. 600 surfrdMod.F90)
 
-(L. 600 surfrdMod.F90)
-Required: call ncd_io(ncid=ncid, varname= ... by Fiorella, Rich
-Fiorella, Rich
+# (L. 600 surfrdMod.F90)
+# Required: call ncd_io(ncid=ncid, varname= ... by Fiorella, Rich
+# Fiorella, Rich
 
-Required: call ncd_io(ncid=ncid, varname= 'PFTDATA_MASK', flag='read', data=ldomain%pftm, &
-         dim1name=grlnd, readvar=readvar)
-    if (.not. readvar) call endrun( msg=' ERROR: pftm NOT on surface dataset'//errMsg(__FILE__, __LINE__))
+# Required: call ncd_io(ncid=ncid, varname= 'PFTDATA_MASK', flag='read', data=ldomain%pftm, &
+#          dim1name=grlnd, readvar=readvar)
+#     if (.not. readvar) call endrun( msg=' ERROR: pftm NOT on surface dataset'//errMsg(__FILE__, __LINE__))
 
-some code doesn't execute unless certain features are turned on
-using these model options, figure out which ones are being read
+# some code doesn't execute unless certain features are turned on
+# using these model options, figure out which ones are being read

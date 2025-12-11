@@ -4,9 +4,12 @@ Canonical ELM/ELM surface-variable spec for Dapper.
 This file is the single place where new surface variables
 and their basic metadata (dims, description, requiredness)
 are added. Other modules (schema, validation, docs) should
-import this and *not* duplicate the information.
+import this and *not* duplicate this information elsewhere.
 
-It was initially generated from a ChatGPT scrape of X by Rich Fiorella.
+It was initially generated from a ChatGPT scrape of a public ELM surface file
+and E3SM Fortran code, assembled by Rich Fiorella. Jon then added more 
+parameters based on comparing a handful of ELM surface files. Additional
+parameters should be added to the SURFACE_VAR_SPECS dictionary below.
 """
 
 from __future__ import annotations

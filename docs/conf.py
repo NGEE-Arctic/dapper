@@ -66,3 +66,81 @@ intersphinx_mapping = {
 # -- HTML output -------------------------------------------------------------
 html_theme = "furo"
 html_static_path = ["_static"]
+
+
+# ------------------------------------------------------------------
+# Auto-generate surface variable tables from SURFACE_VAR_SPECS
+# ------------------------------------------------------------------
+
+def _generate_surface_var_docs():
+    """
+    Write docs/_generated/surface_variables_tables.rst from
+    dapper.surf.surface_var_specs.SURFACE_VAR_SPECS.
+
+    Groups variables by required_level into separate tables:
+      * Required variables
+      * Conditional variables
+      * Optional variables
+    """
+    # Import here so docs build doesn't fail if dapper isn't importable
+    from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
+
+    out_dir = Path(__file__).parent / "_generated"
+    out_dir.mkdir(exist_ok=True)
+    out_path = out_dir / "surface_variables_tables.rst"
+
+    def _write_group(title, items, f):
+        if not items:
+            return
+
+        f.write(f"{title}\n")
+        f.write(f"{'-' * len(title)}\n\n")
+
+        f.write(".. list-table::\n")
+        f.write("   :header-rows: 1\n")
+        f.write("   :widths: 20 20 60\n\n")
+
+        f.write("   * - **Variable**\n")
+        f.write("     - **Dimensions**\n")
+        f.write("     - **Description**\n\n")
+
+        for name in sorted(items):
+            spec = items[name]
+            dims = spec.get("dims", "")
+            doc = spec.get("doc", "").replace("\n", " ")
+            # Optional extra prose about when it is required
+            req_attr = spec.get("attrs", {}).get("requirement", "")
+            if req_attr:
+                doc = f"{doc} (Requirement: {req_attr})"
+
+            f.write(f"   * - ``{name}``\n")
+            f.write(f"     - ``{dims}``\n")
+            f.write(f"     - {doc}\n\n")
+
+    # Partition by required_level
+    required = {
+        k: v
+        for k, v in SURFACE_VAR_SPECS.items()
+        if v.get("required_level", "").lower() == "required"
+    }
+    conditional = {
+        k: v
+        for k, v in SURFACE_VAR_SPECS.items()
+        if v.get("required_level", "").lower() == "conditional"
+    }
+    optional = {
+        k: v
+        for k, v in SURFACE_VAR_SPECS.items()
+        if v.get("required_level", "").lower()
+        not in ("required", "conditional")
+    }
+
+    with out_path.open("w", encoding="utf-8") as f:
+        _write_group("Required variables", required, f)
+        f.write("\n")
+        _write_group("Conditional variables", conditional, f)
+        f.write("\n")
+        _write_group("Optional variables", optional, f)
+
+# Run the generator when Sphinx imports this conf.py
+_generate_surface_var_docs()

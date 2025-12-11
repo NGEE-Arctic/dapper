@@ -1,4 +1,4 @@
-dapper.met.adapters
+﻿dapper.met.adapters
 ===================
 
 .. automodule:: dapper.met.adapters
@@ -12,3 +12,4 @@ dapper.met.adapters
 
    base
    era5
+   fluxnet

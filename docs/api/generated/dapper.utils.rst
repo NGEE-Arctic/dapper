@@ -13,4 +13,5 @@ dapper.utils
    elm_utils
    find_duplicates
    gee_utils
+   pathing
    utils
