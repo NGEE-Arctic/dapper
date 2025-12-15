@@ -119,9 +119,21 @@ def _generate_surface_var_docs():
         f.write("     - **Contexts**\n")
         f.write("     - **Description**\n\n")
 
+        # sort variables alphabetically by name
         for name in sorted(items):
             spec = items[name]
-            dims, units, req_level, ctx_str, doc = _row_for(name, spec)
+            dims = spec.get("dims", "")
+            units = spec.get("units", "")
+            req_level = spec.get("required_level", "")
+            ctxs = sorted(spec.get("contexts", []) or [])
+            # format each context as code, like the other columns
+            ctx_str = ", ".join(f"``{c}``" for c in ctxs)
+
+            doc = spec.get("doc", "").replace("\n", " ")
+            req_attr = spec.get("attrs", {}).get("requirement", "")
+            if req_attr:
+                doc = f"{doc} (Requirement: {req_attr})"
+
             f.write(f"   * - ``{name}``\n")
             f.write(f"     - ``{dims}``\n")
             f.write(f"     - ``{units}``\n")
