@@ -1,0 +1,32 @@
+
+import geopandas as gpd
+from importlib import reload
+
+from dapper.surf import sfile 
+from dapper.utils.pathing import SURFDATA_HALFDEGREE_TOP
+
+reload(sfile)
+# Sample at a point from the half-degree SURFDATA
+sf = sfile.SurfaceFile.from_halfdegree_point(
+    lat=68.5,
+    lon=-149.5,
+    nc_in=SURFDATA_HALFDEGREE_TOP,
+)
+
+# Add topounit parameters (assume you've built topo_gdf elsewhere)
+topos = gpd.read_file(r"X:\Research\NGEE Arctic\dapper_data\topounit_tests\kup_5.gpkg")
+topos['MaxTopounitElv'] = topos['TopounitAveElv'].max()
+sf.add_params_from_df(
+    dim_name="topounit",
+    df=topos,
+    id_col="band_name",
+    drop_cols=["geometry"],
+)
+
+sf.set_global_attrs(
+    title="Testing, 5 topounits",
+    case_name="sfile_topounit_test",
+)
+
+sf.validate(strict=False)
+sf.to_netcdf("surf_kup_elev8.nc", overwrite=True)

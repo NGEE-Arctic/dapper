@@ -66,6 +66,9 @@ intersphinx_mapping = {
 # -- HTML output -------------------------------------------------------------
 html_theme = "furo"
 html_static_path = ["_static"]
+html_css_files = [ # added to expand table width
+    "dapper_custom.css",
+]
 
 
 # ------------------------------------------------------------------
@@ -110,7 +113,7 @@ def _generate_surface_var_docs():
 
         f.write(".. list-table::\n")
         f.write("   :header-rows: 1\n")
-        f.write("   :widths: 16 16 10 14 14 30\n\n")
+        # f.write("   :widths: 16 16 10 14 14 30\n\n")
 
         f.write("   * - **Variable**\n")
         f.write("     - **Dimensions**\n")

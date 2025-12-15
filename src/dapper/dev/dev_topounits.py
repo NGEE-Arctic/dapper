@@ -19,11 +19,12 @@ kup = gpd.read_file(_DATA_DIR / 'kup_watershed' / 'Kuparuk_gageshed.shp')
 kup = kup.buffer(0) # A hack to "fix" invalid geometries--not needed here but just demonstrating
 kup_pgon = ee.Geometry.Polygon(list(kup.geometry.values[0].exterior.coords))
 
-# # Load shared asset (FeatureCollection → first feature → Feature)
-feature = ee.Feature(ee.FeatureCollection('projects/ee-jonschwenk/assets/E3SM/Kuparuk_gageshed').first())
+# # # Load shared asset (FeatureCollection → first feature → Feature)
+# feature = ee.Feature(ee.FeatureCollection('projects/ee-jonschwenk/assets/E3SM/Kuparuk_gageshed').first())
 
 topos = topomake.make_topounits(
-    feature=feature,
+    feature=kup_pgon,
+    # feature=feature,
     sources=['elev'],
     binning={'elev': {'strategy': 'percentiles', 'n_bins': 5, 'label_prefix': 'ELEV'}}, # 'label_prefix' is for plotting only
     return_as='gdf',
@@ -31,6 +32,7 @@ topos = topomake.make_topounits(
     target_scale=90,          # keep large AOIs reasonable
     verbose=True
 )
+topos.to_file(r'X:\Research\NGEE Arctic\dapper_data\topounit_tests\kup_5.gpkg', driver='GPKG')
 
 soil_specs = [
     {
