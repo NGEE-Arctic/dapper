@@ -81,9 +81,9 @@ def _generate_surface_var_docs():
     dapper.surf.surface_var_specs.SURFACE_VAR_SPECS.
 
     Produces:
-      - One "All variables" table with Required-level as a column.
+      - One "All surface variables" table.
       - One table per context (feature/module), discovered automatically
-        from the 'contexts' lists; no manual RST needed.
+        from the 'contexts' lists.
     """
     from pathlib import Path
     from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
@@ -92,29 +92,21 @@ def _generate_surface_var_docs():
     out_dir.mkdir(exist_ok=True)
     out_path = out_dir / "surface_variables_tables.rst"
 
-    def _row_for(name, spec):
-        dims = spec.get("dims", "")
-        units = spec.get("units", "")
-        req_level = spec.get("required_level", "")
-        ctxs = spec.get("contexts", []) or []
-        ctx_str = ", ".join(ctxs)
-        doc = spec.get("doc", "").replace("\n", " ")
-        req_attr = spec.get("attrs", {}).get("requirement", "")
-        if req_attr:
-            doc = f"{doc} (Requirement: {req_attr})"
-        return dims, units, req_level, ctx_str, doc
+    specs = dict(SURFACE_VAR_SPECS)
 
-    def _write_table(f, title, items):
+    def _write_table(f, title, items: dict[str, dict]):
         if not items:
             return
 
+        # Section heading
         f.write(f"{title}\n")
         f.write(f"{'-' * len(title)}\n\n")
 
+        # list-table directive; note the blank line after options
         f.write(".. list-table::\n")
-        f.write("   :header-rows: 1\n")
-        # f.write("   :widths: 16 16 10 14 14 30\n\n")
+        f.write("   :header-rows: 1\n\n")
 
+        # Header row
         f.write("   * - **Variable**\n")
         f.write("     - **Dimensions**\n")
         f.write("     - **Units**\n")
@@ -122,14 +114,13 @@ def _generate_surface_var_docs():
         f.write("     - **Contexts**\n")
         f.write("     - **Description**\n\n")
 
-        # sort variables alphabetically by name
+        # Rows, sorted alphabetically by variable name
         for name in sorted(items):
             spec = items[name]
             dims = spec.get("dims", "")
             units = spec.get("units", "")
             req_level = spec.get("required_level", "")
             ctxs = sorted(spec.get("contexts", []) or [])
-            # format each context as code, like the other columns
             ctx_str = ", ".join(f"``{c}``" for c in ctxs)
 
             doc = spec.get("doc", "").replace("\n", " ")
@@ -144,10 +135,7 @@ def _generate_surface_var_docs():
             f.write(f"     - {ctx_str}\n")
             f.write(f"     - {doc}\n\n")
 
-    # Get a stable view of all specs
-    specs = dict(SURFACE_VAR_SPECS)
-
-    # Collect all context tags that actually appear
+    # Collect all contexts that actually appear
     all_contexts = []
     for spec in specs.values():
         for c in spec.get("contexts", []) or []:
@@ -159,7 +147,7 @@ def _generate_surface_var_docs():
         _write_table(f, "All surface variables", specs)
         f.write("\n")
 
-        # 2) Per-context tables (variables can appear in multiple contexts)
+        # 2) Per-context tables
         if unique_contexts:
             f.write("Variables by context\n")
             f.write("--------------------\n\n")
@@ -174,6 +162,7 @@ def _generate_surface_var_docs():
                 title = f"Context: {ctx}"
                 _write_table(f, title, subset)
                 f.write("\n")
+
 
 # Run the generator whenever Sphinx imports this conf.py
 _generate_surface_var_docs()

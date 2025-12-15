@@ -16,6 +16,8 @@ sf = sfile.SurfaceFile.from_halfdegree_point(
 # Add topounit parameters (assume you've built topo_gdf elsewhere)
 topos = gpd.read_file(r"X:\Research\NGEE Arctic\dapper_data\topounit_tests\kup_5.gpkg")
 topos['MaxTopounitElv'] = topos['TopounitAveElv'].max()
+topovars = ['MaxTopounitElv', 'TopounitAspect',  'TopounitAveElv', 'TopounitSlope', 'band_name']
+topos = topos[topovars]
 sf.add_params_from_df(
     dim_name="topounit",
     df=topos,
@@ -29,4 +31,4 @@ sf.set_global_attrs(
 )
 
 sf.validate(strict=False)
-sf.to_netcdf("surf_kup_elev8.nc", overwrite=True)
+sf.to_netcdf(r"X:\Research\NGEE Arctic\3. Surface Files\out\test_topounit.nc", overwrite=True)

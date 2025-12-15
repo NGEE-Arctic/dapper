@@ -1,0 +1,11 @@
+/* Let the main content column use the full available width */
+.page .content {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Allow inline code in table cells to wrap, so contexts/dims don't force huge width */
+table.docutils td code {
+  white-space: normal;
+  word-break: break-word;
+}
