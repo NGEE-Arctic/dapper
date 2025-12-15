@@ -1,7 +1,7 @@
 # elm_surface_registry.py
 from __future__ import annotations
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Tuple, Iterable, Optional
+from typing import Dict, List, Tuple, Iterable, Optional, Any
 
 from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
 
@@ -94,7 +94,8 @@ class ParDef:
     units: str = ""
     doc: str = ""
     required_level: str = ""
-    attrs: Optional[Dict[str, str]] = None
+    attrs: Optional[Dict[str, Any]] = None
+    contexts: Tuple[str, ...] = ()
 
 
 def pdef(
@@ -147,12 +148,13 @@ REGISTRY: Dict[str, ParDef] = {}
 
 for name, spec in SURFACE_VAR_SPECS.items():
     attrs = spec.get("attrs", {})
+    contexts = tuple(spec.get("contexts", []) or [])
     REGISTRY[name] = pdef(
         spec["dims"],
-        # you can add "units" to SURFACE_VAR_SPECS later if you want:
         units=spec.get("units", ""),
         doc=spec.get("doc", ""),
         required_level=spec.get("required_level", ""),
+        contexts=contexts,
         **attrs,
     )
 
