@@ -3,7 +3,6 @@ import json
 import pandas as pd
 import geopandas as gpd
 from shapely import Point
-import dapper.met.era5land as e5l
 from pathlib import Path
 from shapely.geometry import Point
 from importlib import reload

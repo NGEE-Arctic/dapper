@@ -1,0 +1,25 @@
+Make sure to define scratch
+/mnt/workspace is where runs get run from (within OLMT)
+--runroot
+--caseroot
+--model_root 
+All three may need to be defined
+
+
+cd "X:\Research\NGEE Arctic\dockervers\field-to-model"
+
+WSL 
+
+# To run a baseline run_ngeearctic_site
+docker run -it --rm \
+  --user "$(id -u):$(id -g)" \
+  -v "$(pwd):/home/modex_user" \
+  -v inputdata:/mnt/inputdata \
+  -v output:/mnt/output \
+  yuanfornl/ngee-arctic-modex25:models-main-latest \
+  /home/modex_user/model_examples/ELM/run_ngeearctic_site.sh --site_name=teller
+
+
+
+
+
