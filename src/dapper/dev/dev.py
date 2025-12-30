@@ -1,11 +1,3 @@
-# i want us to design an end-to-end jupyter notebook for dapper. 
-# by end-to-end, i mean that i want to start with a watershed polygon, 
-# and i want dapper to generate all the files needed to run ELM in site-mode for that polygon, 
-# including a surffile that uses topounits. so we need to 1) export a domain file, 2) export met data, 
-# 3) compute topounits, 4) export a surffile with topounits included, 5) export a landduse file 
-# [this isn't implemented yet], and 6) [this isn't ready but it would be nice if we could show it passes our 
-# ELM smoke tests, although a user would not be able to do this easily].
-
 #  Functions either in development or used for one-off data stuff. Created by JPS.
 # Note that there may be imports here that aren't included in environment.yml file.
 

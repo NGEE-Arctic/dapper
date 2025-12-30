@@ -295,7 +295,7 @@ class Domain:
         grid_shape: tuple[int, int] | None = None,
         cell_dx_deg: float = 0.5,
         cell_dy_deg: float | None = None,
-        land_frac_col: str | None = None,
+        land_frac_col: str | None = "frac",
         mask_from_frac: bool = True,
         global_attrs: dict | None = None,
     ) -> xr.Dataset:
@@ -523,3 +523,43 @@ class Domain:
         ds = self._to_elm_domain_dataset(**kwargs)
         ds.to_netcdf(out_path)
         return out_path
+
+    def to_df_loc(
+        self,
+        *,
+        gid_col: str = "gid",
+        lon_col: str = "lon",
+        lat_col: str = "lat",
+        weight_col: str = "weight",
+        frac_col: str = "frac",
+        default_weight: float = 1.0,
+    ) -> pd.DataFrame:
+        """
+        Return a plain DataFrame suitable for gridded sampling utilities.
+
+        Output columns:
+        - gid (optional, if present)
+        - lon
+        - lat
+        - weight
+
+        Weight is taken from gdf[frac_col] if present; otherwise default_weight.
+        """
+        dom = self.ensure_lon_lat()
+        gdf = dom.gdf
+
+        out = pd.DataFrame(index=gdf.index)
+
+        if gid_col in gdf.columns:
+            out["gid"] = gdf[gid_col].astype(str)
+
+        out[lon_col] = gdf["lon"].to_numpy(dtype="float64")
+        out[lat_col] = gdf["lat"].to_numpy(dtype="float64")
+
+        if frac_col in gdf.columns:
+            w = gdf[frac_col].to_numpy(dtype="float64")
+        else:
+            w = np.full(len(gdf), float(default_weight), dtype="float64")
+
+        out[weight_col] = w
+        return out
