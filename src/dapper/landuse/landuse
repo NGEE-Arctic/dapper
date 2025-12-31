@@ -8,6 +8,8 @@ import numpy as np
 import xarray as xr
 
 from dapper.utils import sampling
+from dapper.domains.domain import Domain
+
 
 LonWrap = Literal["auto", "0_360", "-180_180"]
 
@@ -161,3 +163,47 @@ def sample_landuse_timeseries(
 
     out_path = sampling.write_netcdf(out, out_path, compress=compress, complevel=complevel)
     return out_path, df_cells
+
+
+def export_landuse_timeseries(
+    domain: Domain,
+    *,
+    src_path: str | Path,
+    out_dir: str | Path,
+    filename_template: str = "landuse.timeseries_{run_id}.nc",
+    **kwargs,
+) -> dict[str, Path]:
+    """
+    Export landuse timeseries for a Domain.
+
+    Returns:
+      dict[run_id, output_path]
+
+    Behavior:
+      - domain.mode='cellset': writes one file into out_dir
+      - domain.mode='sites'  : writes one file per site into out_dir/<gid>/
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    outputs: dict[str, Path] = {}
+    for run_id, run_dom in domain.iter_runs():
+        df_loc = run_dom.to_df_loc()
+
+        if domain.mode == "sites":
+            run_out_dir = out_dir / str(run_id)
+            run_out_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            run_out_dir = out_dir
+
+        out_path = run_out_dir / filename_template.format(run_id=str(run_id))
+
+        path_written, _df_cells = sample_landuse_timeseries(
+            src_path=src_path,
+            df_loc=df_loc,
+            out_path=out_path,
+            **kwargs,
+        )
+        outputs[str(run_id)] = Path(path_written)
+
+    return outputs

@@ -511,258 +511,65 @@ def _attach_topounit_terrain_stats(
 # Main API 
 # -----------------------------------------
 def make_topounits(
-    feature,
-    sources,                      # e.g., ['elev'] or ['elev','hand'] or ['elev','aspect']
-    binning,                      # dict: { 'elev': {...}, 'hand': {...}, 'aspect': {...} }
-    combine='cartesian',          # 'cartesian' or 'hierarchical'
-    combine_order=None,           # required if combine='hierarchical', e.g., ['elev','hand']
+    aoi,
+    sources=None,                 # if None, inferred from binning keys (insertion order)
+    binning=None,                 # dict: { sid: {...}, ... }
+    combine='cartesian',
+    combine_order=None,
     max_topounits=256,
     dem_source='arcticdem',
-    return_as='gdf',              # 'gdf' or 'asset'
+    return_as='gdf',
     export_scale='native',
     asset_name='topounits',
     asset_ftype='GeoJSON',
-    min_patch_pixels=None,        # e.g., 9 to drop tiny patches
+    min_patch_pixels=None,
     target_pixels_per_topounit=500,
-    target_scale=None,            # if provided, analysis_scale = max(target_scale, coarsest_native)
+    target_scale=None,
     verbose=False
 ):
     """
-    Generate “topounits” (topographic units) by binning one or more raster sources
-    (elevation, HAND, aspect, CTI, or a user-supplied image) and combining the
-    resulting classes into polygons.
+    SINGLE-AOI topounit builder.
 
-    This function **does not** globally reproject rasters. Instead it:
-    1) chooses an **analysis scale** from the AOI area and planned bin count,
-    2) clamps that scale to be **no finer than the coarsest source’s native scale**,
-    3) runs all sampling, statistics, and vectorization with `scale=analysis_scale`
-    while letting Earth Engine handle per-pixel alignment internally.
+    aoi can be:
+      - Domain (must have exactly 1 geometry in domain.support / domain.gdf)
+      - shapely geometry
+      - ee.Geometry / ee.Feature / ee.FeatureCollection
+      - str (GEE FeatureCollection asset id)
 
-    The output is **one feature per bin** (i.e., the union geometry of all patches
-    that belong to that bin), with rich metadata describing how each bin was formed.
-
-    Args:
-        feature (ee.Feature | ee.FeatureCollection | ee.Geometry):
-            The area of interest (AOI). If a FeatureCollection is passed, its
-            `.geometry()` (union) is used as the AOI. Geodesic area is used to
-            pick an analysis scale that avoids oversampling large polygons.
-
-        sources (list[str]):
-            Source identifiers to bin and (optionally) combine. Supported built-ins:
-            - 'elev'   : ArcticDEM elevation (meters).
-            - 'hand'   : Height Above Nearest Drainage; automatically selects an
-                        appropriate HAND product (30m/90m; 0–100 or 0–1000 range).
-            - 'aspect' : Aspect (degrees) derived from the DEM.
-            - 'cti'    : Compound Topographic Index (dimensionless), mosaicked.
-            Custom source via user-supplied image is also supported: pick any unique
-            key (e.g., 'myvar') and provide `binning['myvar']['image'] = ee.Image(...)`
-            (single-band, already mosaicked/selected). See `binning` below.
-
-        binning (dict[str, dict]):
-            Per-source binning specification. For each `sid in sources`, provide a
-            dictionary describing *how* to make bins for that source. Common keys:
-
-            For **numeric** sources ('elev', 'hand', 'cti', or a custom image):
-            - 'strategy' (str, required): one of
-                    'percentiles'   # equal-area bins over the AOI (empirical quantiles)
-                    'equalwidth'    # equal-width bins between min/max in the AOI
-                    'fixed'         # user-specified edges (monotonic list of floats)
-            - if 'percentiles' or 'equalwidth':
-                    'n_bins' (int): number of bins (default 5)
-            - if 'fixed':
-                    'edges' (list[float]): bin breakpoints; length = n_bins + 1
-                    Example: [0, 1, 2, 5, 10, 100, 1000]  → 6 bins
-            - Optional cosmetics:
-                    'label_prefix' (str): short prefix used in labels (e.g., 'ELEV', 'HAND')
-                    'units' (str): only for *custom* images; used in plotting labels
-                    'name' (str): only for *custom* images; human-readable source name
-            - For **custom image** only:
-                    'image' (ee.Image, single-band): pre-prepared raster. You must
-                    handle `.mosaic()` (if coming from an ImageCollection) and `.select(...)`
-                    yourself **before** passing it in. The function validates it is single-band.
-
-            For **aspect** (circular data):
-            - 'strategy' must be 'fixed'.
-            - 'ranges' (list[tuple]): list of (start_deg, end_deg, label) ranges; wrap
-                across 360→0 is supported by letting start > end.
-                Example (N/S):
-                    [(270, 90, 'N'), (90.01, 269.99, 'S')]
-                Example (4 winds):
-                    [(315, 45, 'N'), (45, 135, 'E'), (135, 225, 'S'), (225, 315, 'W')]
-            - Optional: 'label_prefix' (e.g., 'ASP').
-
-        combine (str, default 'cartesian'):
-            How to combine per-source bins into final topounits:
-            - 'cartesian'    : full cross-product of bins across sources
-                                (e.g., 3 elev × 2 aspect = 6 units).
-            - 'hierarchical' : apply bins in a priority order; each level further
-                                subdivides only where the parent has pixels. Useful
-                                when the cartesian product would explode.
-
-        combine_order (list[str] | None, default None):
-            Required when `combine='hierarchical'`. The ordered list of `sources`
-            to apply (e.g., ['elev', 'hand'] means “bin elevation, then within each
-            elevation bin, subdivision by HAND”). Ignored for 'cartesian'.
-
-        max_topounits (int, default 256):
-            Safety cap on the number of combined bins emitted. For 'cartesian', if the
-            theoretical product exceeds this, only the first `max_topounits` are materialized.
-            For 'hierarchical', recursion stops once the cap is reached.
-
-        dem_source (str, default 'arcticdem'):
-            DEM used for 'elev' and 'aspect'. Currently only 'arcticdem' is supported.
-
-        return_as (str, default 'gdf'):
-            What to return:
-            - 'gdf'   : a `geopandas.GeoDataFrame` with one row per **bin** (unioned
-                        geometry of all patches in that bin). If direct download via
-                        `FeatureCollection.getInfo()` fails, the function triggers an
-                        export to Drive and returns `None`.
-            - 'asset' : trigger export to Google Drive using `gu.export_fc(...)` and
-                        return `None`.
-
-        export_scale (str | float, default 'native'):
-            Pixel scale (meters) used for vectorization (`reduceToVectors`). If 'native',
-            uses the chosen `analysis_scale` (see below). You may pass a numeric meter
-            value to override.
-
-        asset_name (str, default 'topounits'):
-            Name used when exporting (folder is 'topotest' via `gu.export_fc`).
-
-        asset_ftype (str, default 'GeoJSON'):
-            Export file type passed through to `gu.export_fc`. (E.g., 'GeoJSON', 'SHP'.)
-
-        min_patch_pixels (int | None, default None):
-            If set, tiny slivers are dropped before vectorization by requiring each
-            connected component to have at least this many pixels (in the analysis
-            scale grid). Example: 9 retains components ≥ 3×3 pixels.
-
-        target_pixels_per_topounit (int, default 500):
-            Controls how coarse the **analysis scale** will be when it is auto-selected
-            from AOI area. Roughly, the AOI is divided into `planned_bins × target_pixels_per_topounit`
-            pixels; the square root of that per-bin area yields the scale in meters.
-            Larger values → coarser analysis.
-
-        target_scale (float | None, default None):
-            If set (meters), directly influences the **analysis scale**; the final
-            scale becomes `max(target_scale, coarsest_native_scale_across_sources)`.
-            Use this to keep large AOIs manageable (e.g., 90 or 120 m).
-
-        verbose (bool, default False):
-            Print diagnostics, including the chosen `analysis_scale`.
-
-    How sources are built:
-        - 'elev'   : ArcticDEM V4 2 m mosaic, band 'elevation'.
-        - 'hand'   : Chooses among 30m/100m and 30m/1000m or 90m/1000m HAND products.
-                    If you use fixed edges with values >100, a *_1000 product is preferred.
-                    If `target_scale` is set, we prefer a product that is not finer than it.
-        - 'aspect' : Computed from the DEM (degrees 0–360).
-        - 'cti'    : `projects/sat-io/open-datasets/HYDROGRAPHY90/flow_index/cti` (mosaicked).
-        - custom   : If `binning[sid]['image']` is present, it must be a **single-band ee.Image**.
-                    You must `.mosaic()` and `.select(...)` yourself beforehand. We only validate
-                    it is single-band and rename that band to 'v'.
-
-    Scale selection (important):
-        - Let A be AOI area (m²) and B be the **planned** number of bins
-        (product of per-source bin counts; for aspect, number of ranges).
-        - If `target_scale` is None:
-            analysis_scale ≈ sqrt( A / (B × target_pixels_per_topounit) )
-        Then: analysis_scale = max(analysis_scale, coarsest_native_source_scale).
-        - If `target_scale` is provided:
-            analysis_scale = max(target_scale, coarsest_native_source_scale).
-        - This scale is used in `sample`, `reduceRegion`, and `reduceToVectors`.
-
-    Output:
-        If `return_as='gdf'`, a GeoDataFrame with (at minimum) these columns:
-        - geometry                  : union geometry for the bin.
-        - band_name                 : stable ID like 'topounit_elev1__aspect2'.
-        - schema                    : 'cartesian' or 'hierarchical'.
-        - source_ids (list[str])    : sources used for this bin (e.g., ['elev','aspect']).
-        - labels (dict)             : per-source human labels (e.g., {'elev': 'ELEV_0-100', 'aspect': 'ASP_N'}).
-        - bin_bounds (dict)         : per-source numeric bounds or angular ranges.
-        - bin_method (dict)         : per-source method (e.g., 'percentiles', 'fixed').
-        - analysis_scale_m (float)  : the final analysis scale used for the run.
-        - planned_counts (dict)     : planned #bins per source (before combination).
-        - combine, max_topounits, target_pixels_per_topounit, target_scale.
-
-    Raises:
-        ValueError:
-            - Unknown `combine` strategy.
-            - `combine='hierarchical'` without `combine_order`.
-            - Unsupported binning strategy for a source.
-            - Fixed-edge binning without ≥ 2 edges.
-            - Aspect given a non-'fixed' strategy.
-            - Custom image provided with multiple bands.
-        KeyError:
-            - Unsupported `dem_source` for 'elev'/'aspect'.
-
-    Notes:
-        • One row per **bin** (union of all patches for that bin). If you prefer one
-        feature per *patch*, vectorization logic would need to keep all polygons
-        from `reduceToVectors` instead of the union geometry.
-        • For large AOIs, use `target_scale` and/or `min_patch_pixels` to balance
-        performance and polygon cleanliness.
-        • HAND auto-selection is heuristic and aims to avoid oversampling; you can
-        still override the scale via `target_scale`.
-
-    Examples (not-exhaustive):
-        # Elevation percentiles (equal-area):
-        gdf = make_topounits(
-            feature=feature,
-            sources=['elev'],
-            binning={'elev': {'strategy': 'percentiles', 'n_bins': 5, 'label_prefix': 'ELEV'}},
-            combine='cartesian',
-            target_scale=90,
-            return_as='gdf'
-        )
-
-        # HAND with fixed hydrologic thresholds (meters):
-        gdf = make_topounits(
-            feature=feature,
-            sources=['hand'],
-            binning={'hand': {'strategy': 'fixed', 'edges': [0,1,2,5,10,100,1000], 'label_prefix': 'HAND'}},
-            combine='cartesian',
-            return_as='gdf'
-        )
-
-        # Elevation × Aspect (N/S), Cartesian:
-        aspects = [(270, 90, 'N'), (90.01, 269.99, 'S')]
-        gdf = make_topounits(
-            feature=feature,
-            sources=['elev','aspect'],
-            binning={
-                'elev':   {'strategy': 'percentiles', 'n_bins': 4, 'label_prefix': 'ELEV'},
-                'aspect': {'strategy': 'fixed', 'ranges': aspects, 'label_prefix': 'ASP'}
-            },
-            combine='cartesian',
-            max_topounits=20,
-            target_scale=90,
-            return_as='gdf'
-        )
-
-        # Custom user image (single-band, already prepared):
-        my_img = ee.Image('users/me/mystack').mosaic().select('band_of_interest')
-        gdf = make_topounits(
-            feature=feature,
-            sources=['myvar'],
-            binning={'myvar': {'image': my_img, 'strategy': 'equalwidth', 'n_bins': 6, 'label_prefix': 'MYVAR'}},
-            combine='cartesian',
-            return_as='gdf'
-        )
+    If sources is None, sources = list(binning.keys()) (dict insertion order).
     """
-    # --- Normalize AOI: Domain or raw feature/geometry ---
-    #
-    # If a Domain is passed, use the union of its cell geometries as the AOI.
-    # Otherwise, keep the existing behavior (let gee_utils._geom_from_any handle it).
-    if isinstance(feature, Domain):
-        if feature.gdf.empty:
-            raise ValueError("Domain has no geometries; cannot build topounits.")
-        aoi_geom = feature.gdf.unary_union  # shapely geometry in EPSG:4326
-        feature_for_gee = aoi_geom
-    else:
-        feature_for_gee = feature
+    if binning is None or not isinstance(binning, dict) or len(binning) == 0:
+        raise ValueError("make_topounits requires a non-empty 'binning' dict.")
 
-    region = gu._geom_from_any(feature_for_gee)
+    # Infer sources from binning (keeps dict insertion order)
+    if sources is None:
+        sources = list(binning.keys())
+
+    # Validate sources
+    missing = [sid for sid in sources if sid not in binning]
+    if missing:
+        raise KeyError(f"Sources missing from binning: {missing}. Provide binning['sid'] for each source.")
+
+    # Coerce AOI input to a single shapely/ee object, then to ee.Geometry
+    if isinstance(aoi, Domain):
+        gdf = getattr(aoi, "support", None)
+        if gdf is None:
+            gdf = getattr(aoi, "gdf", None)  # legacy fallback
+        if gdf is None or gdf.empty:
+            raise ValueError("Domain has no geometries; cannot build topounits.")
+
+        if len(gdf) != 1:
+            raise ValueError(
+                "make_topounits(aoi=Domain) expects a single-geometry Domain. "
+                "Use make_topounits_for_domain(domain, ...) for multi-geometry Domains."
+            )
+
+        aoi_obj = gdf.geometry.iloc[0]  # shapely geom
+    else:
+        aoi_obj = aoi
+
+    # IMPORTANT: always use ee.Geometry for region-based EE ops (sample/reduceRegion/reduceToVectors)
+    region = gu.parse_geometry_object(aoi_obj, name="aoi")
 
     # 1) Planned total bins (product across sources)
     def _planned_bins_for_source(sid):
@@ -783,22 +590,23 @@ def make_topounits(
     for v in planned_counts.values():
         total_planned *= max(1, v)
 
-    # 2) Build sources (no reproject), record native scales
+    # 2) Build sources, record native scales
     source_images = {}
     native_scales = {}
     source_meta = {}
-    desired_scale_hint = target_scale  # may be None
+    desired_scale_hint = target_scale
 
+    # Pass region (ee.Geometry) downstream; build_source uses gu._geom_from_any(feature)
     for sid in sources:
         img, nat_scale, meta = build_source(
             sid,
-            feature=feature_for_gee,   # <-- changed from 'feature'
+            feature=region,
             desired_scale_hint=desired_scale_hint,
             binning_spec=binning[sid],
             dem_source=dem_source,
             verbose=verbose
         )
-        source_images[sid] = img  # single band 'v', already clipped
+        source_images[sid] = img
         native_scales[sid] = float(nat_scale)
         source_meta[sid] = meta
 
@@ -816,13 +624,12 @@ def make_topounits(
         print(f"[Scale] planned bins={total_planned}, coarsest_native={coarsest_native:.1f} m, "
               f"analysis_scale={analysis_scale:.1f} m")
 
-    # 4) Build per-source bins and masks (no reprojection)
+    # 4) Build per-source bins and masks
     bin_defs_by_source = {}
     bin_masks_by_source = {}
 
     for sid in sources:
         img = source_images[sid]
-        # Build bin definitions
         bin_defs = build_bins_for_source(
             sid,
             img,
@@ -833,7 +640,6 @@ def make_topounits(
         )
         bin_defs_by_source[sid] = bin_defs
 
-        # Build masks per bin
         entries = []
         if sid == 'aspect':
             for b in bin_defs:
@@ -891,12 +697,13 @@ def make_topounits(
         extra_image_props=extra_props
     )
 
-    # Compute DEM-based terrain stats for each topounit and append
+    # Attach terrain stats (uses DEM; region is fine as "feature")
     polygons_fc = _attach_topounit_terrain_stats(
         polygons_fc=polygons_fc,
-        feature_for_gee=feature_for_gee,
+        feature_for_gee=region,
         dem_source=dem_source,
         analysis_scale=analysis_scale,
+        verbose=verbose,
     )
 
     # 9) Return or export
@@ -1017,3 +824,130 @@ def add_topounit_image_samples(
         )
 
     return gdf
+
+
+def make_topounits_for_domain(
+    domain: Domain,
+    *,
+    sources,
+    binning,
+    combine="cartesian",
+    combine_order=None,
+    max_topounits=256,
+    dem_source="arcticdem",
+    export_scale="native",
+    min_patch_pixels=None,
+    target_pixels_per_topounit=500,
+    target_scale=None,
+    verbose=False,
+    allow_slow_ncells: int = 25,
+):
+    """
+    Compute topounits per-domain-geometry and attach them to the Domain.
+
+    - For domain.mode == 'sites': this computes per-run (each run is 1 geom)
+      and returns a Domain with a concatenated topounits table; iter_runs()
+      can later subset by gid.
+    - For domain.mode == 'cellset': loops over each cell geometry and computes
+      topounits for each gid separately (can be slow for large N).
+
+    Returns
+    -------
+    Domain
+        domain with domain.topounits populated (expects Domain.with_topounits exists).
+    """
+    import pandas as pd
+    import geopandas as gpd
+    from pyproj import Geod
+
+    # Choose which geometry view to use for topounits (support is the right one)
+    gdf = getattr(domain, "support", None)
+    if gdf is None:
+        gdf = getattr(domain, "gdf", None)
+    if gdf is None or gdf.empty:
+        raise ValueError("Domain has no geometries; cannot compute topounits.")
+
+    if "gid" not in gdf.columns:
+        raise KeyError("Domain geometry table must include a 'gid' column.")
+
+    gdf = gdf.copy()
+    gdf["gid"] = gdf["gid"].astype(str)
+
+    ncells = len(gdf)
+    if ncells > allow_slow_ncells and not verbose:
+        raise ValueError(
+            f"make_topounits_for_domain would run {ncells} separate GEE topounit builds. "
+            f"Set verbose=True to proceed intentionally, or raise allow_slow_ncells."
+        )
+
+    geod = Geod(ellps="WGS84")
+
+    def _geod_area_m2(geom) -> float:
+        # returns signed area; take abs
+        try:
+            a, _p = geod.geometry_area_perimeter(geom)
+            return float(abs(a))
+        except Exception:
+            # fallback: 0 rather than crashing; user will see pct=nan
+            return float("nan")
+
+    parts = []
+    for row in gdf.itertuples(index=False):
+        gid = str(getattr(row, "gid"))
+        geom = getattr(row, "geometry")
+
+        if verbose:
+            print(f"[topounits] gid={gid}: building topounits...")
+
+        tu = make_topounits(
+            aoi=geom,
+            sources=sources,
+            binning=binning,
+            combine=combine,
+            combine_order=combine_order,
+            max_topounits=max_topounits,
+            dem_source=dem_source,
+            return_as="gdf",
+            export_scale=export_scale,
+            min_patch_pixels=min_patch_pixels,
+            target_pixels_per_topounit=target_pixels_per_topounit,
+            target_scale=target_scale,
+            verbose=verbose,
+        )
+        
+        if tu is None:
+            raise RuntimeError(
+                f"make_topounits returned None for gid={gid} "
+                "(likely fell back to Drive export). Use a smaller AOI/scale or run in an env where FC download works."
+            )
+
+        tu = tu.copy()
+        tu["gid"] = gid
+
+        # Stable ids across multi-cell: prefix band_name with gid
+        if "band_name" not in tu.columns:
+            raise KeyError("Topounits output must include 'band_name'.")
+        tu["topounit_id"] = tu["gid"].astype(str) + "__" + tu["band_name"].astype(str)
+
+        # Compute area fraction within the parent geometry (percent)
+        cell_area = _geod_area_m2(geom)
+        if not (cell_area and cell_area > 0):
+            tu["TopounitArea_m2"] = float("nan")
+            tu["TopounitPctOfCell"] = float("nan")
+        else:
+            # Intersection is defensive; should already be inside geom
+            inter = tu.geometry.intersection(geom)
+            tu["TopounitArea_m2"] = inter.apply(_geod_area_m2)
+            tu["TopounitPctOfCell"] = 100.0 * (tu["TopounitArea_m2"] / cell_area)
+
+        parts.append(tu)
+
+    all_topounits = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs=gdf.crs)
+
+    # Attach to Domain (expects you implemented Domain.with_topounits)
+    return domain.with_topounits(
+        all_topounits,
+        id_col="topounit_id",
+        gid_col="gid",
+        dim_name="topounit",
+    )

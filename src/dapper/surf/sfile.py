@@ -1,13 +1,15 @@
-from __future__ import annotations
-from typing import Dict, Any, Optional, Tuple, Union
-import numpy as np
-import xarray as xr
+from typing import Dict, Any, Optional, Tuple, Union, List
+import tempfile
 from pathlib import Path
 
-from dapper.surf import schema as SC  # expects REGISTRY (name -> ParDef), ParDef
-from dapper.surf import sample as SP
+import numpy as np
+import xarray as xr
+import pandas as pd
 
+from dapper.surf import schema as SC
+from dapper.surf import sample as SP  # for from_halfdegree_point 
 from dapper.utils.pathing import SURFDATA_HALFDEGREE_TOP
+from dapper.utils import sampling  # shared gridded sampler
 
 ArrayLike = Union[np.ndarray, "xr.DataArray", float, int]
 
@@ -94,6 +96,80 @@ def build_surface_dataset(
                            f" | dapper.surf.write: built from sampled point at "
                            f"({sampled['__meta__']['lat_on_grid']:.6f}, {sampled['__meta__']['lon_on_grid']:.6f})").strip()
 
+    return ds
+
+def build_surface_dataset_cellset(
+    sampled_list: List[Dict[str, Any]],
+    *,
+    include: Optional[set[str]] = None,
+    drop_non_spatial_arrays: bool = False,
+) -> xr.Dataset:
+    """
+    Build an ELM surface xarray.Dataset for a cellset laid out as (nj=N, ni=1).
+    This mirrors your domain writer default of N×1, and keeps spatial dims last.
+
+    Each entry of sampled_list is the dict returned by SurfacePointSampler.sample().
+    """
+    if not sampled_list:
+        raise ValueError("build_surface_dataset_cellset(): sampled_list is empty.")
+
+    meta0 = sampled_list[0]["__meta__"]
+    coords_src = sampled_list[0].get("__coords__", {})
+    lat_dim, lon_dim = meta0["lat_dim"], meta0["lon_dim"]
+
+    nj = len(sampled_list)
+    ni = 1
+
+    coords = {
+        lat_dim: (lat_dim, np.arange(nj, dtype=np.int32)),
+        lon_dim: (lon_dim, np.arange(ni, dtype=np.int32)),
+    }
+    for dim, vals in coords_src.items():
+        if isinstance(vals, np.ndarray):
+            coords[dim] = (dim, vals)
+
+    # Use variable names from the first sample (assume consistent filtering across samples)
+    names = [n for n in sampled_list[0].keys() if not n.startswith("__")]
+    if include:
+        names = [n for n in names if n in include]
+
+    data_vars: Dict[str, Any] = {}
+
+    for name in names:
+        spec0 = sampled_list[0][name]
+        dims_no_spatial = tuple(spec0["dims"])
+        orig_dims = tuple(spec0["orig_dims"])
+        attrs = spec0.get("attrs", {})
+
+        if drop_non_spatial_arrays and ((lat_dim not in orig_dims) and (lon_dim not in orig_dims)):
+            continue
+
+        # Collect per-cell arrays (all should share the same non-spatial shape)
+        per_cell = []
+        for smp in sampled_list:
+            spec = smp[name]
+            data = np.asarray(spec["data"])
+            per_cell.append(data)
+
+        # Stack along new lat_dim (nj), then add lon_dim (ni=1)
+        stacked = np.stack(per_cell, axis=-1)   # shape: base_shape + (nj,)
+        stacked = np.expand_dims(stacked, axis=-1)  # -> base_shape + (nj,1)
+
+        target_dims = list(dims_no_spatial) + [lat_dim, lon_dim]
+        data_vars[name] = (target_dims, stacked.astype(stacked.dtype, copy=False), attrs)
+
+    ds = xr.Dataset(data_vars=data_vars, coords=coords)
+
+    # LATIXY/LONGXY: (nj,1)
+    lat_on_grid = np.array([s["__meta__"]["lat_on_grid"] for s in sampled_list], dtype=np.float32).reshape(nj, 1)
+    lon_on_grid = np.array([s["__meta__"]["lon_on_grid"] for s in sampled_list], dtype=np.float32).reshape(nj, 1)
+    ds["LATIXY"] = xr.DataArray(lat_on_grid, dims=(lat_dim, lon_dim))
+    ds["LONGXY"] = xr.DataArray(lon_on_grid, dims=(lat_dim, lon_dim))
+
+    # Global attrs: use first sample
+    ds.attrs.update(meta0.get("global_attrs", {}))
+    ds.attrs["history"] = (ds.attrs.get("history", "") +
+                           f" | dapper.surf.write: built from {nj} sampled points").strip()
     return ds
 
 def write_surface_nc(ds: xr.Dataset, out_path: str) -> str:
@@ -484,54 +560,222 @@ class SurfaceFile:
         registry: Optional[Dict[str, SC.ParDef]] = None,
     ) -> "SurfaceFile":
         """
-        Workflow B (point version): sample the global half-degree surface at
-        (lat, lon) and build a 1x1 surface Dataset, then wrap it.
-
-        This is essentially:
-            sampled = sample_point_values(...)
-            ds = build_surface_dataset(sampled, ...)
-        but returned as a SurfaceFile.
+        Sample the global half-degree surface at (lat, lon) and return a 1x1 SurfaceFile.
+        Uses dapper.utils.sampling.sample_gridded_dataset_points.
         """
-        sampled = SP.sample_point_values(
-            nc_in=nc_in,
-            lat=lat,
-            lon=lon,
-            decode_times=decode_times,
-            chunks=chunks,
-            include=include,
-            exclude=exclude,
+        ds_src = xr.open_dataset(nc_in, decode_times=decode_times, chunks=chunks)
+
+        df_loc = pd.DataFrame({"lat": [float(lat)], "lon": [float(lon)], "weight": [1.0]})
+
+        ds_out = sampling.sample_gridded_dataset_points(
+            ds_src,
+            df_loc,
+            lat_col="lat",
+            lon_col="lon",
+            vars_include=sorted(include) if include else None,
+            vars_drop=sorted(exclude) if exclude else None,
+            lon_wrap="auto",
+            method="nearest",
         )
-        ds = build_surface_dataset(sampled)
-        return cls(ds=ds, registry=registry)
+        return cls(ds=ds_out, registry=registry)
 
     @classmethod
     def from_domain(
         cls,
         domain: Any,
+        nc_in: Union[str, Path] = SURFDATA_HALFDEGREE_TOP,
+        *,
+        decode_times: bool = True,
+        chunks: Optional[Dict[str, int]] = None,
+        include: Optional[set[str]] = None,
+        exclude: Optional[set[str]] = None,
         registry: Optional[Dict[str, SC.ParDef]] = None,
+        attach_topounits: bool = True,
     ) -> "SurfaceFile":
         """
-        Workflow B (general): create a new surface dataset from a Domain.
+        Create a surface dataset by sampling the global half-degree surface
+        at the Domain's cell locations (Domain.mode must be 'cellset' for this call).
 
-        Current behaviour is intentionally minimal: we just create an empty
-        Dataset and copy any attrs from the Domain. You can extend this later
-        to:
-          - set up lsmlat/lsmlon/landunit/column dims from the Domain
-          - optionally sample a global parameter file per-domain element.
+        For multi-run (mode='sites') exports, use SurfaceFile.export_surface(...),
+        which loops domain.iter_runs() and calls this on each per-run Domain.
         """
-        base_ds = xr.Dataset()
+        if getattr(domain, "mode", None) == "sites":
+            raise ValueError(
+                "SurfaceFile.from_domain expects a single-run Domain (mode='cellset'). "
+                "Use SurfaceFile.export_surface(domain, ...) for mode='sites'."
+            )
 
-        # Optionally propagate some global attrs from the Domain
-        attrs: Dict[str, Any] = {}
-        for attr_name in ("attrs", "metadata"):
-            if hasattr(domain, attr_name):
-                maybe = getattr(domain, attr_name)
-                if isinstance(maybe, dict):
-                    attrs.update(maybe)
-        if attrs:
-            base_ds = base_ds.assign_attrs(attrs)
+        df_loc = domain.to_df_loc()  # must include lon/lat; weight is fine to carry along
 
-        return cls(ds=base_ds, registry=registry)
+        ds_src = xr.open_dataset(nc_in, decode_times=decode_times, chunks=chunks)
+
+        ds_out = sampling.sample_gridded_dataset_points(
+            ds_src,
+            df_loc,
+            lat_col="lat",
+            lon_col="lon",
+            vars_include=sorted(include) if include else None,
+            vars_drop=sorted(exclude) if exclude else None,
+            lon_wrap="auto",
+            method="nearest",
+        )
+
+        sf = cls(ds=ds_out, registry=registry)
+
+        if attach_topounits and hasattr(domain, "has_topounits") and domain.has_topounits():
+            sf._attach_topounits_from_domain(domain)
+
+        return sf
+    
+    def _attach_topounits_from_domain(self, domain: Any) -> None:
+        """
+        Attach Domain.topounits as a 1D parameter table on the surface dataset.
+
+        This is intentionally "metadata-style" (1D along topounit dim). It does NOT
+        attempt to reshape existing ELM vars to include topounits.
+        """
+        gdf = domain.topounits.copy()
+        dim_name = getattr(domain, "topounits_dim_name", "topounit")
+        id_col = getattr(domain, "topounits_id_col", "topounit_id")
+        gid_col = getattr(domain, "topounits_gid_col", "gid")
+
+        if id_col not in gdf.columns:
+            raise KeyError(f"Domain.topounits missing id column '{id_col}'")
+
+        # If topounit ids collide across gids, make them unique using gid prefix
+        if gdf[id_col].astype(str).duplicated().any() and (gid_col in gdf.columns):
+            gdf[id_col] = gdf[gid_col].astype(str) + "_" + gdf[id_col].astype(str)
+
+        drop_cols = ["geometry"]
+        if gid_col in gdf.columns:
+            drop_cols.append(gid_col)
+
+        self.add_params_from_df(
+            dim_name=dim_name,
+            df=gdf,
+            id_col=id_col,
+            drop_cols=drop_cols,
+        )
+
+    @classmethod
+    def export_surface(
+        cls,
+        domain: Any,
+        out_dir: Union[str, Path],
+        *,
+        nc_in: Union[str, Path] = SURFDATA_HALFDEGREE_TOP,
+        filename_template: str = "surfdata_{run_id}.nc",
+        decode_times: bool = True,
+        chunks: Optional[Dict[str, int]] = None,
+        include: Optional[set[str]] = None,
+        exclude: Optional[set[str]] = None,
+        registry: Optional[Dict[str, SC.ParDef]] = None,
+        attach_topounits: bool = True,
+        overwrite: bool = False,
+    ) -> list[Path]:
+        """
+        Export surface file(s) for a Domain.
+
+        - domain.mode='cellset' -> writes one file
+        - domain.mode='sites'   -> writes one file per gid (uses domain.iter_runs()).
+
+        Returns list of written Paths.
+        """
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        written: list[Path] = []
+        for run_id, run_dom in domain.iter_runs():
+            sf = cls.from_domain(
+                run_dom,
+                nc_in=nc_in,
+                decode_times=decode_times,
+                chunks=chunks,
+                include=include,
+                exclude=exclude,
+                registry=registry,
+                attach_topounits=attach_topounits,
+            )
+            out_path = out_dir / filename_template.format(run_id=run_id)
+            sf.to_netcdf(out_path, overwrite=overwrite)
+            written.append(out_path)
+
+        return written
+
+    @classmethod
+    def export(
+        cls,
+        domain: Any,
+        *,
+        out_dir: str | Path,
+        nc_in: str | Path = SURFDATA_HALFDEGREE_TOP,
+        filename_template: str = "surfdata_{run_id}.nc",
+        overwrite: bool = False,
+        decode_times: bool = True,
+        chunks: Optional[Dict[str, int]] = None,
+        include: Optional[set[str]] = None,
+        exclude: Optional[set[str]] = None,
+        lon_wrap: sampling.LonWrap = "auto",
+        validate: bool = False,
+        validator_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Path]:
+        """
+        Export surfdata NetCDF(s) for a Domain.
+
+        Returns: dict[run_id, path]
+
+        - domain.mode='cellset': one file in out_dir
+        - domain.mode='sites'  : one file per site in out_dir/<gid>/
+        """
+        from dapper.domains.domain import Domain  # local import to avoid circular deps
+
+        if not isinstance(domain, Domain):
+            raise TypeError("SurfaceFile.export() expects a dapper.domains.Domain instance.")
+
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        outputs: Dict[str, Path] = {}
+
+        for run_id, run_dom in domain.iter_runs():
+            run_id = str(run_id)
+
+            run_out_dir = (out_dir / run_id) if domain.mode == "sites" else out_dir
+            run_out_dir.mkdir(parents=True, exist_ok=True)
+
+            out_path = run_out_dir / filename_template.format(run_id=run_id)
+            if out_path.exists() and not overwrite:
+                raise FileExistsError(f"{out_path} exists (overwrite=False).")
+
+            sf = cls.from_domain(
+                run_dom,
+                nc_in=nc_in,
+                decode_times=decode_times,
+                chunks=chunks,
+                include=include,
+                exclude=exclude,
+                lon_wrap=lon_wrap,
+            )
+
+            # Add topounit parameters if they exist
+            if getattr(run_dom, "topounits", None) is not None and run_dom.topounits is not None:
+                sf.add_topounits_from_domain(run_dom)
+
+            write_surface_nc(sf.ds, str(out_path))
+
+            if validate:
+                from dapper.surf.validate import SurfaceValidator
+                vkw = dict(validator_kwargs or {})
+
+                # Allow N×1 (cellset) surfaces without forcing len==1
+                if int(sf.ds.sizes.get("lsmlat", 1)) > 1:
+                    vkw.setdefault("require_point_dims", False)
+
+                SurfaceValidator(**vkw).validate(str(out_path))
+
+            outputs[run_id] = out_path
+
+        return outputs
 
     # ------------------------------------------------------------------
     # Core operations
@@ -634,6 +878,105 @@ class SurfaceFile:
                     da = da.assign_attrs(attrs)
 
             ds[col] = da
+
+        self.ds = ds
+
+    def add_topounits_from_domain(
+        self,
+        domain,
+        *,
+        gid_col: str = "gid",
+        id_col: str = "topounit_id",
+        pct_col: str = "TopounitPctOfCell",
+        dim_name: str = "topounit",
+        pct_var_name: str = "PCT_TOPUNIT",
+    ) -> None:
+        """
+        Attach topounits + per-cell weights to the surface dataset.
+
+        Expects domain.topounits to exist and contain:
+        - gid_col (links topounit -> cell gid)
+        - id_col  (unique id per topounit across the whole run)
+        - pct_col (percent of the parent cell; sums to ~100 per gid)
+        """
+        import pandas as pd
+        import numpy as np
+        import xarray as xr
+
+        if getattr(domain, "topounits", None) is None or domain.topounits is None:
+            raise ValueError("Domain has no topounits attached.")
+
+        topos = domain.topounits.copy()
+        for c in (gid_col, id_col, pct_col):
+            if c not in topos.columns:
+                raise KeyError(f"topounits is missing required column '{c}'")
+
+        # Ensure strings for ids
+        topos[gid_col] = topos[gid_col].astype(str)
+        topos[id_col] = topos[id_col].astype(str)
+
+        # Determine spatial dims in this surf dataset
+        ds = self.ds
+        lat_dim = "lsmlat" if "lsmlat" in ds.dims else None
+        lon_dim = "lsmlon" if "lsmlon" in ds.dims else None
+        if lat_dim is None or lon_dim is None:
+            raise ValueError("Surface dataset is missing expected spatial dims (lsmlat/lsmlon).")
+
+        nj = int(ds.sizes[lat_dim])
+        ni = int(ds.sizes[lon_dim])
+        if ni != 1:
+            raise NotImplementedError("Topounit mapping currently assumes (nj=N, ni=1) layout for cellsets.")
+
+        # Domain cell order must match surf layout order
+        df_loc = domain.to_df_loc()
+        if len(df_loc) != nj:
+            raise ValueError(f"Domain has {len(df_loc)} cells but surf dataset has {nj} {lat_dim} entries.")
+
+        gid_order = df_loc["gid"].astype(str).tolist()
+        gid_to_j = {gid: j for j, gid in enumerate(gid_order)}
+
+        # Create / align the topounit dimension
+        top_ids = pd.unique(topos[id_col]).astype(str)
+        top_ids = list(top_ids)
+
+        # Add 1D topounit parameters (all non-geometry, non-(gid/id/pct) columns)
+        drop = {"geometry", gid_col, id_col, pct_col}
+        param_cols = [c for c in topos.columns if c not in drop]
+        if param_cols:
+            df_params = topos[[id_col] + param_cols].drop_duplicates(subset=[id_col]).copy()
+            self.add_params_from_df(dim_name=dim_name, df=df_params, id_col=id_col, drop_cols=["geometry"] if "geometry" in df_params.columns else None)
+
+        # Build pct mapping array: (topounit, nj, ni)
+        pct = np.zeros((len(top_ids), nj, ni), dtype=np.float32)
+        id_to_k = {tid: k for k, tid in enumerate(top_ids)}
+
+        for gid, grp in topos.groupby(gid_col):
+            if gid not in gid_to_j:
+                raise ValueError(f"topounits contains gid={gid!r} not present in domain cells.")
+            j = gid_to_j[gid]
+
+            vals = grp[pct_col].to_numpy(dtype=np.float64)
+            s = float(np.nansum(vals))
+            if not np.isfinite(s) or s <= 0:
+                raise ValueError(f"Topounit pct weights for gid={gid} are invalid (sum={s}).")
+            # normalize to 100 just in case
+            vals = 100.0 * (vals / s)
+
+            for tid, v in zip(grp[id_col].astype(str).tolist(), vals):
+                k = id_to_k[tid]
+                pct[k, j, 0] = float(v)
+
+        # Install the topounit coord if needed
+        if dim_name not in ds.dims:
+            ds = ds.assign_coords({dim_name: (dim_name, np.asarray(top_ids, dtype=object))})
+        else:
+            # If already exists, ensure ids match exactly
+            existing = [str(x) for x in ds[dim_name].values.tolist()]
+            if existing != top_ids:
+                raise ValueError(f"Existing {dim_name} coord does not match topounit ids from domain.")
+
+        ds[pct_var_name] = xr.DataArray(pct, dims=(dim_name, lat_dim, lon_dim))
+        ds[pct_var_name].attrs.update({"long_name": "percent of gridcell in each topounit", "units": "percent"})
 
         self.ds = ds
 

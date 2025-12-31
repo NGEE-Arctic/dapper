@@ -64,16 +64,19 @@ class SurfaceValidator:
         lat_candidates: Tuple[str, ...] = ("lsmlat","lat","latitude","y"),
         lon_candidates: Tuple[str, ...] = ("lsmlon","lon","longitude","x"),
         enforce_known_vars_only: bool = False,
+        require_point_dims: bool = True,
         skip_soft_checks: bool = False,
     ):
         self.expected_sizes = expected_sizes or {
             "time": 12, "natpft": 17, "lsmpft": 17, "nlevsoi": 10,
             "nlevslp": 11, "numurbl": 3, "numrad": 2, "nlevurb": 5
         }
+        self.require_point_dims = require_point_dims
         self.lat_candidates = lat_candidates
         self.lon_candidates = lon_candidates
         self.enforce_known_vars_only = enforce_known_vars_only
         self.skip_soft_checks = skip_soft_checks
+
 
     # ---------- public API: path-only ----------
     def validate(self, nc_path: str) -> pd.DataFrame:
@@ -113,10 +116,11 @@ class SurfaceValidator:
             CheckResult("V-001.lat_dim.present", "ERROR", lat_dim is not None, f"lat_dim={lat_dim}"),
             CheckResult("V-001.lon_dim.present", "ERROR", lon_dim is not None, f"lon_dim={lon_dim}"),
         ]
-        if lat_dim:
-            r.append(CheckResult("V-001.lat_dim.len1", "ERROR", int(ds.sizes[lat_dim])==1, f"{lat_dim}={ds.sizes[lat_dim]}"))
-        if lon_dim:
-            r.append(CheckResult("V-001.lon_dim.len1", "ERROR", int(ds.sizes[lon_dim])==1, f"{lon_dim}={ds.sizes[lon_dim]}"))
+        if self.require_point_dims:
+            if lat_dim:
+                r.append(CheckResult("V-001.lat_dim.len1", "ERROR", int(ds.sizes[lat_dim]) == 1, f"{lat_dim}={ds.sizes[lat_dim]}"))
+            if lon_dim:
+                r.append(CheckResult("V-001.lon_dim.len1", "ERROR", int(ds.sizes[lon_dim]) == 1, f"{lon_dim}={ds.sizes[lon_dim]}"))
         return r
 
     def _check_expected_sizes(self, ds: xr.Dataset) -> List[CheckResult]:
@@ -125,29 +129,85 @@ class SurfaceValidator:
             if dim in ds.dims:
                 r.append(CheckResult(f"V-002.size.{dim}", "WARN", int(ds.sizes[dim])==n, f"found {ds.sizes[dim]}, expected {n}"))
         return r
+    
+    def _check_schema_presence(self, ds: xr.Dataset) -> list[CheckResult]:
+        """
+        Check that required/recommended schema vars exist and schema rules are satisfied.
 
-    def _check_schema_presence(self, ds: xr.Dataset) -> List[CheckResult]:
-        r: List[CheckResult] = []
+        Requiredness is driven by SC.REGISTRY[var].required_level, not SC.SCHEMA.
+        SC.SCHEMA provides tier organization + cross-var rules (choose_one_of, conditional).
+        """
+        r: list[CheckResult] = []
         present = set(ds.data_vars)
+
         for tier, spec in SC.SCHEMA.items():
-            # required
-            for v in spec.get("required", []):
-                r.append(CheckResult(f"V-003.required.{tier}.{v}", "ERROR", v in present,
-                                     "present" if v in present else "missing", v))
-            # choose_one_of
-            for group in spec.get("choose_one_of", []):
-                group_vars = group if isinstance(group, list) else group.get("vars", [])
-                ok = any(v in present for v in group_vars)
-                r.append(CheckResult(f"V-004.choose_one_of.{tier}.{','.join(group_vars)}", "ERROR", ok,
-                                     f"present={sorted(present & set(group_vars))}"))
-            # conditional (presence only)
-            for cond in spec.get("conditional", []):
-                driver = cond["if_var_present"]
-                deps = cond["then_require"]
+            tier_vars = list(spec.get("vars", []) or [])
+
+            # Presence checks: required vs recommended (driven by registry)
+            for v in tier_vars:
+                par = SC.REGISTRY.get(v)
+                if par is None:
+                    # If schema references something not in registry, don't hard fail here.
+                    continue
+
+                lvl = getattr(par, "required_level", "optional") or "optional"
+                if lvl == "required":
+                    r.append(
+                        CheckResult(
+                            check_id=f"V-003.required.{tier}.{v}",
+                            severity="ERROR",
+                            ok=(v in present),
+                            message=f"Missing REQUIRED var {v} in tier {tier}" if v not in present else "present",
+                            var=v,
+                        )
+                    )
+                elif lvl == "recommended":
+                    r.append(
+                        CheckResult(
+                            check_id=f"V-003.recommended.{tier}.{v}",
+                            severity="WARN",
+                            ok=(v in present),
+                            message=f"Missing recommended var {v} in tier {tier}" if v not in present else "present",
+                            var=v,
+                        )
+                    )
+
+            # choose_one_of groups (schema rule)
+            for group in spec.get("choose_one_of", []) or []:
+                # group is expected as list like ["PCT_NATVEG","PCT_NAT_PFT"]
+                if not isinstance(group, (list, tuple)) or len(group) == 0:
+                    continue
+                ok = any(v in present for v in group)
+                r.append(
+                    CheckResult(
+                        check_id=f"V-004.choose_one_of.{tier}",
+                        severity="ERROR",
+                        ok=ok,
+                        message=f"Must include at least one of {group} (tier {tier})" if not ok else "ok",
+                        var="|".join(group),
+                    )
+                )
+
+            # conditional rules (schema rule)
+            for cond in spec.get("conditional", []) or []:
+                driver = cond.get("if_var_present")
+                deps = cond.get("then_require", []) or []
+                if not driver or not deps:
+                    continue
                 if driver in present:
                     for dep in deps:
-                        r.append(CheckResult(f"V-005.conditional.{tier}.{driver}->{dep}", "WARN", dep in present,
-                                             "present" if dep in present else "missing", dep))
+                        r.append(
+                            CheckResult(
+                                check_id=f"V-005.conditional.{tier}.{driver}->{dep}",
+                                severity="WARN",
+                                ok=(dep in present),
+                                message=f"{dep} should be present when {driver} is present (tier {tier})"
+                                if dep not in present
+                                else "ok",
+                                var=dep,
+                            )
+                        )
+
         return r
 
     def _check_unknown_vars(self, ds: xr.Dataset) -> List[CheckResult]:

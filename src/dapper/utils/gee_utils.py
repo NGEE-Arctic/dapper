@@ -7,8 +7,13 @@ from pathlib import Path
 from datetime import datetime
 from shapely.geometry import Polygon, shape
 from dateutil.relativedelta import relativedelta
+from shapely.geometry import (
+        Point, Polygon, MultiPolygon,
+        LineString, MultiLineString,
+        GeometryCollection
+    )
+from shapely.ops import unary_union
 
-from dapper.domains.aoi import AOI
 from dapper.domains.domain import Domain
 from dapper.config.metsources import era5
 
@@ -19,84 +24,156 @@ _ROOT_DIR = Path(next(iter(dapper.__path__))).parent
 _DATA_DIR = _ROOT_DIR / "data"
 
 
-def parse_geometry_object(geom, name):
+def parse_geometry_object(geom, name=None):
     """
-    Translates gdf geometries to ee geometries.
+    Convert a single geometry-like input into an ee.Geometry.
+
+    Supported:
+      - str: treated as a GEE asset id; returns its union geometry
+      - shapely: Point / Polygon / MultiPolygon / LineString / MultiLineString / GeometryCollection
+      - ee.Geometry / ee.Feature / ee.FeatureCollection
     """
+    from shapely.geometry import (
+        Point, Polygon, MultiPolygon,
+        LineString, MultiLineString,
+        GeometryCollection,
+    )
+    from shapely.ops import unary_union
 
-    if type(geom) is str:  # GEE Asset
-        ret = geom
-    elif type(geom) in [Polygon]:
-        eegeom = ee.Geometry.Polygon(list(geom.exterior.coords))
-        eefeature = ee.Feature(eegeom, {"name": name})
-        ret = ee.FeatureCollection(eefeature)
-    else:
-        raise TypeError(f"Unsupported geometry type: {type(geom)}")
+    def _ring_coords(ls):
+        return [[float(x), float(y)] for x, y in ls.coords]
 
-    return ret
+    def _poly_coords(poly: Polygon):
+        # EE expects [outer, hole1, hole2, ...]
+        coords = [_ring_coords(poly.exterior)]
+        for interior in poly.interiors:
+            coords.append(_ring_coords(interior))
+        return coords
+
+    def _to_ee_geometry(g):
+        if g is None:
+            raise TypeError("Geometry is None")
+
+        if isinstance(g, GeometryCollection):
+            g = unary_union(g)
+
+        if isinstance(g, Point):
+            return ee.Geometry.Point([float(g.x), float(g.y)])
+
+        if isinstance(g, Polygon):
+            return ee.Geometry.Polygon(_poly_coords(g))
+
+        if isinstance(g, MultiPolygon):
+            polys = [_poly_coords(p) for p in g.geoms]
+            return ee.Geometry.MultiPolygon(polys)
+
+        if isinstance(g, LineString):
+            return ee.Geometry.LineString(_ring_coords(g))
+
+        if isinstance(g, MultiLineString):
+            lines = [_ring_coords(ln) for ln in g.geoms]
+            return ee.Geometry.MultiLineString(lines)
+
+        # last resort: union then retry once
+        g2 = unary_union(g)
+        if g2 is not g:
+            return _to_ee_geometry(g2)
+
+        raise TypeError(f"Unsupported geometry type: {type(g)}")
+
+    # asset id -> union geometry
+    if isinstance(geom, str):
+        return ee.FeatureCollection(geom).geometry()
+
+    # pass-through EE types
+    if isinstance(geom, ee.Geometry):
+        return geom
+    if isinstance(geom, ee.Feature):
+        return geom.geometry()
+    if isinstance(geom, ee.FeatureCollection):
+        return ee.FeatureCollection(geom).geometry()
+
+    # shapely
+    if isinstance(geom, (Point, Polygon, MultiPolygon, LineString, MultiLineString, GeometryCollection)):
+        return _to_ee_geometry(geom)
+
+    raise TypeError(f"Unsupported geometry type: {type(geom)}")
 
 
 def parse_geometry_objects(geom, geometry_id_field=None):
     """
-    Translates geometry containers to an ee.FeatureCollection.
+    Translate geometry containers to an ee.FeatureCollection.
 
-    If geom is a string, it's interpreted as a path to an available GEE asset.
-    If geom is a GeoDataFrame, the geometries for each row are interpreted.
-    geometry_id_field is the column that contains the unique identifier for each
-    geometry/row in the GeoDataFrame.
+    Accepted inputs:
+      - Domain: uses domain.support (preferred) or legacy domain.gdf
+      - str: interpreted as a GEE asset id
+      - ee.FeatureCollection: returned (re-cast) as FeatureCollection
+      - GeoDataFrame: requires geometry_id_field; converts rows to features
 
-    Returns a FeatureCollection, even if a single feature is present.
+    Returns an ee.FeatureCollection (even if a single feature is present).
+
+    Notes:
+      - This function intentionally does NOT depend on AOI.
+      - This function does NOT attempt to “fix” individual shapely geometries
+        (e.g., MultiPolygon). GeoDataFrame -> GeoJSON -> EE handles that.
     """
-
-    # AOI -> underlying GeoDataFrame (['gid', 'geometry'])
-    if isinstance(geom, AOI):
-        # AOI always has a 'gid' column; fall back to that if no id provided
-        return parse_geometry_objects(
-            geom.to_geometries_gdf(),
-            geometry_id_field=geometry_id_field or "gid",
-        )
-
     # Domain -> GeoDataFrame (['gid', 'geometry'])
     if isinstance(geom, Domain):
-        return parse_geometry_objects(
-            geom.to_geometries(),
-            geometry_id_field=geometry_id_field or "gid",
-        )
+        gdf = getattr(geom, "support", None)
+        if gdf is None:
+            gdf = getattr(geom, "gdf", None)  # legacy fallback
+        if gdf is None:
+            raise AttributeError(
+                "Domain has no 'support' (or legacy 'gdf') GeoDataFrame to extract geometries from."
+            )
+        return parse_geometry_objects(gdf, geometry_id_field=geometry_id_field or "gid")
 
     # String = GEE asset ID
     if isinstance(geom, str):
         return ee.FeatureCollection(geom)
 
-    # Already a FeatureCollection
+    # Already a FeatureCollection (re-cast to avoid odd type issues)
     if isinstance(geom, ee.FeatureCollection):
-        # re-casting; should already be correct type but this fixes weird errors
         return ee.FeatureCollection(geom)
 
-    # GeoDataFrame
+    # GeoDataFrame -> FeatureCollection
     if isinstance(geom, gpd.GeoDataFrame):
-        gdf_reduced = geom.copy()
         if geometry_id_field is None:
             raise KeyError(
-                "No geometry id field was provided, but it is required. "
-                "Ensure your GeoDataFrame has a unique identifier column."
+                "geometry_id_field is required for GeoDataFrame inputs. "
+                "Provide the column that uniquely identifies each row/geometry."
+            )
+        if geometry_id_field not in geom.columns:
+            raise KeyError(
+                f"geometry_id_field={geometry_id_field!r} not found in GeoDataFrame columns: {list(geom.columns)}"
             )
 
+        gdf_reduced = geom.copy()
         geom_field = gdf_reduced.geometry.name
-        gdf_reduced = gdf_reduced[[geometry_id_field, geom_field]]
+        if geom_field is None or geom_field not in gdf_reduced.columns:
+            raise KeyError("GeoDataFrame has no active geometry column.")
+
+        # keep only id + geometry
+        gdf_reduced = gdf_reduced[[geometry_id_field, geom_field]].copy()
 
         # force string IDs (preserve leading zeros)
-        gdf_reduced[geometry_id_field] = (
-            gdf_reduced[geometry_id_field].astype(str).str.strip()
-        )
+        gdf_reduced[geometry_id_field] = gdf_reduced[geometry_id_field].astype(str).str.strip()
+
+        # standardize to 'gid' for EE properties
         gdf_reduced = gdf_reduced.rename(columns={geometry_id_field: "gid"})
+
+        # ensure CRS for stable lon/lat interpretation
+        if gdf_reduced.crs is None:
+            gdf_reduced = gdf_reduced.set_crs(epsg=4326)
+        else:
+            gdf_reduced = gdf_reduced.to_crs(epsg=4326)
 
         geojson_str = gdf_reduced.to_json()
         return ee.FeatureCollection(json.loads(geojson_str))
 
-    # If we get here, the type is unsupported
-    raise ValueError(
+    raise TypeError(
         f"Unsupported geometries type: {type(geom)}; "
-        "expected str, ee.FeatureCollection, GeoDataFrame, AOI, or Domain."
+        "expected str, ee.FeatureCollection, GeoDataFrame, or Domain."
     )
 
 

@@ -11,10 +11,7 @@ from dapper.utils import utils
 import dapper.met.temporal as dt 
 from dapper.domains.domain import Domain
 from dapper.met.writers import initialize_met_netcdf, append_met_netcdf
-
-# Rounding precision for lat/lon axes and lookups.
-# 1e-6 deg ~ 0.11 m at the equator, which is far below any grid we're using.
-LATLON_DECIMALS = 6
+from dapper.constants import LATLON_DECIMALS
 
 class Exporter:
     """
