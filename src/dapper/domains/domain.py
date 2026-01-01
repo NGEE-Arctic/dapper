@@ -125,7 +125,7 @@ class Domain:
     topo_support: Optional[gpd.GeoDataFrame] = None
 
     domain_nc: Optional[Path] = None
-    output_root: Optional[Path] = None
+    path_out: Optional[Path] = None
     run_group: Optional[str] = None  # if None, defaults to self.name
 
 
@@ -143,7 +143,7 @@ class Domain:
         cells: Optional[Union[gpd.GeoDataFrame, pd.DataFrame]] = None,
         cell_kind: Optional[CellKind] = None,
         domain_nc: Optional[Union[str, Path]] = None,
-        output_root: Optional[Union[str, Path]] = None,
+        path_out: Optional[Union[str, Path]] = None,
         run_group: Optional[str] = None,
     ) -> "Domain":
         prov = _ensure_geodf(provided, id_col=id_col)
@@ -182,7 +182,7 @@ class Domain:
             support=sup,
             cells=cel,
             domain_nc=Path(domain_nc) if domain_nc is not None else None,
-            output_root=Path(output_root) if output_root is not None else None,
+            path_out=Path(path_out) if path_out is not None else None,
             run_group=str(run_group) if run_group is not None else None,
         )
 
@@ -200,12 +200,12 @@ class Domain:
         name: str = "domain",
         mode: DomainMode = "cellset",
         cell_kind: CellKind = "site_points",
-        output_root: Optional[Union[str, Path]] = None,
+        path_out: Optional[Union[str, Path]] = None,
         run_group: Optional[str] = None,
     ) -> "Domain":
         gdf = gpd.GeoDataFrame({"gid": [gid], "geometry": [geometry]}, crs="EPSG:4326")
         return cls.from_provided(gdf, name=name, mode=mode, cell_kind=cell_kind,
-                                 output_root=Path(output_root) if output_root is not None else None,
+                                 path_out=Path(path_out) if path_out is not None else None,
                                  run_group=str(run_group) if run_group is not None else None,)
 
     @classmethod
@@ -218,7 +218,7 @@ class Domain:
         id_col: str = "gid",
         mode: Optional[DomainMode] = None,
         cell_kind: Optional[CellKind] = None,
-        output_root: Optional[Union[str, Path]] = None,
+        path_out: Optional[Union[str, Path]] = None,
         run_group: Optional[str] = None,
     ) -> "Domain":
         path = Path(path)
@@ -233,7 +233,7 @@ class Domain:
             id_col=id_col,
             mode=mode,
             cell_kind=cell_kind,
-            output_root=Path(output_root) if output_root is not None else None,
+            path_out=Path(path_out) if path_out is not None else None,
             run_group=str(run_group) if run_group is not None else None,
         )
 
@@ -246,7 +246,7 @@ class Domain:
         mask_name: str = "mask",
         frac_name: str = "frac",
         frac_threshold: float = 0.0,
-        output_root: Optional[Union[str, Path]] = None,
+        path_out: Optional[Union[str, Path]] = None,
         run_group: Optional[str] = None,
     ) -> "Domain":
         """
@@ -306,7 +306,7 @@ class Domain:
             met_support=None,
             topo_support=None,
             domain_nc=path_nc,
-            output_root=Path(output_root) if output_root is not None else None,
+            path_out=Path(path_out) if path_out is not None else None,
             run_group=str(run_group) if run_group is not None else None,
         )
 
@@ -431,7 +431,7 @@ class Domain:
                 met_support=gpd.GeoDataFrame(run_met, geometry="geometry", crs="EPSG:4326") if run_met is not None else None,
                 topo_support=gpd.GeoDataFrame(run_topo, geometry="geometry", crs="EPSG:4326") if run_topo is not None else None,
                 # propagate output layout + group name
-                output_root=self.output_root,
+                path_out=self.path_out,
                 run_group=(self.run_group or self.name),
                 # propagate topounits subset (so exporters in sites mode can see them)
                 topounits=self.topounits_for_gid(str(gid)) if self.has_topounits() else None,
@@ -442,12 +442,12 @@ class Domain:
             )
 
     # ----------------------------- output pathing -----------------------------
-    def _require_output_root(self) -> Path:
-        if self.output_root is None:
+    def _require_path_out(self) -> Path:
+        if self.path_out is None:
             raise ValueError(
-                "Domain.output_root is not set. Call domain = domain.with_output_root(...)."
+                "Domain.path_out is not set. Call domain = domain.with_path_out(...)."
             )
-        return Path(self.output_root)
+        return Path(self.path_out)
 
     @property
     def group_name(self) -> str:
@@ -457,11 +457,11 @@ class Domain:
     def run_dir(self) -> Path:
         """
         Directory holding the main run outputs for this Domain instance.
-        - For top-level cellset OR top-level sites container: output_root/<group_name>
+        - For top-level cellset OR top-level sites container: path_out/<group_name>
         - For per-site/per-cellset run domains (created by iter_runs in sites mode):
-            output_root/<group_name>/<domain.name>
+            path_out/<group_name>/<domain.name>
         """
-        root = self._require_output_root()
+        root = self._require_path_out()
         base = root / self.group_name
 
         # If this is a run-domain coming from a parent sites-domain, self.name is the gid,
@@ -495,7 +495,7 @@ class Domain:
         Does not write any files.
         """
         # Ensure output root is set (and directory exists)
-        _ = self._require_output_root()
+        _ = self._require_path_out()
 
         for _, run_dom in self.iter_runs():
             run_dom.run_dir.mkdir(parents=True, exist_ok=True)
@@ -686,7 +686,7 @@ class Domain:
         cell_dy_deg: float | None = None,
         land_frac_col: str | None = "frac",
         mask_from_frac: bool = True,
-        global_attrs: dict | None = None,
+                append_attrs: dict | None = None,
     ) -> xr.Dataset:
         """
         Build an ELM land domain Dataset from *cells* (never from support/provided).
@@ -785,20 +785,48 @@ class Domain:
             "title": "ELM domain data: generated by dapper",
             "user_comment": f"Domain generated from dapper.Domain(name='{self.name}', mode='{self.mode}')",
         }
-        if global_attrs:
-            attrs_default.update(global_attrs)
+        if append_attrs:
+            attrs_default.update(append_attrs)
         ds.attrs.update(attrs_default)
 
         return ds
 
-    def write_elm_domain(self, path: str | Path | None = None, **kwargs) -> Path:
-        out_path = Path(path) if path is not None else self.path_domain_nc()
+    def export_domain(
+        self,
+        *,
+        filename: str = "domain.nc",
+        out_dir: str | Path | None = None,
+        overwrite: bool = False,
+        append_attrs: dict | None = None,
+        **kwargs,
+    ) -> Path:
+        group_dir = Path(out_dir) if out_dir is not None else self.run_dir
+        out_path = group_dir / filename
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        ds = self._to_elm_domain_dataset(**kwargs)
+        if out_path.exists() and not overwrite:
+            raise FileExistsError(f"{out_path} exists (overwrite=False).")
+        ds = self._to_elm_domain_dataset(append_attrs=append_attrs, **kwargs)
         ds.to_netcdf(out_path)
         return out_path
 
-def export_surface(self, out_dir: str | Path | None = None, **kwargs):
-    from dapper.surf.sfile import SurfaceFile
-    out_dir = Path(out_dir) if out_dir is not None else self.run_dir
-    return SurfaceFile.export_surface(self, out_dir=out_dir, **kwargs)
+    def export_surface(
+        self,
+        src_path: str | Path,
+        *,
+        filename: str = "surfdata.nc",
+        out_dir: str | Path | None = None,
+        overwrite: bool = False,
+        append_attrs: dict | None = None,
+        **kwargs,
+    ):
+        from dapper.surf.sfile import SurfaceFile
+        out_dir = Path(out_dir) if out_dir is not None else self.run_dir
+        return SurfaceFile.export(
+            self,
+            out_dir=out_dir,
+            src_path=src_path,
+            filename=filename,
+            overwrite=overwrite,
+            append_attrs=append_attrs,
+            **kwargs,
+        )

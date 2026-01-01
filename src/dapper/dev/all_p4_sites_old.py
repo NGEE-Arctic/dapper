@@ -73,8 +73,10 @@ e5l.e5lh_to_elm(csv_directory, write_directory, df_loc, dtime_resolution_hrs=1)
 
 #     # Get them all in a dictionary
 #     global_attr_names = ds.ncattrs()
-#     global_attrs = {name: ds.getncattr(name) for name in global_attr_names}
-#     print(f"Global attribute values: {global_attrs}")
+#         append_attrs
+ = {name: ds.getncattr(name) for name in global_attr_names}
+#     print(f"Global attribute values: {    append_attrs
+}")
 
 # import matplotlib.pyplot as plt
 # from datetime import datetime, timedelta

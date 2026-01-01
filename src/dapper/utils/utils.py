@@ -94,3 +94,21 @@ def get_git_commit_hash():
         return result.stdout.strip()
     except Exception:
         return "unknown"
+
+
+from pathlib import Path
+from datetime import datetime, date
+
+def apply_append_attrs(ds, append_attrs: dict | None):
+    """Update xarray Dataset global attrs in a NetCDF-safe way."""
+    if not append_attrs:
+        return ds
+
+    for k, v in append_attrs.items():
+        # make common non-serializable types safe
+        if isinstance(v, Path):
+            v = str(v)
+        elif isinstance(v, (datetime, date)):
+            v = v.isoformat()
+        ds.attrs[str(k)] = v
+    return ds

@@ -77,7 +77,7 @@ domain = Domain.from_provided(
     name=RUN_NAME,
     mode="cellset",
     cell_kind="site_points",
-    output_root=PATH_ELM_OUT
+    path_out=PATH_ELM_OUT
 )
 
 print("Domain gids:", domain.to_df_loc()["gid"].tolist())
@@ -123,7 +123,7 @@ print(chk)
 surf_dir = OUT_DIR / "surf"
 paths = domain.export_surface(
     out_dir=surf_dir,
-    filename_template="surfdata_{run_id}.nc",  # run_id will be RUN_NAME in cellset
+    filename="surfdata.nc",  # run_id will be RUN_NAME in cellset
     overwrite=True,
     attach_topounits=True,
 )

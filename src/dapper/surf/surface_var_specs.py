@@ -435,3 +435,70 @@ SURFACE_VAR_SPECS = {
                  'required_level': 'optional',
                  'units': 'unknown',
                  'contexts': ['phosphorus_cycle']}}
+
+# -----------------------------------------------------------------------------
+# Zonal-sampling aggregation policy
+# -----------------------------------------------------------------------------
+#
+# For polygon-based (zonal) sampling, each surface variable needs an explicit
+# aggregation strategy.
+#
+# We keep the registry strict (every var gets an 'agg' entry) while allowing a
+# lightweight default via the 'auto' strategy, which resolves at runtime based
+# on dtype:
+#   - integer/bool -> weighted mode (wmode)
+#   - float        -> area-weighted mean (wmean)
+#
+# A few variables are better derived directly from the Domain cell geometry
+# rather than sampled from the source dataset.
+
+SURFACE_VAR_AGG_VALID = {
+    # meta
+    "auto",        # resolve by dtype at runtime
+    "derived",     # derived from Domain (e.g., area/coords)
+
+    # explicit reducers (implemented in dapper.utils.zonal)
+    "wmean",
+    "wmode",
+    "max",
+    "min",
+    "wmean_threshold",  # weighted mean + threshold for boolean-ish masks
+}
+
+# Variables we prefer to derive from the Domain geometry / metadata.
+SURFACE_VAR_DERIVED = {
+    "LONGXY",  # domain lon
+    "LATIXY",  # domain lat
+    "AREA",    # domain cell area (m2)
+}
+
+def _add_default_agg_policies() -> None:
+    """Ensure every SURFACE_VAR_SPECS entry has an 'agg' policy."""
+    for var, spec in SURFACE_VAR_SPECS.items():
+        if "agg" in spec:
+            continue
+
+        if var in SURFACE_VAR_DERIVED:
+            spec["agg"] = "derived"
+        elif var == "mask" or "MASK" in var:
+            # Most *MASK variables in ELM surface data are boolean-ish.
+            # If we discover fractional masks later, override explicitly.
+            spec["agg"] = "wmean_threshold"
+        else:
+            spec["agg"] = "auto"
+
+    # Validate
+    missing = [v for v, s in SURFACE_VAR_SPECS.items() if "agg" not in s]
+    if missing:
+        raise ValueError(f"SURFACE_VAR_SPECS missing 'agg' for: {missing[:25]}")
+
+    invalid = [
+        (v, SURFACE_VAR_SPECS[v].get("agg"))
+        for v in SURFACE_VAR_SPECS
+        if SURFACE_VAR_SPECS[v].get("agg") not in SURFACE_VAR_AGG_VALID
+    ]
+    if invalid:
+        bad = ", ".join([f"{v}={a}" for v, a in invalid[:25]])
+        raise ValueError(f"Invalid agg policies in SURFACE_VAR_SPECS: {bad}")
+
+_add_default_agg_policies()

@@ -25,7 +25,8 @@ sf.add_params_from_df(
     drop_cols=["geometry"],
 )
 
-sf.set_global_attrs(
+sf.set_    append_attrs
+(
     title="Testing, 5 topounits",
     case_name="sfile_topounit_test",
 )

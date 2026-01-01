@@ -74,8 +74,10 @@ with netCDF4.Dataset(path) as ds:
 
     # Get them all in a dictionary
     global_attr_names = ds.ncattrs()
-    global_attrs = {name: ds.getncattr(name) for name in global_attr_names}
-    print(f"Global attribute values: {global_attrs}")
+        append_attrs
+ = {name: ds.getncattr(name) for name in global_attr_names}
+    print(f"Global attribute values: {    append_attrs
+}")
 
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta

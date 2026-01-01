@@ -18,4 +18,5 @@ dependencies:
   - folium # interactive mapping
   - contextily # static mapping
   - xyzservices # basemaps
+  - pytest
 

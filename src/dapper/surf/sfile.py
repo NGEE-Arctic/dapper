@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional, Tuple, Union, List
+from typing import Dict, Any, Optional, Tuple, Union, List, Literal
 import tempfile
 from pathlib import Path
 
@@ -8,8 +8,8 @@ import pandas as pd
 
 from dapper.surf import schema as SC
 from dapper.surf import sample as SP  # for from_halfdegree_point 
-from dapper.utils.pathing import SURFDATA_HALFDEGREE_TOP
 from dapper.utils import sampling  # shared gridded sampler
+from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
 
 ArrayLike = Union[np.ndarray, "xr.DataArray", float, int]
 
@@ -172,19 +172,39 @@ def build_surface_dataset_cellset(
                            f" | dapper.surf.write: built from {nj} sampled points").strip()
     return ds
 
-def write_surface_nc(ds: xr.Dataset, out_path: str) -> str:
-    """
-    Write xarray.Dataset to NetCDF with sane encodings:
-      - float vars get float32 + _FillValue=nan
-      - integer vars keep integer dtype with no FillValue
-    """
+def write_surface_nc(
+    ds: xr.Dataset,
+    out_path: str,
+    *,
+    append_attrs: dict | None = None,
+    dapper_attrs: dict | None = None,
+    add_created_utc: bool = True,
+) -> str:
+    import datetime as _dt
+
+    # ---- global attrs ----
+    ds2 = ds.copy(deep=False)
+    merged = dict(ds2.attrs)
+
+    if dapper_attrs:
+        for k, v in dict(dapper_attrs).items():
+            merged.setdefault(k, v)
+
+    if add_created_utc:
+        merged.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
+
+    if append_attrs:
+        merged.update(dict(append_attrs))
+
+    ds2.attrs = merged
+
     enc: Dict[str, dict] = {}
-    for v in ds.data_vars:
-        if str(ds[v].dtype).startswith(("int","uint")):
-            enc[v] = {"_FillValue": None}
-        else:
-            enc[v] = {"_FillValue": np.float32(np.nan), "dtype": "float32"}
-    ds.to_netcdf(out_path, encoding=enc)
+    for v in ds2.data_vars:
+        # Fill values must match dtype. Here we do float32 to match ELM surface expectations.
+        if ds2[v].dtype.kind == "f":
+            enc[v] = {"dtype": "float32", "_FillValue": np.float32(-9.96921e36)}
+
+    ds2.to_netcdf(out_path, encoding=enc)
     return out_path
 
 
@@ -336,7 +356,7 @@ def _sanitize_netcdf4_encoding(var_enc: dict, dtype) -> dict:
     return enc
 
 def customize_surface(
-    nc_in: str | Path,
+    src_path: str | Path,
     customizations: Dict[str, Any],
     nc_out: Optional[str | Path] = None,
     *,
@@ -352,7 +372,7 @@ def customize_surface(
 
     Parameters
     ----------
-    nc_in : str | Path
+    src_path : str | Path
         Path to existing surface NetCDF.
     customizations : dict
         Mapping of variable -> value OR variable -> spec dict:
@@ -393,8 +413,8 @@ def customize_surface(
     CustomizeError on shape/dtype/units/dim mismatches.
     """
     import pandas as pd  # only used in return type
-    nc_in = str(nc_in)
-    ds = xr.open_dataset(nc_in)
+    src_path = str(src_path)
+    ds = xr.open_dataset(src_path)
     ds_edit = ds.copy()
 
     lat_dim, lon_dim = _latlon_dim_names(ds)  # detected, not strictly required here
@@ -484,7 +504,7 @@ def customize_surface(
 
     # Decide output path
     if nc_out is None:
-        p = Path(nc_in)
+        p = Path(src_path)
         nc_out = str(p.with_name(p.stem + "_custom.nc"))
 
     # Write with per-var encodings preserved
@@ -501,6 +521,54 @@ def customize_surface(
         report = v.validate(str(nc_out))
 
     return str(nc_out), report
+
+def _surface_zonal_agg_policy_from_registry(
+    ds_src: xr.Dataset,
+    *,
+    include: Optional[set[str]],
+    exclude: Optional[set[str]],
+) -> tuple[dict[str, str], set[str]]:
+    """
+    Returns:
+      - agg_policy: var -> reducer name understood by dapper.utils.zonal
+      - derived_vars: vars whose registry agg == "derived"
+    """
+    include_set = set(include) if include else None
+    drop = set(exclude or [])
+
+    # Find registry-derived vars (we will not sample these; we compute them from Domain)
+    derived_vars = {v for v, spec in SURFACE_VAR_SPECS.items() if spec.get("agg") == "derived"}
+
+    agg_policy: dict[str, str] = {}
+
+    # Build policy for vars we will actually sample
+    for v in ds_src.data_vars:
+        if include_set is not None and v not in include_set:
+            continue
+        if v in drop or v in derived_vars:
+            continue
+
+        spec = SURFACE_VAR_SPECS.get(v)
+
+        # If a var isn't in the registry, fall back by dtype (keeps things robust)
+        if spec is None:
+            kind = ds_src[v].dtype.kind
+            agg_policy[v] = "wmode" if kind in {"i", "u", "b"} else "wmean"
+            continue
+
+        agg = spec.get("agg")
+        if agg is None:
+            raise ValueError(f"SURFACE_VAR_SPECS[{v!r}] is missing required key 'agg'")
+
+        if agg == "derived":
+            continue
+        if agg == "auto":
+            kind = ds_src[v].dtype.kind
+            agg = "wmode" if kind in {"i", "u", "b"} else "wmean"
+
+        agg_policy[v] = agg
+
+    return agg_policy, derived_vars
 
 
 class SurfaceFile:
@@ -551,8 +619,8 @@ class SurfaceFile:
         cls,
         lat: float,
         lon: float,
-        nc_in: Union[str, Path] = SURFDATA_HALFDEGREE_TOP,
         *,
+        src_path: str | Path,
         decode_times: bool = True,
         chunks: Optional[Dict[str, int]] = None,
         include: Optional[set[str]] = None,
@@ -563,7 +631,7 @@ class SurfaceFile:
         Sample the global half-degree surface at (lat, lon) and return a 1x1 SurfaceFile.
         Uses dapper.utils.sampling.sample_gridded_dataset_points.
         """
-        ds_src = xr.open_dataset(nc_in, decode_times=decode_times, chunks=chunks)
+        ds_src = xr.open_dataset(src_path, decode_times=decode_times, chunks=chunks)
 
         df_loc = pd.DataFrame({"lat": [float(lat)], "lon": [float(lon)], "weight": [1.0]})
 
@@ -583,7 +651,7 @@ class SurfaceFile:
     def from_domain(
         cls,
         domain: Any,
-        nc_in: Union[str, Path] = SURFDATA_HALFDEGREE_TOP,
+        src_path: str | Path,
         *,
         decode_times: bool = True,
         chunks: Optional[Dict[str, int]] = None,
@@ -591,42 +659,131 @@ class SurfaceFile:
         exclude: Optional[set[str]] = None,
         registry: Optional[Dict[str, SC.ParDef]] = None,
         attach_topounits: bool = True,
+        sampling_method: Literal["nearest", "zonal"] = "nearest",
+        lon_wrap: sampling.LonWrap = "auto",
+        agg_policy: dict[str, str] | None = None,
     ) -> "SurfaceFile":
-        """
-        Create a surface dataset by sampling the global half-degree surface
-        at the Domain's cell locations (Domain.mode must be 'cellset' for this call).
-
-        For multi-run (mode='sites') exports, use SurfaceFile.export_surface(...),
-        which loops domain.iter_runs() and calls this on each per-run Domain.
-        """
         if getattr(domain, "mode", None) == "sites":
             raise ValueError(
                 "SurfaceFile.from_domain expects a single-run Domain (mode='cellset'). "
-                "Use SurfaceFile.export_surface(domain, ...) for mode='sites'."
+                "Use SurfaceFile.export(domain, ...) for mode='sites'."
             )
 
-        df_loc = domain.to_df_loc()  # must include lon/lat; weight is fine to carry along
+        # Use a lon/lat-guaranteed Domain view for everything in this method
+        dom = domain.ensure_cells_lon_lat()
+        df_loc = dom.to_df_loc()
 
-        ds_src = xr.open_dataset(nc_in, decode_times=decode_times, chunks=chunks)
+        ds_src = xr.open_dataset(src_path, decode_times=decode_times, chunks=chunks)
 
-        ds_out = sampling.sample_gridded_dataset_points(
-            ds_src,
-            df_loc,
-            lat_col="lat",
-            lon_col="lon",
-            vars_include=sorted(include) if include else None,
-            vars_drop=sorted(exclude) if exclude else None,
-            lon_wrap="auto",
-            method="nearest",
-        )
+        if sampling_method == "nearest":
+            ds_out = sampling.sample_gridded_dataset_points(
+                ds_src,
+                df_loc,
+                lat_col="lat",
+                lon_col="lon",
+                vars_include=sorted(include) if include else None,
+                vars_drop=sorted(exclude) if exclude else None,
+                lon_wrap=lon_wrap,
+                method="nearest",
+            )
+
+        elif sampling_method == "zonal":
+            from dapper.utils import zonal  # lazy import
+
+            # Require polygon-like cells
+            if dom.cells.geometry.geom_type.isin(["Point"]).all():
+                raise ValueError(
+                    "sampling_method='zonal' requires polygon (or at least non-point) cell geometries "
+                    "in Domain.cells. Your Domain.cells are Points."
+                )
+
+            targets = dom.cells[["gid", "geometry"]].copy()
+            if targets.crs is None:
+                targets = targets.set_crs("EPSG:4326")
+            else:
+                targets = targets.to_crs("EPSG:4326")
+
+            base_policy, derived_vars = _surface_zonal_agg_policy_from_registry(
+                ds_src, include=include, exclude=exclude
+            )
+            if agg_policy:
+                base_policy.update(dict(agg_policy))
+
+            # Never sample derived vars
+            for dv in derived_vars:
+                base_policy.pop(dv, None)
+
+            vars_drop = set(exclude or []) | set(derived_vars)
+            vars_include = None if include is None else sorted(set(include) - set(derived_vars))
+
+            zw = zonal.intersect_weights_rectilinear(
+                ds_src,
+                targets,
+                lon_wrap=lon_wrap,
+            )
+
+            ds_out = zonal.sample_gridded_dataset_polygons(
+                ds_src,
+                targets,
+                vars_include=vars_include,
+                vars_drop=sorted(vars_drop),
+                agg_policy=base_policy,
+                lon_wrap=lon_wrap,
+                weights=zw,
+            )
+            # Inject derived vars if requested
+            include_set = set(include) if include else None
+            want_derived = set(derived_vars) if include_set is None else (set(derived_vars) & include_set)
+            want_derived -= set(exclude or [])
+
+            if want_derived:
+                spec = sampling.infer_latlon_spec(ds_src, lon_wrap=lon_wrap)
+                lat_dim, lon_dim = spec.lat_dim, spec.lon_dim
+                n = len(targets)
+
+                # Ensure dims exist even if only derived requested
+                if lat_dim not in ds_out.dims or lon_dim not in ds_out.dims:
+                    ds_out = ds_out.expand_dims(
+                        {lat_dim: np.arange(n, dtype=np.int32), lon_dim: np.arange(1, dtype=np.int32)}
+                    )
+
+                if "LATIXY" in want_derived:
+                    arr = dom.cells["lat"].to_numpy(dtype=np.float64).reshape(n, 1).astype(np.float32)
+                    attrs = dict(ds_src["LATIXY"].attrs) if "LATIXY" in ds_src else {"units": "degrees_north"}
+                    ds_out["LATIXY"] = xr.DataArray(arr, dims=(lat_dim, lon_dim), attrs=attrs)
+
+                if "LONGXY" in want_derived:
+                    arr = dom.cells["lon"].to_numpy(dtype=np.float64).reshape(n, 1).astype(np.float32)
+                    attrs = dict(ds_src["LONGXY"].attrs) if "LONGXY" in ds_src else {"units": "degrees_east"}
+                    ds_out["LONGXY"] = xr.DataArray(arr, dims=(lat_dim, lon_dim), attrs=attrs)
+
+                if "AREA" in want_derived:
+                    ea = zw.equal_area_crs
+                    area_m2 = targets.to_crs(ea).geometry.area.to_numpy(dtype=np.float64)
+
+                    # Preserve upstream AREA units if present
+                    units = (ds_src["AREA"].attrs.get("units") if "AREA" in ds_src else None) or "km^2"
+                    if "km" in units:
+                        arr = (area_m2 / 1e6).reshape(n, 1).astype(np.float32)
+                        attrs = dict(ds_src["AREA"].attrs) if "AREA" in ds_src else {"units": "km^2", "long_name": "area"}
+                    else:
+                        arr = area_m2.reshape(n, 1).astype(np.float32)
+                        attrs = dict(ds_src["AREA"].attrs) if "AREA" in ds_src else {"units": "m2", "long_name": "area"}
+
+                    ds_out["AREA"] = xr.DataArray(arr, dims=(lat_dim, lon_dim), attrs=attrs)
+
+            ds_out.attrs["dapper_surface_sampling_method"] = "zonal"
+
+        else:
+            raise ValueError(f"Unknown sampling_method={sampling_method!r}")
 
         sf = cls(ds=ds_out, registry=registry)
 
-        if attach_topounits and hasattr(domain, "has_topounits") and domain.has_topounits():
-            sf._attach_topounits_from_domain(domain)
+        if attach_topounits and hasattr(dom, "has_topounits") and dom.has_topounits():
+            sf._attach_topounits_from_domain(dom)
 
         return sf
-    
+
     def _attach_topounits_from_domain(self, domain: Any) -> None:
         """
         Attach Domain.topounits as a 1D parameter table on the surface dataset.
@@ -658,69 +815,29 @@ class SurfaceFile:
         )
 
     @classmethod
-    def export_surface(
+    def export(
         cls,
         domain: Any,
-        out_dir: Union[str, Path],
         *,
-        nc_in: Union[str, Path] = SURFDATA_HALFDEGREE_TOP,
-        filename_template: str = "surfdata_{run_id}.nc",
+        out_dir: str | Path,
+        src_path: str | Path,
+        filename: str = "surfdata.nc",
+        overwrite: bool = False,
+        append_attrs=None,
         decode_times: bool = True,
         chunks: Optional[Dict[str, int]] = None,
         include: Optional[set[str]] = None,
         exclude: Optional[set[str]] = None,
         registry: Optional[Dict[str, SC.ParDef]] = None,
         attach_topounits: bool = True,
-        overwrite: bool = False,
-    ) -> list[Path]:
-        """
-        Export surface file(s) for a Domain.
-
-        - domain.mode='cellset' -> writes one file
-        - domain.mode='sites'   -> writes one file per gid (uses domain.iter_runs()).
-
-        Returns list of written Paths.
-        """
-        out_dir = Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        written: list[Path] = []
-        for run_id, run_dom in domain.iter_runs():
-            sf = cls.from_domain(
-                run_dom,
-                nc_in=nc_in,
-                decode_times=decode_times,
-                chunks=chunks,
-                include=include,
-                exclude=exclude,
-                registry=registry,
-                attach_topounits=attach_topounits,
-            )
-            out_path = out_dir / filename_template.format(run_id=run_id)
-            sf.to_netcdf(out_path, overwrite=overwrite)
-            written.append(out_path)
-
-        return written
-
-    @classmethod
-    def export(
-        cls,
-        domain: Any,
-        *,
-        out_dir: str | Path,
-        nc_in: str | Path = SURFDATA_HALFDEGREE_TOP,
-        filename_template: str = "surfdata_{run_id}.nc",
-        overwrite: bool = False,
-        decode_times: bool = True,
-        chunks: Optional[Dict[str, int]] = None,
-        include: Optional[set[str]] = None,
-        exclude: Optional[set[str]] = None,
+        sampling_method: Literal["nearest", "zonal"] = "nearest",
         lon_wrap: sampling.LonWrap = "auto",
+        agg_policy: dict[str, str] | None = None,
         validate: bool = False,
         validator_kwargs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Path]:
         """
-        Export surfdata NetCDF(s) for a Domain.
+        Export surface file(s) for a Domain.
 
         Returns: dict[run_id, path]
 
@@ -743,22 +860,26 @@ class SurfaceFile:
             run_out_dir = (out_dir / run_id) if domain.mode == "sites" else out_dir
             run_out_dir.mkdir(parents=True, exist_ok=True)
 
-            out_path = run_out_dir / filename_template.format(run_id=run_id)
+            out_path = run_out_dir / filename
             if out_path.exists() and not overwrite:
                 raise FileExistsError(f"{out_path} exists (overwrite=False).")
 
             sf = cls.from_domain(
                 run_dom,
-                nc_in=nc_in,
+                src_path=src_path,
                 decode_times=decode_times,
                 chunks=chunks,
                 include=include,
                 exclude=exclude,
+                registry=registry,
+                attach_topounits=False,  # avoid duplicate attachment; handled below
+                sampling_method=sampling_method,
                 lon_wrap=lon_wrap,
+                agg_policy=agg_policy,
             )
 
-            # Add topounit parameters if they exist
-            if getattr(run_dom, "topounits", None) is not None and run_dom.topounits is not None:
+            # Attach topounit parameters (and PCT_TOPUNIT) exactly once
+            if attach_topounits and getattr(run_dom, "topounits", None) is not None and run_dom.topounits is not None:
                 sf.add_topounits_from_domain(run_dom)
 
             write_surface_nc(sf.ds, str(out_path))
@@ -1128,21 +1249,40 @@ class SurfaceFile:
         path: Union[str, Path],
         overwrite: bool = False,
         encoding: Optional[Dict[str, Dict[str, Any]]] = None,
+        append_attrs: dict | None = None,
+        dapper_attrs: dict | None = None,
+        add_created_utc: bool = True,
     ) -> str:
-        """
-        Write the surface Dataset to NetCDF.
-
-        If encoding is omitted, xarray chooses defaults. If you want to
-        reuse your existing write_surface_nc encodings, you can wire that
-        in later.
-        """
         path = Path(path)
+
         if path.exists() and not overwrite:
-            raise FileExistsError(f"{path} already exists; pass overwrite=True to overwrite.")
+            raise FileExistsError(f"File already exists: {path}")
 
         if encoding is None:
-            self.ds.to_netcdf(path)
-        else:
-            self.ds.to_netcdf(path, encoding=encoding)
+            # keep the surface-specific encoding behavior
+            return write_surface_nc(
+                self.ds,
+                str(path),
+                append_attrs=append_attrs,
+                dapper_attrs=dapper_attrs,
+                add_created_utc=add_created_utc,
+            )
 
+        # If caller supplied encoding, still merge attrs in a non-destructive way.
+        import datetime as _dt
+        ds2 = self.ds.copy(deep=False)
+        merged = dict(ds2.attrs)
+
+        if dapper_attrs:
+            for k, v in dict(dapper_attrs).items():
+                merged.setdefault(k, v)
+
+        if add_created_utc:
+            merged.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
+
+        if append_attrs:
+            merged.update(dict(append_attrs))
+
+        ds2.attrs = merged
+        ds2.to_netcdf(path, encoding=encoding)
         return str(path)

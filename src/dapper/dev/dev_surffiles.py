@@ -1,5 +1,5 @@
 
-from dapper.utils import pathing
+from dapper.dev import pathing
 from dapper.surf.sample import sample_point_values
 from dapper.surf.write import build_surface_dataset, write_surface_nc
 

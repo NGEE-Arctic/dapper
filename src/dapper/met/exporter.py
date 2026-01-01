@@ -11,7 +11,7 @@ from dapper.utils import utils
 import dapper.met.temporal as dt 
 from dapper.domains.domain import Domain
 from dapper.met.writers import initialize_met_netcdf, append_met_netcdf
-from dapper.constants import LATLON_DECIMALS
+from dapper.utils.constants import LATLON_DECIMALS
 
 class Exporter:
     """
@@ -42,7 +42,7 @@ class Exporter:
     csv_directory : str or pathlib.Path
         Directory containing time-sharded CSV files for all sites/cells.
 
-    write_directory : str or pathlib.Path
+    out_dir : str or pathlib.Path
         Destination directory for NetCDF outputs and temporary parquet shards.
 
     df_loc : pandas.DataFrame
@@ -85,8 +85,8 @@ class Exporter:
 
     Side Effects
     ------------
-    - Creates a temporary directory of per-site parquet shards under ``write_directory``.
-    - Writes NetCDF files to ``write_directory`` in the chosen layout.
+    - Creates a temporary directory of per-site parquet shards under ``out_dir``.
+    - Writes NetCDF files to ``out_dir`` in the chosen layout.
     - Writes a ``zone_mappings.txt`` file either at the root (``elm-combined``)
       or inside each site directory (``elm-sites``).
 
@@ -103,8 +103,8 @@ class Exporter:
         self,
         adapter,
         csv_directory,
-        write_directory,
-        domain,
+        out_dir=None,
+        domain=None,
         id_col=None,
         calendar="noleap",
         dtime_resolution_hrs=1,
@@ -126,7 +126,7 @@ class Exporter:
         csv_directory : str or pathlib.Path
             Directory containing time-sharded CSV files for all sites/cells.
 
-        write_directory : str or pathlib.Path
+        out_dir : str or pathlib.Path
             Destination directory for NetCDF outputs and temporary parquet shards.
 
         domain : Domain or (Geo)DataFrame
@@ -143,7 +143,6 @@ class Exporter:
         """
         self.adapter = adapter
         self.csv_directory = Path(csv_directory)
-        self.write_directory = Path(write_directory)
 
         # ---- normalize / wrap into Domain ----
         if isinstance(domain, Domain):
@@ -157,6 +156,11 @@ class Exporter:
 
         self.domain = dom
         self.domain_norm = None  # will hold adapter-normalized Domain
+
+
+        # Output root for this exporter run. If not provided, uses Domain.run_dir
+        # (requires Domain.path_out to be set).
+        self.group_dir = Path(out_dir) if out_dir is not None else self.domain.run_dir
 
         self.id_col = id_col
         self.calendar = calendar
@@ -198,7 +202,7 @@ class Exporter:
 
     # ---------------------- public ----------------------
 
-    def run(self, output_mode, pack_scope=None):
+    def run(self, output_mode, pack_scope=None, filename=None):
         """
         output_mode : 'elm-combined' | 'elm-sites' | 'raw-site-parquet' | 'raw-site-csv'
         """
@@ -214,10 +218,10 @@ class Exporter:
         self.csv_files, self.start_year, self.end_year = self.adapter.discover_files(
             self.csv_directory, self.calendar
         )
-        self.write_directory.mkdir(parents=True, exist_ok=True)
+        self.group_dir.mkdir(parents=True, exist_ok=True)
 
         # 1) shards → parquet (raw or elm-prep)
-        self.temp_dir = self.write_directory / "temp_parquet"
+        self.temp_dir = self.group_dir / ".dapper_tmp" / "met_parquet"
         utils._rm_and_mkdir(self.temp_dir)
 
         # --- raw export if requested ---
@@ -229,35 +233,71 @@ class Exporter:
                 utils._rm(self.temp_dir)
                 return
 
-            # destination folder
-            out_sub = "sites_parquet" if output_mode == "raw-site-parquet" else "sites_csv"
-            dest_dir = self.write_directory / out_sub
-            dest_dir.mkdir(parents=True, exist_ok=True)
-
-            # zone mapping once at root of dest folder: lon, lat, zone, id
-            zm_path = dest_dir / "zone_mappings.txt"
+            # Raw outputs are written alongside MET outputs.
+            # - sites mode: one file per gid under <group>/<gid>/MET/
+            # - cellset mode: one file per gid under <group>/MET/ (gid in filename)
             zm = self._zone_mappings_table()
-            zm[["lon", "lat", "zone_str", "id"]].to_csv(
-                zm_path, index=False, header=False, sep="\t"
-            )
 
-            # write one file per gid
-            for pf in parquet_files:
-                gid = pf.stem
-                if output_mode == "raw-site-parquet":
-                    try:
-                        pf.rename(dest_dir / f"{gid}.parquet")
-                    except OSError:
+            if getattr(self.domain, "mode", None) == "sites":
+                for pf in parquet_files:
+                    gid = pf.stem
+                    met_dir = self._met_dir_for_gid(gid)
+                    met_dir.mkdir(parents=True, exist_ok=True)
+
+                    # per-gid zone mapping (lon, lat, zone, id)
+                    zm_path = met_dir / "zone_mappings.txt"
+                    if not zm_path.exists():
+                        row_zm = zm[zm["gid"] == gid]
+                        if not row_zm.empty:
+                            row_zm[["lon", "lat", "zone_str", "id"]].to_csv(
+                                zm_path, index=False, header=False, sep="\t"
+                            )
+
+                    if output_mode == "raw-site-parquet":
+                        out_path = met_dir / "raw_timeseries.parquet"
+                        try:
+                            pf.rename(out_path)
+                        except OSError:
+                            df = pd.read_parquet(pf)
+                            df.to_parquet(out_path, index=False)
+                    else:
+                        out_path = met_dir / "raw_timeseries.csv"
                         df = pd.read_parquet(pf)
-                        df.to_parquet(dest_dir / f"{gid}.parquet", index=False)
-                else:  # raw-site-csv
-                    df = pd.read_parquet(pf)
-                    if "date" in df.columns:
-                        df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
-                    df.to_csv(dest_dir / f"{gid}.csv", index=False)
+                        if "date" in df.columns:
+                            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
+                        df.to_csv(out_path, index=False)
 
-            utils._rm(self.temp_dir)
-            print(f"{output_mode} export complete → {dest_dir}")
+                utils._rm(self.temp_dir)
+                print(f"{output_mode} export complete → {self.group_dir}")
+
+            else:
+                met_dir = self._met_dir_for_gid()
+                met_dir.mkdir(parents=True, exist_ok=True)
+
+                zm_path = met_dir / "zone_mappings.txt"
+                if not zm_path.exists():
+                    zm[["lon", "lat", "zone_str", "id"]].to_csv(
+                        zm_path, index=False, header=False, sep="\t"
+                    )
+
+                for pf in parquet_files:
+                    gid = pf.stem
+                    if output_mode == "raw-site-parquet":
+                        out_path = met_dir / f"{gid}.parquet"
+                        try:
+                            pf.rename(out_path)
+                        except OSError:
+                            df = pd.read_parquet(pf)
+                            df.to_parquet(out_path, index=False)
+                    else:
+                        out_path = met_dir / f"{gid}.csv"
+                        df = pd.read_parquet(pf)
+                        if "date" in df.columns:
+                            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
+                        df.to_csv(out_path, index=False)
+
+                utils._rm(self.temp_dir)
+                print(f"{output_mode} export complete → {met_dir}")
             return
 
         effective_pack = self._resolve_pack_scope(output_mode, pack_scope)
@@ -309,6 +349,47 @@ class Exporter:
         utils._rm(self.temp_dir)
 
     # ---------------------- private: helpers ----------------------
+
+    def _run_dir_for_gid(self, gid: str) -> Path:
+        """Resolve run directory for a gid under the current output root."""
+        if getattr(self.domain, "mode", None) == "sites":
+            return self.group_dir / str(gid)
+        return self.group_dir
+
+    def _met_dir_for_gid(self, gid: str | None = None) -> Path:
+        """Resolve MET directory for a gid (sites mode) or the single run (cellset mode)."""
+        if getattr(self.domain, "mode", None) == "sites":
+            if gid is None:
+                raise ValueError("gid is required when domain.mode == 'sites'.")
+            return self._run_dir_for_gid(gid) / "MET"
+        return self._run_dir_for_gid("unused") / "MET"
+
+    def _zone_mappings_path(self, gid: str | None = None, filename: str = "zone_mappings.txt") -> Path:
+        return self._met_dir_for_gid(gid) / filename
+
+    def _format_nc_filename(
+        self,
+        template: str,
+        *,
+        var: str,
+        source: str,
+        years: str,
+        gid: str | None = None,
+        zone: str | None = None,
+    ) -> str:
+        """Format a NetCDF filename from a template with common placeholders."""
+        fmt = {
+            "var": var,
+            "source": source,
+            "years": years,
+            "gid": "" if gid is None else str(gid),
+            "zone": "" if zone is None else str(zone),
+        }
+        try:
+            return template.format(**fmt)
+        except KeyError as e:
+            raise KeyError(f"filename is missing a placeholder: {e}") from e
+
     def _zone_mappings_table(self):
         """
         Build a table for zone_mappings.txt with columns:
@@ -347,12 +428,23 @@ class Exporter:
             use_lon_0360=True,
         )
 
+        if getattr(self.domain, "mode", None) == "sites":
+            raise ValueError("elm-combined output_mode is only supported for Domain(mode='cellset').")
+
+        met_dir = self._met_dir_for_gid()
+        met_dir.mkdir(parents=True, exist_ok=True)
+
         # initialize one lat/lon file per var
         self._grid_paths = {}
         for v in self.var_cols:
             ao, sf = packing[v]
             source_tag = getattr(self.adapter, "DRIVER_TAG", "ERA5")
-            path_nc = self.write_directory / f"{source_tag}_{v}_{years_span}.nc"
+            path_nc = met_dir / self._format_nc_filename(
+                filename or "{var}.nc",
+                var=v,
+                source=source_tag,
+                years=years_span,
+            )
             initialize_met_netcdf(
                 path_nc=path_nc,
                 var_name=v,
@@ -379,7 +471,7 @@ class Exporter:
         zm_df = self.df_loc_norm.copy()
         zm_df["lon"] = zm_df["lon"].round(LATLON_DECIMALS)
         zm_df["lat"] = zm_df["lat"].round(LATLON_DECIMALS)
-        zm_path = self.write_directory / "zone_mappings.txt"
+        zm_path = met_dir / "zone_mappings.txt"
         zm_df[["lon", "lat", "gid", "zone"]].to_csv(
             zm_path, index=False, header=False, sep="\t"
         )
@@ -444,10 +536,10 @@ class Exporter:
             zone_val = row["zone"].iloc[0]
             zone_str = str(int(zone_val)).zfill(2)
 
-            # site dir + zone mapping (lon, lat, zone, id for this gid)
-            site_dir = self.write_directory / gid
-            site_dir.mkdir(parents=True, exist_ok=True)
-            zm_path = site_dir / "zone_mappings.txt"
+            # site MET dir + zone mapping (lon, lat, zone, id for this gid)
+            met_dir = self._met_dir_for_gid(gid)
+            met_dir.mkdir(parents=True, exist_ok=True)
+            zm_path = met_dir / "zone_mappings.txt"
             if not zm_path.exists():
                 zm = self._zone_mappings_table()
                 row_zm = zm[zm["gid"] == gid]
@@ -472,7 +564,14 @@ class Exporter:
                     ao, sf = float(rep), 1.0
 
                 source_tag = getattr(self.adapter, "DRIVER_TAG", "ERA5")
-                path_nc = site_dir / f"{source_tag}_{v}_{years_span}_z{zone_str}.nc"
+                path_nc = met_dir / self._format_nc_filename(
+                    filename or "{var}_z{zone}.nc",
+                    var=v,
+                    source=source_tag,
+                    years=years_span,
+                    gid=gid,
+                    zone=zone_str,
+                )
                 if not path_nc.exists():
                     initialize_met_netcdf(
                         path_nc=path_nc,

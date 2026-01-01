@@ -7,6 +7,7 @@ from typing import Iterable, Literal, Sequence
 import numpy as np
 import pandas as pd
 import xarray as xr
+import datetime as _dt
 
 LonWrap = Literal["auto", "0_360", "-180_180"]
 SampleMethod = Literal["nearest"]
@@ -148,6 +149,79 @@ def infer_latlon_spec(
         lon_1d=np.asarray(lon_1d),
     )
 
+def infer_grid_metadata(
+    ds: xr.Dataset,
+    *,
+    lat_dim: str = "lsmlat",
+    lon_dim: str = "lsmlon",
+    lat_var: str | None = None,
+    lon_var: str | None = None,
+    lon_wrap: LonWrap = "auto",
+) -> dict:
+    """
+    Infer basic (regular) grid metadata for provenance.
+
+    Returns keys that are safe to stash in global attrs (namespaced with dapper_).
+    If resolution can't be inferred reliably, values may be omitted.
+    """
+    spec = infer_latlon_spec(
+        ds,
+        lat_dim=lat_dim,
+        lon_dim=lon_dim,
+        lat_var=lat_var,
+        lon_var=lon_var,
+        lon_wrap=lon_wrap,
+    )
+
+    def _median_step(arr: np.ndarray) -> float | None:
+        arr = np.asarray(arr).astype(float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size < 3:
+            return None
+        u = np.unique(arr)
+        if u.size < 3:
+            return None
+        d = np.diff(np.sort(u))
+        d = d[np.isfinite(d)]
+        if d.size == 0:
+            return None
+        return float(np.median(np.abs(d)))
+
+    def _median_step_lon(arr: np.ndarray) -> float | None:
+        # same as _median_step, but drop the dateline jump
+        arr = np.asarray(arr).astype(float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size < 3:
+            return None
+        u = np.unique(arr)
+        if u.size < 3:
+            return None
+        d = np.diff(np.sort(u))
+        d = d[np.isfinite(d)]
+        # filter out huge jump across wrap
+        d = d[np.abs(d) < 180.0]
+        if d.size == 0:
+            return None
+        return float(np.median(np.abs(d)))
+
+    dlat = _median_step(spec.lat_1d)
+    dlon = _median_step_lon(spec.lon_1d)
+
+    meta: dict = {
+        "dapper_source_grid_lat_dim": spec.lat_dim,
+        "dapper_source_grid_lon_dim": spec.lon_dim,
+        "dapper_source_grid_lat_var": spec.lat_var,
+        "dapper_source_grid_lon_var": spec.lon_var,
+        "dapper_source_grid_lon_wrap": spec.lon_wrap,
+        "dapper_source_grid_nlat": int(ds.sizes.get(spec.lat_dim, -1)),
+        "dapper_source_grid_nlon": int(ds.sizes.get(spec.lon_dim, -1)),
+    }
+    if dlat is not None:
+        meta["dapper_source_grid_dlat_deg"] = dlat
+    if dlon is not None:
+        meta["dapper_source_grid_dlon_deg"] = dlon
+
+    return meta
 
 def nearest_ij(spec: LatLonSpec, lat: float, lon: float) -> tuple[int, int]:
     """
@@ -249,6 +323,9 @@ def write_netcdf(
     *,
     compress: bool = True,
     complevel: int = 4,
+    append_attrs: dict | None = None,
+    dapper_attrs: dict | None = None,
+    add_created_utc: bool = True,
 ) -> Path:
     out_path = Path(out_path)
 
@@ -260,8 +337,25 @@ def write_netcdf(
                 continue
             encoding[v] = {"zlib": True, "complevel": int(complevel)}
 
+    # ---- global attrs ----
+    ds2 = ds.copy(deep=False)
+    merged = dict(ds2.attrs)
+
+    if dapper_attrs:
+        for k, v in dict(dapper_attrs).items():
+            merged.setdefault(k, v)
+
+    if add_created_utc:
+        merged.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
+
+    if append_attrs:
+        # user attrs override everything (including source + dapper defaults)
+        merged.update(dict(append_attrs))
+
+    ds2.attrs = merged
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    ds.to_netcdf(out_path, encoding=encoding)
+    ds2.to_netcdf(out_path, encoding=encoding)
     return out_path
 
 def points_to_nearest_cells(
