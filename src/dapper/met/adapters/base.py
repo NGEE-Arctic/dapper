@@ -16,10 +16,16 @@ class BaseAdapter(ABC):
         """Return (csv_files, start_year, end_year)."""
 
     # ---------- locations (default provided) ----------
-    def normalize_locations(self, df_loc: pd.DataFrame, id_col=None, nzones: int = 1) -> pd.DataFrame:
+    def normalize_locations(self, df_loc: pd.DataFrame, id_col=None) -> pd.DataFrame:
         """
         Standardize df_loc to include ['gid','lat','lon','lon_0-360','zone'], sorted by (lat, lon).
-        Assumes 'gid' is present (your project-wide convention).
+
+        Zones are treated as a *per-location grouping label* (e.g., to support E3SM/ELM
+        decomposition hints across a cellset). If df_loc lacks a 'zone' column, we default
+        every location to zone=1.
+
+        We intentionally do **not** auto-expand locations across multiple zones. If you want
+        multiple zones, supply an explicit 'zone' column in df_loc with one row per location.
         """
         required = {"gid", "lat", "lon"}
         if not required.issubset(df_loc.columns):
@@ -31,15 +37,16 @@ class BaseAdapter(ABC):
             raise ValueError("df_loc contains null gid values.")
 
         out["gid"] = out["gid"].astype(str).str.strip()
-        out["lon_0-360"] = np.mod(out["lon"].to_numpy(), 360.0)
+        out["lon_0-360"] = np.mod(out["lon"].to_numpy(dtype=float), 360.0)
 
         if "zone" not in out.columns:
-            if nzones < 1:
-                raise ValueError("nzones must be >= 1")
-            out["zone"] = np.tile(
-                np.arange(1, nzones + 1, dtype=int),
-                (len(out) // nzones) + 1
-            )[: len(out)]
+            out["zone"] = 1
+        else:
+            # Fill null zones with 1, enforce integer zone labels
+            out["zone"] = out["zone"].fillna(1).astype(int)
+
+        if (out["zone"] < 1).any():
+            raise ValueError("df_loc contains zone values < 1. Zones must be positive integers.")
 
         return out.sort_values(["lat", "lon"]).reset_index(drop=True)
 
@@ -73,7 +80,7 @@ class BaseAdapter(ABC):
         Adapters can override for source-specific packing strategies.
         """
         try:
-            from dapper.utils import elm_utils as eu
+            from dapper.elm import utils as eu
             ao, sf = eu.elm_var_packing_params(elm_var, data=data if data is not None else [])
             return float(ao), float(sf)
         except Exception:

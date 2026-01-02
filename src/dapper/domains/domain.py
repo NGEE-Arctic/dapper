@@ -14,7 +14,7 @@ import xarray as xr
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 
-from dapper.utils.constants import LATLON_DECIMALS
+from dapper.geo.constants import LATLON_DECIMALS
 
 DomainMode = Literal["sites", "cellset"]
 StepName = Literal["met", "topounits"]
@@ -322,6 +322,17 @@ class Domain:
     def gids(self) -> list[str]:
         return self.cells["gid"].astype(str).tolist()
 
+    @property
+    def gdf(self) -> gpd.GeoDataFrame:
+        """Backwards-compat alias for older code.
+
+        Historically dapper carried a single GeoDataFrame on the domain object
+        (often a df_loc-style table with columns like gid/lon/lat/geometry).
+        In the refactor we split that into provided/support/cells; the closest
+        old behavior is `cells` (the run-level geometry table).
+        """
+        return self.cells
+
     def ensure_cells_lon_lat(self) -> "Domain":
         cel = _ensure_lon_lat(self.cells)
         if cel is self.cells:
@@ -471,23 +482,44 @@ class Domain:
 
         return base
 
+    def _run_dir_for(self, run_id: str | None = None) -> Path:
+        """
+        Resolve the per-run directory for this Domain.
+
+        Notes:
+          - mode='cellset': run_id is ignored; returns self.run_dir
+          - mode='sites'  : run_id is required when called on the container Domain
+        """
+        if self.mode == "sites":
+            if run_id is None:
+                raise ValueError(
+                    "run_id is required for path helpers on a sites-mode container Domain. "
+                    "Use domain.iter_runs() (run_dom.path_*) or pass run_id explicitly."
+                )
+            return self.run_dir / str(run_id)
+        return self.run_dir
+
+    def path_met_dir(self, run_id: str | None = None) -> Path:
+        return self._run_dir_for(run_id) / "MET"
+
     @property
     def met_dir(self) -> Path:
-        return self.run_dir / "MET"
+        return self.path_met_dir()
 
     # --- canonical filenames (exporters can override, but these are the defaults) ---
 
-    def path_domain_nc(self, filename: str = "domain.nc") -> Path:
-        return self.run_dir / filename
+    def path_domain_nc(self, filename: str = "domain.nc", run_id: str | None = None) -> Path:
+        return self._run_dir_for(run_id) / filename
 
-    def path_surface_nc(self, filename: str = "surfdata.nc") -> Path:
-        return self.run_dir / filename
+    def path_surface_nc(self, filename: str = "surfdata.nc", run_id: str | None = None) -> Path:
+        return self._run_dir_for(run_id) / filename
 
-    def path_landuse_nc(self, filename: str = "landuse_timeseries.nc") -> Path:
-        return self.run_dir / filename
+    def path_landuse_nc(self, filename: str = "landuse_timeseries.nc", run_id: str | None = None) -> Path:
+        return self._run_dir_for(run_id) / filename
 
-    def path_zone_mappings(self, filename: str = "zone_mappings.txt") -> Path:
-        return self.met_dir / filename
+    def path_zone_mappings(self, filename: str = "zone_mappings.txt", run_id: str | None = None) -> Path:
+        return self.path_met_dir(run_id) / filename
+
 
     def ensure_output_dirs(self, *, met: bool = True) -> None:
         """
@@ -524,6 +556,16 @@ class Domain:
         out["gid"] = gdf["gid"].astype(str)
         out[lon_col] = gdf["lon"].to_numpy(dtype="float64")
         out[lat_col] = gdf["lat"].to_numpy(dtype="float64")
+
+        # Optional per-location zone labels (used by MET cellset decomposition).
+        # If missing, default to 1. For sites-mode, exporters may override to a single zone.
+        if "zone" in gdf.columns:
+            out["zone"] = pd.to_numeric(gdf["zone"], errors="coerce").fillna(1).astype(int)
+        else:
+            out["zone"] = 1
+
+        if (out["zone"] < 1).any():
+            raise ValueError("Domain cells contain zone values < 1. Zones must be positive integers.")
 
         if frac_col in gdf.columns:
             w = gdf[frac_col].to_numpy(dtype="float64")
@@ -686,110 +728,20 @@ class Domain:
         cell_dy_deg: float | None = None,
         land_frac_col: str | None = "frac",
         mask_from_frac: bool = True,
-                append_attrs: dict | None = None,
+        append_attrs: dict | None = None,
     ) -> xr.Dataset:
-        """
-        Build an ELM land domain Dataset from *cells* (never from support/provided).
-        Vertex bounds are always encoded as a 4-corner bounding box (nv=4).
-        """
-        dom = self.ensure_cells_lon_lat()
-        gdf = dom.cells.copy()
-        ncell = len(gdf)
-        if ncell == 0:
-            raise ValueError("Domain has no cells; cannot build ELM domain.")
+        """Build an ELM land domain Dataset from cells (delegates to dapper.domains.elm_domain)."""
+        from dapper.domains.elm_domain import to_elm_domain_dataset
 
-        if grid_shape is None:
-            nj, ni = ncell, 1
-        else:
-            nj, ni = grid_shape
-            if nj * ni != ncell:
-                raise ValueError(f"grid_shape {grid_shape} has nj*ni={nj*ni}, but Domain has {ncell} cells.")
-
-        if cell_dy_deg is None:
-            cell_dy_deg = cell_dx_deg
-
-        nv = 4
-        area = np.zeros((nj, ni), dtype="f8")
-        frac = np.zeros_like(area)
-        mask = np.zeros((nj, ni), dtype="i4")
-        xc = np.zeros_like(area)
-        yc = np.zeros_like(area)
-        xv = np.zeros((nj, ni, nv), dtype="f8")
-        yv = np.zeros_like(xv)
-
-        if land_frac_col is not None and land_frac_col in gdf.columns:
-            frac_vals = gdf[land_frac_col].to_numpy(dtype="f8")
-        else:
-            frac_vals = np.ones(ncell, dtype="f8")
-
-        for idx, row in gdf.reset_index(drop=True).iterrows():
-            j = idx // ni
-            i = idx % ni
-
-            lon_c = float(row["lon"])
-            lat_c = float(row["lat"])
-            geom = row.get("geometry", None)
-
-            if geom is not None and hasattr(geom, "bounds"):
-                minx, miny, maxx, maxy = geom.bounds
-            else:
-                half_dx = cell_dx_deg / 2.0
-                half_dy = cell_dy_deg / 2.0
-                minx, maxx = lon_c - half_dx, lon_c + half_dx
-                miny, maxy = lat_c - half_dy, lat_c + half_dy
-
-            # Bounding-box corners, consistent with existing behavior
-            xv[j, i, :] = [minx, maxx, minx, maxx]
-            yv[j, i, :] = [miny, miny, maxy, maxy]
-
-            xc[j, i] = lon_c
-            yc[j, i] = lat_c
-
-            # radians^2 (same approach as before)
-            lam1 = math.radians(minx)
-            lam2 = math.radians(maxx)
-            phi1 = math.radians(miny)
-            phi2 = math.radians(maxy)
-            area_sr = (lam2 - lam1) * (math.sin(phi2) - math.sin(phi1))
-            if area_sr < 0:
-                area_sr = -area_sr
-            area[j, i] = area_sr
-
-            fval = float(frac_vals[idx])
-            frac[j, i] = fval
-            mask[j, i] = 1 if (not mask_from_frac) or fval > 0 else 0
-
-        ds = xr.Dataset(
-            coords={"nj": np.arange(nj), "ni": np.arange(ni), "nv": np.arange(nv)},
-            data_vars={
-                "area": (("nj", "ni"), area),
-                "frac": (("nj", "ni"), frac),
-                "mask": (("nj", "ni"), mask),
-                "xc": (("nj", "ni"), xc),
-                "yc": (("nj", "ni"), yc),
-                "xv": (("nj", "ni", "nv"), xv),
-                "yv": (("nj", "ni", "nv"), yv),
-            },
+        return to_elm_domain_dataset(
+            self,
+            grid_shape=grid_shape,
+            cell_dx_deg=cell_dx_deg,
+            cell_dy_deg=cell_dy_deg,
+            land_frac_col=land_frac_col,
+            mask_from_frac=mask_from_frac,
+            append_attrs=append_attrs,
         )
-
-        ds["area"].attrs.update({"long_name": "area of grid cell in radians squared", "coordinate": "xc yc", "units": "radians2"})
-        ds["frac"].attrs.update({"long_name": "fraction of grid cell that is active", "coordinate": "xc yc", "units": "unitless"})
-        ds["mask"].attrs.update({"long_name": "land domain mask", "coordinate": "xc yc", "comment": "0=ocean and 1=land"})
-        ds["xc"].attrs.update({"long_name": "longitude of grid cell center", "units": "degrees_east", "bounds": "xv"})
-        ds["xv"].attrs.update({"long_name": "longitude of grid cell vertices", "units": "degrees_east"})
-        ds["yc"].attrs.update({"long_name": "latitude of grid cell center", "units": "degrees_north", "bounds": "yv"})
-        ds["yv"].attrs.update({"long_name": "latitude of grid cell vertices", "units": "degrees_north"})
-
-        attrs_default = {
-            "Conventions": "NCAR-CSM:CF-1.0",
-            "title": "ELM domain data: generated by dapper",
-            "user_comment": f"Domain generated from dapper.Domain(name='{self.name}', mode='{self.mode}')",
-        }
-        if append_attrs:
-            attrs_default.update(append_attrs)
-        ds.attrs.update(attrs_default)
-
-        return ds
 
     def export_domain(
         self,
@@ -799,15 +751,41 @@ class Domain:
         overwrite: bool = False,
         append_attrs: dict | None = None,
         **kwargs,
-    ) -> Path:
-        group_dir = Path(out_dir) if out_dir is not None else self.run_dir
-        out_path = group_dir / filename
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        if out_path.exists() and not overwrite:
-            raise FileExistsError(f"{out_path} exists (overwrite=False).")
-        ds = self._to_elm_domain_dataset(append_attrs=append_attrs, **kwargs)
-        ds.to_netcdf(out_path)
-        return out_path
+    ) -> dict[str, Path]:
+        """
+        Export ELM domain NetCDF(s) for this Domain.
+
+        Output layout:
+          - mode='cellset': <run_dir>/domain.nc
+          - mode='sites'  : <run_dir>/<gid>/domain.nc
+
+        Returns:
+          dict[run_id, output_path]
+        """
+        group_dir: Path | None = None
+        if out_dir is not None:
+            group_dir = Path(out_dir)
+            group_dir.mkdir(parents=True, exist_ok=True)
+
+        outputs: dict[str, Path] = {}
+        for run_id, run_dom in self.iter_runs():
+            rid = str(run_id)
+
+            if group_dir is None:
+                out_path = run_dom.path_domain_nc(filename=filename)
+            else:
+                run_out_dir = (group_dir / rid) if self.mode == "sites" else group_dir
+                out_path = run_out_dir / filename
+
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            if out_path.exists() and not overwrite:
+                raise FileExistsError(f"{out_path} exists (overwrite=False).")
+
+            ds = run_dom._to_elm_domain_dataset(append_attrs=append_attrs, **kwargs)
+            ds.to_netcdf(out_path)
+            outputs[rid] = out_path
+
+        return outputs
 
     def export_surface(
         self,
@@ -818,15 +796,113 @@ class Domain:
         overwrite: bool = False,
         append_attrs: dict | None = None,
         **kwargs,
-    ):
+    ) -> dict[str, Path]:
+        """Export surface NetCDF(s) for this Domain."""
         from dapper.surf.sfile import SurfaceFile
-        out_dir = Path(out_dir) if out_dir is not None else self.run_dir
+
+        group_dir = Path(out_dir) if out_dir is not None else self.run_dir
         return SurfaceFile.export(
             self,
-            out_dir=out_dir,
+            out_dir=group_dir,
             src_path=src_path,
             filename=filename,
             overwrite=overwrite,
             append_attrs=append_attrs,
             **kwargs,
         )
+
+    def export_landuse(
+        self,
+        src_path: str | Path,
+        *,
+        filename: str = "landuse_timeseries.nc",
+        out_dir: str | Path | None = None,
+        overwrite: bool = False,
+        append_attrs: dict | None = None,
+        **kwargs,
+    ) -> dict[str, Path]:
+        """Export landuse timeseries NetCDF(s) for this Domain."""
+        from dapper.landuse.landuse import export_landuse_timeseries
+
+        group_dir = Path(out_dir) if out_dir is not None else self.run_dir
+        return export_landuse_timeseries(
+            self,
+            src_path=src_path,
+            out_dir=group_dir,
+            filename=filename,
+            overwrite=overwrite,
+            append_attrs=append_attrs,
+            **kwargs,
+        )
+
+    def export_met(
+        self,
+        src_path: str | Path,
+        *,
+        adapter,
+        out_dir: str | Path | None = None,
+        filename: str | None = None,
+        overwrite: bool = False,
+        append_attrs: dict | None = None,
+        pack_scope=None,
+        **kwargs,
+    ) -> dict[str, Path]:
+        """
+        Export meteorological forcing NetCDF(s) for this Domain.
+
+        Parameters
+        ----------
+        src_path : Path-like
+            Directory containing input CSV(s) for the adapter.
+        adapter : object
+            Adapter instance implementing the met adapter protocol.
+        out_dir : Path-like, optional
+            Override output root. Defaults to Domain.run_dir.
+        filename : str, optional
+            Optional filename prefix for output NetCDFs. If provided, each var is written to '{filename}_{var}.nc'.
+        overwrite : bool
+            If False, raises if MET output(s) already exist.
+
+        Returns
+        -------
+        dict[run_id, met_dir]
+        """
+        from dapper.met.exporter import Exporter
+
+        group_dir = Path(out_dir) if out_dir is not None else self.run_dir
+        group_dir.mkdir(parents=True, exist_ok=True)
+
+        # Conservative overwrite guard: refuse to run if outputs already exist
+        if not overwrite:
+            if self.mode == "cellset":
+                met_dir = group_dir / "MET"
+                if met_dir.exists() and any(met_dir.glob("*.nc")):
+                    raise FileExistsError(
+                        f"{met_dir} already contains NetCDF files (overwrite=False)."
+                    )
+            else:
+                if any(group_dir.glob("*/MET/*.nc")):
+                    raise FileExistsError(
+                        f"{group_dir} already contains MET NetCDF outputs (overwrite=False)."
+                    )
+
+
+        ex = Exporter(
+            adapter=adapter,
+            src_path=src_path,
+            out_dir=group_dir,
+            domain=self,
+            append_attrs=append_attrs,
+            **kwargs,
+        )
+        ex.run(
+            pack_scope=pack_scope,
+            filename=filename,
+            overwrite=overwrite,
+        )
+
+        outputs: dict[str, Path] = {}
+        for run_id, _ in self.iter_runs():
+            rid = str(run_id)
+            outputs[rid] = (group_dir / rid / "MET") if self.mode == "sites" else (group_dir / "MET")
+        return outputs

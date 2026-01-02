@@ -1,8 +1,32 @@
-import ee
+try:
+    import ee  # type: ignore
+except Exception:  # pragma: no cover
+    ee = None  # type: ignore
+
+def _require_ee_global():
+    global ee
+    if ee is None:
+        try:
+            import ee as _ee  # type: ignore
+        except Exception as e:  # pragma: no cover
+            raise ImportError(
+                "Google Earth Engine (earthengine-api) is required for topounit creation. "
+                "Install it (pip install earthengine-api) and authenticate (earthengine authenticate)."
+            ) from e
+        ee = _ee
+    return ee
+
+if ee is None:  # pragma: no cover
+    class _EEProxy:
+        def __getattr__(self, name):
+            return getattr(_require_ee_global(), name)
+
+    ee = _EEProxy()  # type: ignore
+
 import math
 
 from dapper.domains.domain import Domain
-from dapper.utils import gee_utils as gu
+from dapper.integrations.earthengine import gee_utils as gu
 
 
 # ----------------------------

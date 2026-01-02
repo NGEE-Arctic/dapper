@@ -1,16 +1,32 @@
 import numpy as np
 import pandas as pd
 
+
+from pathlib import Path
+import dapper
+import warnings
+
+# NOTE: validate_met_vars currently depends on stats stored under docs/data.
+# We keep the concept around, but do not require those assets to exist at runtime.
+_ROOT_DIR = Path(next(iter(dapper.__path__))).parent.parent
+_DATA_DIR = _ROOT_DIR / "docs" / "data"
+
 from dapper.domains.domain import Domain
-from dapper.utils.utils import _DATA_DIR
 
 def validate_met_vars(df):
     """
     Uses pre-computed statistics to ensure that the unit conversions resulted in
     distributions for each variable that make sense.
     """
-    # Load pre-computed variable statistics
+    # Load pre-computed variable statistics (optional; not shipped in some installs)
     path_stats = _DATA_DIR / 'elm_met_var_stats.csv'
+    if not path_stats.exists():
+        warnings.warn(
+            f"validate_met_vars: stats file not found at {path_stats}. "
+            "Skipping validation (this is expected if docs/data isn't installed).",
+            RuntimeWarning,
+        )
+        return
     sdf = pd.read_csv(path_stats, index_col=0)
 
     # Determine which variables can/can't be validated
@@ -286,11 +302,17 @@ def gen_zone_mappings(domain_or_df, site: bool = False):
 
     # Accept either Domain or raw df_loc for backward compatibility
     if isinstance(domain_or_df, Domain):
-        df_loc = domain_or_df.gdf
+        # In the refactored Domain, "cells" is the run-level geometry table.
+        df_loc = domain_or_df.ensure_cells_lon_lat().cells
     else:
         df_loc = domain_or_df
 
     # Base mapping
+    # Ensure a zone column exists (default to 1 like Domain.to_df_loc()).
+    if "zone" not in df_loc.columns:
+        df_loc = df_loc.copy()
+        df_loc["zone"] = 1
+
     zone_mapping = df_loc[["lon", "lat", "zone"]].copy()
     zone_mapping["lon"] = zone_mapping["lon"] % 360  # ELM uses 0–360 longitudes
     zone_mapping["id"] = np.arange(1, len(zone_mapping) + 1)
@@ -344,5 +366,4 @@ def elm_var_packing_params(elm_var, data=[], dtype=np.int16):
     add_offset = xmin - imin * scale_factor
 
     return add_offset, scale_factor
-
 

@@ -34,7 +34,7 @@ try:
 except Exception:  # pragma: no cover
     gpd = None  # type: ignore
 
-from dapper.utils import elm_utils as eu
+from dapper.elm import utils as eu
 
 DEFAULT_CATALOG_URL = "https://storage.googleapis.com/cmip6/pangeo-cmip6.json"
 

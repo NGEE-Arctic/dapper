@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
 import numpy as np
+from dapper.geo.lonwrap import infer_lon_wrap, normalize_lon
 import xarray as xr
 
 LatLonDimNames = Tuple[Optional[str], Optional[str]]
@@ -35,15 +36,13 @@ def _get_latlon_vectors(ds: xr.Dataset, lat_dim: str, lon_dim: str) -> Tuple[np.
 
 
 def _normalize_lon_to_array(lon: float, lon_vec: np.ndarray) -> float:
+    """Normalize `lon` to match the wrapping convention used by `lon_vec`."""
+    lon_vec = np.asarray(lon_vec, dtype=float)
     finite = lon_vec[np.isfinite(lon_vec)]
     if finite.size == 0:
         return lon
-    frac_0360 = np.mean((finite >= 0) & (finite < 360))
-    if frac_0360 > 0.9:
-        return lon % 360 if lon >= 0 else (lon + 360) % 360
-    ln = ((lon + 180) % 360) - 180
-    return (180 - 1e-6) if ln == -180 else ln
-
+    wrap = infer_lon_wrap(finite)
+    return float(normalize_lon(float(lon), wrap))
 
 def _slice_spatial(da: xr.DataArray, lat_dim: str, lon_dim: str, i: int, j: int) -> xr.DataArray:
     return da.isel({lat_dim: i, lon_dim: j})

@@ -154,20 +154,20 @@ class SurfaceValidator:
                 if lvl == "required":
                     r.append(
                         CheckResult(
-                            check_id=f"V-003.required.{tier}.{v}",
+                            check=f"V-003.required.{tier}.{v}",
                             severity="ERROR",
-                            ok=(v in present),
-                            message=f"Missing REQUIRED var {v} in tier {tier}" if v not in present else "present",
+                            passed=(v in present),
+                            detail=f"Missing REQUIRED var {v} in tier {tier}" if v not in present else "present",
                             var=v,
                         )
                     )
                 elif lvl == "recommended":
                     r.append(
                         CheckResult(
-                            check_id=f"V-003.recommended.{tier}.{v}",
+                            check=f"V-003.recommended.{tier}.{v}",
                             severity="WARN",
-                            ok=(v in present),
-                            message=f"Missing recommended var {v} in tier {tier}" if v not in present else "present",
+                            passed=(v in present),
+                            detail=f"Missing recommended var {v} in tier {tier}" if v not in present else "present",
                             var=v,
                         )
                     )
@@ -180,10 +180,10 @@ class SurfaceValidator:
                 ok = any(v in present for v in group)
                 r.append(
                     CheckResult(
-                        check_id=f"V-004.choose_one_of.{tier}",
+                        check=f"V-004.choose_one_of.{tier}",
                         severity="ERROR",
-                        ok=ok,
-                        message=f"Must include at least one of {group} (tier {tier})" if not ok else "ok",
+                        passed=ok,
+                        detail=f"Must include at least one of {group} (tier {tier})" if not ok else "ok",
                         var="|".join(group),
                     )
                 )
@@ -198,10 +198,10 @@ class SurfaceValidator:
                     for dep in deps:
                         r.append(
                             CheckResult(
-                                check_id=f"V-005.conditional.{tier}.{driver}->{dep}",
+                                check=f"V-005.conditional.{tier}.{driver}->{dep}",
                                 severity="WARN",
-                                ok=(dep in present),
-                                message=f"{dep} should be present when {driver} is present (tier {tier})"
+                                passed=(dep in present),
+                                detail=f"{dep} should be present when {driver} is present (tier {tier})"
                                 if dep not in present
                                 else "ok",
                                 var=dep,

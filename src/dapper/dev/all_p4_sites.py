@@ -2,7 +2,6 @@ import ee
 import json
 import pandas as pd
 import geopandas as gpd
-from shapely import Point
 from pathlib import Path
 from shapely.geometry import Point
 from importlib import reload
@@ -74,10 +73,8 @@ with netCDF4.Dataset(path) as ds:
 
     # Get them all in a dictionary
     global_attr_names = ds.ncattrs()
-        append_attrs
- = {name: ds.getncattr(name) for name in global_attr_names}
-    print(f"Global attribute values: {    append_attrs
-}")
+    append_attrs = {name: ds.getncattr(name) for name in global_attr_names}
+    print(f"Global attribute values: {append_attrs}")
 
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta

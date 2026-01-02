@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import datetime as _dt
+from dapper.geo.lonwrap import LonWrap, infer_lon_wrap, normalize_lon
 
-LonWrap = Literal["auto", "0_360", "-180_180"]
 SampleMethod = Literal["nearest"]
 
 
@@ -58,29 +58,6 @@ def infer_lat_lon_vars(ds: xr.Dataset) -> tuple[str, str]:
         )
     return lat_var, lon_var
 
-
-def _infer_lon_wrap(lon_vals: np.ndarray) -> Literal["0_360", "-180_180"]:
-    lon_vals = np.asarray(lon_vals)
-    finite = lon_vals[np.isfinite(lon_vals)]
-    if finite.size == 0:
-        return "-180_180"
-    mn = float(finite.min())
-    mx = float(finite.max())
-    # typical ELM files store degrees_east in [0, 360)
-    if mn >= 0.0 and mx > 180.0:
-        return "0_360"
-    return "-180_180"
-
-
-def normalize_lon(lon: float, wrap: Literal["0_360", "-180_180"]) -> float:
-    lon = float(lon)
-    if wrap == "0_360":
-        lon = lon % 360.0
-        if lon < 0:
-            lon += 360.0
-    else:
-        lon = ((lon + 180.0) % 360.0) - 180.0
-    return lon
 
 def _to_0_360(lon_da: xr.DataArray) -> xr.DataArray:
     return ((lon_da % 360.0) + 360.0) % 360.0
@@ -135,7 +112,7 @@ def infer_latlon_spec(
             f"Unsupported lat/lon shapes: {lat_var}{lat_da.shape}, {lon_var}{lon_da.shape}"
         )
 
-    wrap = _infer_lon_wrap(lon_1d) if lon_wrap == "auto" else lon_wrap  # type: ignore[assignment]
+    wrap = infer_lon_wrap(lon_1d) if lon_wrap == "auto" else lon_wrap  # type: ignore[assignment]
     if wrap not in ("0_360", "-180_180"):
         raise ValueError(f"lon_wrap must resolve to '0_360' or '-180_180', got {wrap}")
 

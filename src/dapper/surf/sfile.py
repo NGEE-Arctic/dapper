@@ -8,7 +8,7 @@ import pandas as pd
 
 from dapper.surf import schema as SC
 from dapper.surf import sample as SP  # for from_halfdegree_point 
-from dapper.utils import sampling  # shared gridded sampler
+from dapper.geo import sampling  # shared gridded sampler
 from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
 
 ArrayLike = Union[np.ndarray, "xr.DataArray", float, int]
@@ -688,7 +688,7 @@ class SurfaceFile:
             )
 
         elif sampling_method == "zonal":
-            from dapper.utils import zonal  # lazy import
+            from dapper.geo import zonal  # lazy import
 
             # Require polygon-like cells
             if dom.cells.geometry.geom_type.isin(["Point"]).all():
@@ -881,6 +881,9 @@ class SurfaceFile:
             # Attach topounit parameters (and PCT_TOPUNIT) exactly once
             if attach_topounits and getattr(run_dom, "topounits", None) is not None and run_dom.topounits is not None:
                 sf.add_topounits_from_domain(run_dom)
+
+            if append_attrs:
+                sf.ds.attrs.update(dict(append_attrs))
 
             write_surface_nc(sf.ds, str(out_path))
 
@@ -1239,6 +1242,7 @@ class SurfaceFile:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir) / "tmp_surface.nc"
             self.ds.to_netcdf(tmp_path)
+            from dapper.surf.validate import SurfaceValidator
             v = SurfaceValidator(**(validator_kwargs or {}))
             report = v.validate(str(tmp_path))
 

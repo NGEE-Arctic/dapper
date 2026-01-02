@@ -159,6 +159,7 @@ def initialize_met_netcdf(
     chunks: tuple[int, ...] | None,
     write_pattern: str = "by_site",
     append_attrs: dict | None = None,
+    var_attrs: dict | None = None,
     nc_format: str = "NETCDF4_CLASSIC",
     zlib: bool = True,
     shuffle: bool = True,
@@ -222,6 +223,14 @@ def initialize_met_netcdf(
         v.setncattr("add_offset", float(add_offset))
         v.setncattr("scale_factor", float(scale_factor))
         v.setncattr("missing_value", np.int16(fill_value) if _dtype_nbytes(dtype) == 2 else fill_value)
+
+        # Per-variable attributes (units, long_name, etc.)
+        if var_attrs:
+            for k, val in var_attrs.items():
+                # Avoid clobbering packing attrs or missing_value
+                if str(k) in {"add_offset", "scale_factor", "missing_value"}:
+                    continue
+                v.setncattr(str(k), val)
 
         # Global attrs
         ds.setncattr("Conventions", "CF-1.8")

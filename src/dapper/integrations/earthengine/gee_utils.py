@@ -1,5 +1,32 @@
 # Generic functions JPS
-import ee
+try:
+    import ee  # type: ignore
+except Exception:  # pragma: no cover
+    ee = None  # type: ignore
+
+def _require_ee_global():
+    """Import Earth Engine lazily and bind it to the module global 'ee'."""
+    global ee
+    if ee is None:
+        try:
+            import ee as _ee  # type: ignore
+        except Exception as e:  # pragma: no cover
+            raise ImportError(
+                "Google Earth Engine (earthengine-api) is required for this functionality. "
+                "Install it (pip install earthengine-api) and authenticate (earthengine authenticate)."
+            ) from e
+        ee = _ee
+    return ee
+
+# If Earth Engine is not importable, expose a proxy that raises a clear error on use.
+if ee is None:  # pragma: no cover
+    class _EEProxy:
+        def __getattr__(self, name):
+            return getattr(_require_ee_global(), name)
+
+    ee = _EEProxy()  # type: ignore
+
+
 import json
 import pandas as pd
 import geopandas as gpd
@@ -347,7 +374,13 @@ def export_fc(
     ).start()
 
 
-def featurecollection_to_domain(fc, name="gee", domain_nc=None):
+def featurecollection_to_domain(
+    fc,
+    name="gee",
+    domain_nc=None,
+    *,
+    mode: str = "sites",
+):
     """
     Converts an ee.FeatureCollection object to a Domain with one row per feature
     and representative lon/lat.
@@ -400,17 +433,19 @@ def featurecollection_to_domain(fc, name="gee", domain_nc=None):
     )
     gdf_loc["gid"] = gdf_loc["gid"].astype(str).str.strip()
 
-    return Domain.from_gdf(gdf_loc, name=name, domain_nc=domain_nc)
+    # A FeatureCollection is (almost always) multiple features; make that explicit.
+    # Use sites-mode: one run per feature.
+    return Domain.from_gdf(gdf_loc, name=name, mode=mode, domain_nc=domain_nc)
 
 
 def featurecollection_to_df_loc(fc, name="gee"):
     """
     Legacy wrapper: convert a FeatureCollection to a df_loc-style GeoDataFrame.
 
-    Prefer `featurecollection_to_domain(fc).gdf` in new code.
+    Prefer `featurecollection_to_domain(fc).cells` in new code.
     """
     dom = featurecollection_to_domain(fc, name=name)
-    return dom.gdf
+    return dom.cells
 
 
 def sample_e5lh(params, domain_name=None, skip_tasks=False):

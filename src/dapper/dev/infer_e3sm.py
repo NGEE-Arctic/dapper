@@ -1,15 +1,12 @@
 from __future__ import annotations
-import re
-import subprocess
-import pandas as pd
-from pathlib import Path
-from typing import Iterable, List, Dict, Optional
 
-from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
-from typing import Iterable, List, Dict, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
+
+import pandas as pd
+
 
 def find_surface_vars_v3(
     repo_root: str | Path,

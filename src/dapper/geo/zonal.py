@@ -1,4 +1,4 @@
-# src/dapper/utils/zonal.py
+# src/dapper/geo/zonal.py
 from __future__ import annotations
 
 import warnings
@@ -15,7 +15,7 @@ from shapely.geometry import box
 from shapely.ops import transform
 from shapely.strtree import STRtree
 
-from dapper.utils import sampling
+from dapper.geo import sampling
 
 LonWrap = Literal["auto", "0_360", "-180_180"]
 TieBreak = Literal["smallest", "largest", "first"]

@@ -82,19 +82,19 @@ def make_quicklooks(
     Create per-site PNG quicklooks *after* an export has finished.
 
     Supports all modes:
-      - NetCDF:  "elm-combined", "elm-sites"
+      - NetCDF:  "cellset", "sites"
       - Raw:     "raw-site-parquet", "raw-site-csv"
 
     Parameters
     ----------
     exporter : Exporter or None
         Optionally pass the Exporter instance you used for `run(...)`.
-        REQUIRED for 'elm-combined' (to map gids to lat/lon via the normalized
+        REQUIRED for 'cellset' (to map gids to lat/lon via the normalized
         domain geometry, i.e. ``exporter.domain_norm`` or ``exporter.df_loc_norm``).
     write_directory : path-like or None
         Where the export outputs live. If omitted and `exporter` is given,
         uses `exporter.write_directory`.
-    mode : {"elm-combined","elm-sites","raw-site-parquet","raw-site-csv"} or None
+    mode : {"cellset","sites","raw-site-parquet","raw-site-csv"} or None
         Export mode. If None, auto-detected by looking under write_directory.
     vars : list[str] or None
         Variables to plot. For NetCDF modes use ELM short names;
@@ -111,7 +111,7 @@ def make_quicklooks(
     Notes
     -----
     - NetCDF modes require `netCDF4` installed.
-    - For 'elm-combined', pass the same `exporter` you ran with so we can use its
+    - For 'cellset', pass the same `exporter` you ran with so we can use its
       `df_loc_norm` to locate each `gid` on the lat/lon axes.
     """
     if write_directory is None:
@@ -141,7 +141,7 @@ def make_quicklooks(
     if Dataset is None or num2date is None:
         raise RuntimeError("netCDF4 is required to plot NetCDF quicklooks.")
 
-    if mode_eff == "elm-sites":
+    if mode_eff == "sites":
         _quicklooks_elm_sites(
             wd=wd,
             out_dir=out_dir,
@@ -150,21 +150,23 @@ def make_quicklooks(
         )
         return
 
-    if mode_eff == "elm-combined":
+    if mode_eff == "cellset":
         if exporter is None:
             raise ValueError(
-                "For 'elm-combined', pass the Exporter used for the run "
+                "For 'cellset', pass the Exporter used for the run "
                 "(needs domain geometry to map gids to lat/lon)."
             )
 
-        # Prefer the Domain-based geometry; fall back to legacy df_loc_norm
-        if getattr(exporter, "domain_norm", None) is not None:
-            df_loc_norm = exporter.domain_norm.gdf
-        elif getattr(exporter, "df_loc_norm", None) is not None:
+        # Prefer the normalized location table produced by the Exporter run.
+        # (This includes lon_0-360, zones, etc.)
+        if getattr(exporter, "df_loc_norm", None) is not None:
             df_loc_norm = exporter.df_loc_norm
+        elif getattr(exporter, "domain", None) is not None and getattr(exporter, "adapter", None) is not None:
+            # Best-effort fallback: reconstruct what Exporter.run(...) would have created.
+            df_loc_norm = exporter.adapter.normalize_locations(exporter.domain.to_df_loc(), id_col=None)
         else:
             raise ValueError(
-                "Exporter has neither 'domain_norm' nor 'df_loc_norm'. "
+                "Exporter has no usable location table (expected 'df_loc_norm'). "
                 "Did you run Exporter.run(...) first?"
             )
 
@@ -183,7 +185,7 @@ def make_quicklooks(
 # ----------------------- mode detection -----------------------
 
 def _detect_mode(wd: Path, *, explicit: Optional[str] = None) -> str:
-    if explicit in {"elm-combined","elm-sites","raw-site-parquet","raw-site-csv"}:
+    if explicit in {"cellset","sites","raw-site-parquet","raw-site-csv"}:
         return explicit
 
     sp = wd / "sites_parquet"
@@ -202,7 +204,7 @@ def _detect_mode(wd: Path, *, explicit: Optional[str] = None) -> str:
             try:
                 with _DS(p, "r") as ds:
                     m = getattr(ds, "export_mode", None)
-                    if m in {"elm-combined","elm-sites"}:
+                    if m in {"cellset","sites"}:
                         return m
                     # infer from dims of a data var
                     vname = _first_data_var_name(ds)
@@ -210,9 +212,9 @@ def _detect_mode(wd: Path, *, explicit: Optional[str] = None) -> str:
                         continue
                     dims = ds.variables[vname].dimensions
                     if dims == ("n","DTIME") or dims == ("DTIME","n"):
-                        return "elm-sites"
+                        return "sites"
                     if dims == ("DTIME","lat","lon"):
-                        return "elm-combined"
+                        return "cellset"
             except Exception:
                 continue
     except Exception:
@@ -314,7 +316,7 @@ def _quicklooks_raw(
     print(f"quicklooks written to {out_dir}")
 
 
-# ----------------------- NetCDF: elm-sites -----------------------
+# ----------------------- NetCDF: sites -----------------------
 
 def _quicklooks_elm_sites(
     *,
@@ -383,7 +385,7 @@ def _quicklooks_elm_sites(
     print(f"quicklooks written to {out_dir}")
 
 
-# ----------------------- NetCDF: elm-combined (lat/lon) -----------------------
+# ----------------------- NetCDF: cellset (lat/lon) -----------------------
 
 def _quicklooks_elm_combined(
     *,
@@ -410,7 +412,7 @@ def _quicklooks_elm_combined(
 
     present = [v for v in vars if v in var_to_path]
     if not present or axis_src is None:
-        print("quicklooks: no plottable vars found in elm-combined outputs.")
+        print("quicklooks: no plottable vars found in cellset outputs.")
         return
 
     with _DS(axis_src, "r") as ds0:

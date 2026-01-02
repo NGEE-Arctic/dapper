@@ -8,7 +8,7 @@ from dapper.met import temporal as dt
 from dapper.met.adapters.base import BaseAdapter
 from dapper.schemas.elm import elm_required_vars, is_nonnegative
 from dapper.config.metsources.era5 import RAW_TO_ELM
-from dapper.utils import elm_utils as eu  # for compute_humidities, packing defaults
+from dapper.elm import utils as eu  # for compute_humidities, packing defaults
 
 
 class ERA5Adapter(BaseAdapter):
@@ -47,12 +47,12 @@ class ERA5Adapter(BaseAdapter):
         Search ``csv_directory`` for ``*.csv`` and compute the inclusive year
         bounds consistent with ``calendar`` (e.g., remove Feb 29 for ``"noleap"``).
 
-    normalize_locations(df_loc, nzones) -> pandas.DataFrame
+    normalize_locations(df_loc) -> pandas.DataFrame
         Input must contain at least ``{"gid","lat","lon"}``.
         Returns a new DataFrame with:
         - ``gid`` coerced to stripped strings (no nulls),
         - ``lon_0-360`` added (modulo 360),
-        - ``zone`` present (created if missing; repeated 1..nzones),
+        - ``zone`` present (created if missing; default zone=1 if missing),
         - rows sorted by (lat, lon).
 
     id_column_for_csv(df_csv, id_col) -> str
@@ -121,32 +121,6 @@ class ERA5Adapter(BaseAdapter):
 
         start_year, end_year = dt.get_start_end_years(csv_files, calendar=calendar)
         return csv_files, start_year, end_year
-
-    def normalize_locations(self, df_loc, nzones):
-        # Expect 'gid','lat','lon' already present per your latest assumption.
-        required = {"gid", "lat", "lon"}
-        missing = required - set(df_loc.columns)
-        if missing:
-            raise KeyError(f"df_loc missing required columns: {sorted(missing)}")
-
-        out = df_loc.copy()
-        if out["gid"].isna().any():
-            bad = int(out["gid"].isna().sum())
-            raise ValueError(f"df_loc has {bad} null gid values. Populate gid before calling.")
-
-        out["gid"] = out["gid"].astype(str).str.strip()
-        out["lon_0-360"] = np.mod(out["lon"].to_numpy(), 360.0)
-
-        if "zone" not in out.columns:
-            if nzones < 1:
-                raise ValueError("nzones must be >= 1")
-            out["zone"] = np.tile(
-                np.arange(1, nzones + 1, dtype=int),
-                (len(out) // nzones) + 1
-            )[: len(out)]
-
-        out = out.sort_values(["lat", "lon"]).reset_index(drop=True)
-        return out
 
     def id_column_for_csv(self, df_csv, id_col):
         if "gid" not in df_csv.columns:

@@ -8,7 +8,7 @@ import numpy as np
 import xarray as xr
 import geopandas as gpd
 
-from dapper.utils import sampling
+from dapper.geo import sampling
 from dapper.domains.domain import Domain
 
 LonWrap = Literal["auto", "0_360", "-180_180"]
@@ -39,6 +39,7 @@ def sample_landuse_timeseries(
     targets: "gpd.GeoDataFrame | None" = None,
     agg_policy: dict[str, str] | None = None,
     write_zonal_mapping: bool = True,
+    append_attrs: dict | None = None,
 ) -> tuple[Path, pd.DataFrame]:
     """
     Sample a landuse time series dataset either by nearest-point sampling (existing behavior)
@@ -71,6 +72,9 @@ def sample_landuse_timeseries(
     ds_src = xr.open_dataset(src_path, decode_times=decode_times, chunks=chunks)
 
     def _write_nc(ds_out: xr.Dataset, path: Path) -> None:
+        if append_attrs:
+            ds_out = ds_out.copy()
+            ds_out.attrs.update(dict(append_attrs))
         if not compress:
             ds_out.to_netcdf(path, mode="w")
             return
@@ -127,7 +131,7 @@ def sample_landuse_timeseries(
         raise ValueError(f"Unknown sampling_method={sampling_method!r}")
 
     import geopandas as gpd
-    from dapper.utils import zonal
+    from dapper.geo import zonal
 
     if targets is None:
         raise ValueError("sampling_method='zonal' requires targets=GeoDataFrame with columns ['gid','geometry'].")
@@ -286,6 +290,7 @@ def export_landuse_timeseries(
             src_path=src_path,
             df_loc=df_loc,
             out_path=out_path,
+            append_attrs=append_attrs,
             **kwargs,
         )
         outputs[run_id] = Path(path_written)

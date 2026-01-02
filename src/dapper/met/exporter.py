@@ -3,15 +3,34 @@ import warnings
 import numpy as np
 import pandas as pd
 import datetime as _dt
-import geopandas as gpd
 from pathlib import Path
-from fastparquet import write
+def _parquet_write(path, df, *, append: bool = False) -> None:
+    """Write/append parquet using fastparquet.
 
-from dapper.utils import utils
+    The met exporter uses Parquet as a temp on-disk cache to avoid holding the
+    full time series for all points in memory.
+
+    We import fastparquet lazily so importing dapper.met (or Domain.export_met)
+    doesn't immediately fail in environments that haven't installed the optional
+    Parquet dependency yet.
+    """
+    try:
+        from fastparquet import write as _fp_write
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "dapper.met requires 'fastparquet' to write intermediate parquet caches. "
+            "Install with: pip install fastparquet"
+        ) from e
+
+    _fp_write(str(path), df, append=bool(append))
+
+from dapper.io import fs as utils
 import dapper.met.temporal as dt 
 from dapper.domains.domain import Domain
 from dapper.met.writers import initialize_met_netcdf, append_met_netcdf
-from dapper.utils.constants import LATLON_DECIMALS
+from dapper.geo.constants import LATLON_DECIMALS
+from dapper.schemas.elm import ELM_UNITS
+from dapper.elm.utils import elm_data_dicts
 
 class Exporter:
     """
@@ -21,9 +40,9 @@ class Exporter:
     for many sites/cells, preprocesses them via a pluggable *adapter*, and
     writes ELM-ready NetCDF outputs in two layouts:
 
-      1) ``"elm-combined"`` – one NetCDF per variable with dims
+      1) ``"cellset"`` – one NetCDF per variable with dims
          ``('DTIME','lat','lon')`` (global packing; sparse lat/lon axes are OK).
-      2) ``"elm-sites"`` – one directory per site; each directory contains
+      2) ``"sites"`` – one directory per site; each directory contains
          one NetCDF per variable with dims ``('n','DTIME')`` where ``n=1``
          (per-site packing).
 
@@ -65,15 +84,13 @@ class Exporter:
     dtime_units : {"days","hours"}, default "days"
         Units of the numeric DTIME coordinate (e.g., ``"days since YYYY-MM-DD HH:MM:SS"``).
 
-    nzones : int, default 1
-        If ``df_loc`` lacks ``"zone"``, adapters may assign repeated zones ``1..nzones``.
 
     dformat : {"BYPASS","DATM_MODE"}, default "BYPASS"
         Target ELM format selector passed through to the adapter.
 
     append_attrs : dict, optional
         Extra global NetCDF attributes to include in every file. The exporter also adds:
-        ``export_mode`` (``"elm-combined"`` or ``"elm-sites"``) and
+        ``export_mode`` (``"cellset"`` or ``"sites"``) and
         ``pack_scope`` (``"global"`` or ``"per-site"``).
 
     chunks : tuple[int,...], optional
@@ -87,12 +104,12 @@ class Exporter:
     ------------
     - Creates a temporary directory of per-site parquet shards under ``out_dir``.
     - Writes NetCDF files to ``out_dir`` in the chosen layout.
-    - Writes a ``zone_mappings.txt`` file either at the root (``elm-combined``)
-      or inside each site directory (``elm-sites``).
+    - Writes a ``zone_mappings.txt`` file either at the root (``cellset``)
+      or inside each site directory (``sites``).
 
     Notes
     -----
-    - **Packing**: global packing for ``elm-combined``; per-site packing for ``elm-sites``.
+    - **Packing**: global packing for ``cellset``; per-site packing for ``sites``.
     - **Required columns**: CSV shards and ``df_loc`` both use ``"gid"``; CSVs include the
       adapter’s date/time column (renamed to ``"time"`` during preprocess).
     - **Combined (lat/lon) layout**: does **not** enforce regular grids; axes are the unique
@@ -102,82 +119,61 @@ class Exporter:
     def __init__(
         self,
         adapter,
-        csv_directory,
+        src_path,
+        *,
+        domain: Domain,
         out_dir=None,
-        domain=None,
-        id_col=None,
-        calendar="noleap",
-        dtime_resolution_hrs=1,
-        dtime_units="days",
-        nzones=1,
-        dformat="BYPASS",
-        append_attrs=None,
+        calendar: str = "noleap",
+        dtime_resolution_hrs: float = 1,
+        dtime_units: str = "days",
+        dformat: str = "BYPASS",
+        append_attrs: dict | None = None,
         chunks=None,
         include_vars=None,
         exclude_vars=None,
     ):
-        """
+        """Create a MET exporter for a given Domain.
+
         Parameters
         ----------
-        adapter : BaseAdapter
-            Implements: ``discover_files``, ``normalize_locations``,
-            ``preprocess_shard``, ``required_vars``, and ``pack_params``.
+        adapter
+            A met adapter implementing the BaseAdapter interface.
 
-        csv_directory : str or pathlib.Path
-            Directory containing time-sharded CSV files for all sites/cells.
+        src_path
+            Input directory containing time-sharded CSV files.
 
-        out_dir : str or pathlib.Path
-            Destination directory for NetCDF outputs and temporary parquet shards.
+        domain
+            A :class:`~dapper.domains.domain.Domain` instance (Domain contract only).
 
-        domain : Domain or (Geo)DataFrame
-            Canonical spatial domain. Preferred is a ``dapper.domain.Domain``
-            instance. For convenience, you may also pass a df_loc-style
-            (geo)DataFrame with at least ``["gid", "lon", "lat"]`` (and
-            optionally ``"geometry"`` and ``"zone"``); it will be wrapped via
-            ``Domain.from_gdf(...)``.
+        out_dir
+            Optional override for the *run_dir* root. If not provided, defaults to
+            ``domain.run_dir``. The exporter will write into ``<run_dir>/MET``
+            (cellset mode) or ``<run_dir>/<gid>/MET`` (sites mode).
 
-        id_col : str, optional
-            Only used when ``domain`` is a DataFrame and does not yet have a
-            ``"gid"`` column; in that case, ``id_col`` will be renamed to
-            ``"gid"``.
+        append_attrs
+            Extra global NetCDF attributes to append to every output file.
         """
-        self.adapter = adapter
-        self.csv_directory = Path(csv_directory)
+        if not isinstance(domain, Domain):
+            raise TypeError("domain must be a dapper.domains.domain.Domain instance")
 
-        # ---- normalize / wrap into Domain ----
-        if isinstance(domain, Domain):
-            dom = domain
-        else:
-            # Backward-compat convenience: accept df_loc-like tables
-            dom = Domain.from_gdf(domain, name="from_exporter", id_col=id_col)
+        self.adapter = adapter
+        self.src_path = Path(src_path)
 
         # Ensure lon/lat exist (derived from geometry if needed)
-        dom = dom.ensure_lon_lat()
-
-        self.domain = dom
-        self.domain_norm = None  # will hold adapter-normalized Domain
-
+        self.domain = domain.ensure_cells_lon_lat()
 
         # Output root for this exporter run. If not provided, uses Domain.run_dir
         # (requires Domain.path_out to be set).
         self.group_dir = Path(out_dir) if out_dir is not None else self.domain.run_dir
 
-        self.id_col = id_col
         self.calendar = calendar
         self.dtime_resolution_hrs = dtime_resolution_hrs
         self.dtime_units = dtime_units
-        self.nzones = nzones
         self.dformat = dformat
         self.append_attrs = append_attrs or {}
         self.chunks = chunks
         self.include_vars = set(include_vars) if include_vars else None
         self.exclude_vars = set(exclude_vars) if exclude_vars else None
-
-        self.temp_dir = None
-        self.csv_files = None
-        self.start_year = None
-        self.end_year = None
-        self.var_cols = None
 
         # Meta columns we expect after preprocess
         self.meta_cols = {
@@ -190,6 +186,12 @@ class Exporter:
             "lon",
             "lon_0-360",
         }
+
+        self.temp_dir = None
+        self.csv_files = None
+        self.start_year = None
+        self.end_year = None
+        self.var_cols = None
         self.dtime_vals = None
         self.dtime_units_out = None
         self.nt = None
@@ -200,156 +202,115 @@ class Exporter:
         # derived
         self.gid_to_isite = None
 
+        # Cached ELM descriptions (used for per-variable attrs)
+        self._elm_desc = (elm_data_dicts() or {}).get("short_descriptions", {})
+
     # ---------------------- public ----------------------
 
-    def run(self, output_mode, pack_scope=None, filename=None):
-        """
-        output_mode : 'elm-combined' | 'elm-sites' | 'raw-site-parquet' | 'raw-site-csv'
-        """
-        possible_output_modes = ['elm-combined', 'elm-sites', 'raw-site-parquet', 'raw-site-csv']
-        if output_mode not in possible_output_modes:
-            raise KeyError(f'Your requested output_mode is invalid. Choose from {possible_output_modes}.')
+    def run(self, *, pack_scope=None, filename: str | None = None, overwrite: bool = False) -> None:
+        """Run the MET export for this exporter’s Domain.
 
-        # 0) prep – adapter-normalized locations
-        self.df_loc_norm = self.adapter.normalize_locations(self.domain.gdf, self.nzones)
-        # keep a normalized Domain alongside the raw Domain
-        self.domain_norm = self.domain.with_gdf(self.df_loc_norm)
+        The output layout is derived from ``Domain.mode``:
+          - ``sites``: writes ``<run_dir>/<gid>/MET/{prefix_}{var}.nc`` and a per-site
+            ``zone_mappings.txt`` (always zone=01, id=1).
+          - ``cellset``: writes ``<run_dir>/MET/{prefix_}{var}.nc`` and a single
+            ``zone_mappings.txt`` covering all locations (zones taken from df_loc, default 1).
 
+        Parameters
+        ----------
+        pack_scope
+            Optional packing strategy override. Defaults to ``per-site`` for sites and
+            ``global`` for cellset outputs.
+
+        filename
+            Optional filename prefix for output NetCDF files. If provided, each variable
+            is written to ``{filename}_{var}.nc``.
+
+        overwrite
+            If True, clears existing MET outputs before writing.
+        """
+        dom_mode = getattr(self.domain, "mode", None)
+        if dom_mode not in ("sites", "cellset"):
+            raise ValueError(
+                f"Domain.mode must be 'sites' or 'cellset' for MET export (got {dom_mode!r})."
+            )
+
+        # 0) prep – adapter-normalized locations from the Domain contract
+        self.df_loc_norm = self.adapter.normalize_locations(self.domain.to_df_loc(), id_col=None)
+        # Sites mode: always a single zone
+        if dom_mode == "sites":
+            self.df_loc_norm["zone"] = 1
+
+        # Discover input shards
         self.csv_files, self.start_year, self.end_year = self.adapter.discover_files(
-            self.csv_directory, self.calendar
+            self.src_path, self.calendar
         )
         self.group_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1) shards → parquet (raw or elm-prep)
+        # 1) shards → parquet (ELM-prep)
         self.temp_dir = self.group_dir / ".dapper_tmp" / "met_parquet"
-        utils._rm_and_mkdir(self.temp_dir)
+        if self.temp_dir.exists():
+            utils.remove_directory_contents(self.temp_dir, remove_directory=False)
+        else:
+            self.temp_dir.mkdir(parents=True, exist_ok=True)
 
-        # --- raw export if requested ---
-        if output_mode in ("raw-site-parquet", "raw-site-csv"):
-            self._pass1_to_parquet_raw()  # writes temp_parquet/<gid>.parquet (raw columns)
-            parquet_files = list(self.temp_dir.glob("*.parquet"))
-            if not parquet_files:
-                print("No site Parquets to export; exiting.")
-                utils._rm(self.temp_dir)
-                return
+        # Optional: clear old MET outputs to avoid accidental appends
+        if overwrite:
+            self._clear_existing_outputs()
 
-            # Raw outputs are written alongside MET outputs.
-            # - sites mode: one file per gid under <group>/<gid>/MET/
-            # - cellset mode: one file per gid under <group>/MET/ (gid in filename)
-            zm = self._zone_mappings_table()
+        self.filename_prefix = filename.strip() if isinstance(filename, str) and filename.strip() else None
 
-            if getattr(self.domain, "mode", None) == "sites":
-                for pf in parquet_files:
-                    gid = pf.stem
-                    met_dir = self._met_dir_for_gid(gid)
-                    met_dir.mkdir(parents=True, exist_ok=True)
+        effective_pack = self._resolve_pack_scope(dom_mode, pack_scope)
 
-                    # per-gid zone mapping (lon, lat, zone, id)
-                    zm_path = met_dir / "zone_mappings.txt"
-                    if not zm_path.exists():
-                        row_zm = zm[zm["gid"] == gid]
-                        if not row_zm.empty:
-                            row_zm[["lon", "lat", "zone_str", "id"]].to_csv(
-                                zm_path, index=False, header=False, sep="\t"
-                            )
-
-                    if output_mode == "raw-site-parquet":
-                        out_path = met_dir / "raw_timeseries.parquet"
-                        try:
-                            pf.rename(out_path)
-                        except OSError:
-                            df = pd.read_parquet(pf)
-                            df.to_parquet(out_path, index=False)
-                    else:
-                        out_path = met_dir / "raw_timeseries.csv"
-                        df = pd.read_parquet(pf)
-                        if "date" in df.columns:
-                            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
-                        df.to_csv(out_path, index=False)
-
-                utils._rm(self.temp_dir)
-                print(f"{output_mode} export complete → {self.group_dir}")
-
-            else:
-                met_dir = self._met_dir_for_gid()
-                met_dir.mkdir(parents=True, exist_ok=True)
-
-                zm_path = met_dir / "zone_mappings.txt"
-                if not zm_path.exists():
-                    zm[["lon", "lat", "zone_str", "id"]].to_csv(
-                        zm_path, index=False, header=False, sep="\t"
-                    )
-
-                for pf in parquet_files:
-                    gid = pf.stem
-                    if output_mode == "raw-site-parquet":
-                        out_path = met_dir / f"{gid}.parquet"
-                        try:
-                            pf.rename(out_path)
-                        except OSError:
-                            df = pd.read_parquet(pf)
-                            df.to_parquet(out_path, index=False)
-                    else:
-                        out_path = met_dir / f"{gid}.csv"
-                        df = pd.read_parquet(pf)
-                        if "date" in df.columns:
-                            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
-                        df.to_csv(out_path, index=False)
-
-                utils._rm(self.temp_dir)
-                print(f"{output_mode} export complete → {met_dir}")
-            return
-
-        effective_pack = self._resolve_pack_scope(output_mode, pack_scope)
-
-        # ----- ELM path: shards → parquet (preprocessed) -----
         self._pass1_to_parquet()
         parquet_files = sorted(self.temp_dir.glob("*.parquet"))
         if not parquet_files:
             print("No site Parquets to export; exiting.")
-            utils._rm(self.temp_dir)
+            utils.remove_directory_contents(self.temp_dir, remove_directory=True)
             return
 
-        # 2) vars + global DTIME
+        # 2) vars + canonical DTIME axis (cellset only)
         sample_df = pd.read_parquet(parquet_files[0])
         self.var_cols = [c for c in sample_df.columns if c not in self.meta_cols]
         if not self.var_cols:
             print("No data variables found; exiting.")
-            utils._rm(self.temp_dir)
+            utils.remove_directory_contents(self.temp_dir, remove_directory=True)
             return
 
-        self.dtime_vals, self.dtime_units_out, _ = dt.create_dtime(
-            sample_df, self.calendar, self.dtime_units, self.dtime_resolution_hrs
-        )
-        self.nt = len(self.dtime_vals)
+        # For cellset (lat/lon) outputs we need a single canonical DTIME axis.
+        # For sites outputs, allow each gid to have its own coverage/cadence.
+        if dom_mode == "cellset":
+            self.dtime_vals, self.dtime_units_out, aligned0 = dt.create_dtime(
+                sample_df, self.calendar, self.dtime_units, self.dtime_resolution_hrs
+            )
+            # Canonical datetime axis for all points in this cellset export.
+            self._time_axis = pd.to_datetime(aligned0["time"]).to_numpy()
+            self.nt = len(self.dtime_vals)
+        else:
+            self.dtime_vals = None
+            self.dtime_units_out = None
+            self._time_axis = None
+            self.nt = None
 
-        # stable site order (used for mapping & attrs in some tools)
+        # stable site order
         site_order = self.df_loc_norm["gid"].tolist()
         self.gid_to_isite = {g: i for i, g in enumerate(site_order)}
 
-        source_tag = getattr(self.adapter, "DRIVER_TAG", "ERA5")
         years_span = f"{self.start_year}-{self.end_year}"
 
         # file-level attrs with provenance
-        nc_attrs = self._file_attrs(output_mode, effective_pack)
+        nc_attrs = self._file_attrs(dom_mode, effective_pack)
 
-        # 3) branch by output_mode
-        if output_mode == "elm-combined":
+        # 3) branch by Domain.mode
+        if dom_mode == "cellset":
             if effective_pack != "global":
-                raise ValueError("elm-combined requires pack_scope='global'.")
+                raise ValueError("Domain(mode='cellset') requires pack_scope='global'.")
             self._write_elm_combined(parquet_files, years_span, nc_attrs)
-
-        elif output_mode == "elm-sites":
+        else:
             self._write_elm_sites(parquet_files, years_span, nc_attrs)
 
-        else:
-            raise ValueError("output_mode must be 'elm-combined' or 'elm-sites'.")
-
         # 4) cleanup
-        utils._rm(self.temp_dir)
-
-    # ---------------------- private: helpers ----------------------
-
+        utils.remove_directory_contents(self.temp_dir, remove_directory=True)
     def _run_dir_for_gid(self, gid: str) -> Path:
         """Resolve run directory for a gid under the current output root."""
         if getattr(self.domain, "mode", None) == "sites":
@@ -367,28 +328,11 @@ class Exporter:
     def _zone_mappings_path(self, gid: str | None = None, filename: str = "zone_mappings.txt") -> Path:
         return self._met_dir_for_gid(gid) / filename
 
-    def _format_nc_filename(
-        self,
-        template: str,
-        *,
-        var: str,
-        source: str,
-        years: str,
-        gid: str | None = None,
-        zone: str | None = None,
-    ) -> str:
-        """Format a NetCDF filename from a template with common placeholders."""
-        fmt = {
-            "var": var,
-            "source": source,
-            "years": years,
-            "gid": "" if gid is None else str(gid),
-            "zone": "" if zone is None else str(zone),
-        }
-        try:
-            return template.format(**fmt)
-        except KeyError as e:
-            raise KeyError(f"filename is missing a placeholder: {e}") from e
+    def _nc_filename(self, var: str) -> str:
+        """Return the output NetCDF filename for a given variable."""
+        if getattr(self, "filename_prefix", None):
+            return f"{self.filename_prefix}_{var}.nc"
+        return f"{var}.nc"
 
     def _zone_mappings_table(self):
         """
@@ -406,6 +350,10 @@ class Exporter:
 
         df = self.df_loc_norm.copy()
 
+        # Prefer 0–360 longitude convention when available (matches LONGXY)
+        if "lon_0-360" in df.columns:
+            df["lon"] = df["lon_0-360"].astype(float)
+
         # Stable ordering: by zone, then gid (or you could use lat/lon)
         df = df.sort_values(["zone", "gid"]).reset_index(drop=True)
 
@@ -416,20 +364,44 @@ class Exporter:
         df["zone_str"] = df["zone"].astype(int).astype(str).str.zfill(2)
 
         # Keep gid for filtering, but it won't get written to the file
-        return df[["gid", "lon", "lat", "zone_str", "id"]]
+        lon_col = "lon_0-360" if "lon_0-360" in df.columns else "lon"
+        return df[["gid", lon_col, "lat", "zone_str", "id"]].rename(columns={lon_col: "lon"})
 
-    def _write_elm_combined(self, parquet_files, years_span, nc_attrs):
+    def _var_attrs(self, var: str) -> dict:
+        """Best-effort per-variable metadata for ELM outputs."""
+        attrs: dict = {}
+        units = ELM_UNITS.get(var)
+        if units:
+            attrs["units"] = units
+        long_name = self._elm_desc.get(var)
+        if long_name:
+            attrs["long_name"] = long_name
+        return attrs
+
+    def _clear_existing_outputs(self) -> None:
+        """Remove existing MET outputs so this run is idempotent."""
+        if getattr(self.domain, "mode", None) == "sites":
+            for gid in self.df_loc_norm["gid"].astype(str).tolist():
+                met_dir = self._met_dir_for_gid(gid)
+                if met_dir.exists():
+                    utils.remove_directory_contents(met_dir, remove_directory=True)
+        else:
+            met_dir = self._met_dir_for_gid()
+            if met_dir.exists():
+                utils.remove_directory_contents(met_dir, remove_directory=False)
+
+    def _write_elm_combined(self, parquet_files, years_span, nc_attrs, filename_template=None):
         # global packing scan
         packing = self._compute_global_packing(parquet_files)
 
-        # lat/lon axes and gid→(iy,ix) from the normalized Domain
-        lats_axis, lons_axis, gid_to_ij = self.domain_norm.elm_latlon_layout(
+        # lat/lon axes and gid→(iy,ix) from the Domain
+        lats_axis, lons_axis, gid_to_ij = self.domain.elm_latlon_layout(
             decimals=LATLON_DECIMALS,
             use_lon_0360=True,
         )
 
         if getattr(self.domain, "mode", None) == "sites":
-            raise ValueError("elm-combined output_mode is only supported for Domain(mode='cellset').")
+            raise ValueError("Cellset MET output is only supported for Domain(mode='cellset').")
 
         met_dir = self._met_dir_for_gid()
         met_dir.mkdir(parents=True, exist_ok=True)
@@ -438,13 +410,7 @@ class Exporter:
         self._grid_paths = {}
         for v in self.var_cols:
             ao, sf = packing[v]
-            source_tag = getattr(self.adapter, "DRIVER_TAG", "ERA5")
-            path_nc = met_dir / self._format_nc_filename(
-                filename or "{var}.nc",
-                var=v,
-                source=source_tag,
-                years=years_span,
-            )
+            path_nc = met_dir / self._nc_filename(v)
             initialize_met_netcdf(
                 path_nc=path_nc,
                 var_name=v,
@@ -463,18 +429,18 @@ class Exporter:
                 add_offset=ao, scale_factor=sf,
                 dtype="i2", fill_value=32767,
                 chunks=self.chunks, write_pattern="by_cell",
-                append_attrs=nc_attrs, nc_format="NETCDF4_CLASSIC",
+                append_attrs=nc_attrs,
+                var_attrs=self._var_attrs(v),
+                nc_format="NETCDF4_CLASSIC",
             )
             self._grid_paths[v] = path_nc
 
-        # zone mappings at root (lon \t lat \t gid \t zone)
-        zm_df = self.df_loc_norm.copy()
-        zm_df["lon"] = zm_df["lon"].round(LATLON_DECIMALS)
-        zm_df["lat"] = zm_df["lat"].round(LATLON_DECIMALS)
+        # zone mappings at root (lon \t lat \t zone_str \t id)
         zm_path = met_dir / "zone_mappings.txt"
-        zm_df[["lon", "lat", "gid", "zone"]].to_csv(
-            zm_path, index=False, header=False, sep="\t"
-        )
+        zm = self._zone_mappings_table().copy()
+        zm["lon"] = zm["lon"].round(LATLON_DECIMALS)
+        zm["lat"] = zm["lat"].round(LATLON_DECIMALS)
+        zm[["lon", "lat", "zone_str", "id"]].to_csv(zm_path, index=False, header=False, sep="\t")
 
         # scatter each site into lat/lon
         for pf in parquet_files:
@@ -482,6 +448,12 @@ class Exporter:
             df0 = pd.read_parquet(pf)
             if df0.empty:
                 continue
+            if "zone" in df0.columns and df0["zone"].nunique(dropna=True) > 1:
+                raise NotImplementedError(
+                    f"{gid}: multi-zone MET forcing is not supported yet (found multiple zone values in the time series). "
+                    "For now, export with a single zone per gid."
+                )
+
 
             ij = gid_to_ij.get(gid)
             if ij is None:
@@ -494,6 +466,13 @@ class Exporter:
             )
             if len(dvals_site) != self.nt:
                 raise ValueError(f"{gid}: per-site DTIME length {len(dvals_site)} != global {self.nt}")
+            site_axis = pd.to_datetime(site_df["time"]).to_numpy()
+            if site_axis.shape != self._time_axis.shape or not np.array_equal(site_axis, self._time_axis):
+                raise ValueError(
+                    f"{gid}: time axis does not match the canonical axis for this export. "
+                    "This usually indicates the source data coverage differs across points "
+                    "(start/end timestamps or cadence)."
+                )
 
             for v in self.var_cols:
                 if v not in site_df.columns:
@@ -509,9 +488,9 @@ class Exporter:
                     indexers={"DTIME": slice(0, self.nt), "lat": iy, "lon": ix},
                 )
 
-        print("elm-combined export complete.")
+        print("cellset export complete.")
 
-    def _write_elm_sites(self, parquet_files, years_span, nc_attrs):
+    def _write_elm_sites(self, parquet_files, years_span, nc_attrs, filename_template=None):
         # per-site packing + per-site files
         for pf in parquet_files:
             gid = pf.stem
@@ -519,12 +498,17 @@ class Exporter:
             if df0.empty:
                 continue
 
-            # align to global dtime
-            dvals_site, _, site_df = dt.create_dtime(
+            # sites mode: compute per-site DTIME independently (coverage/cadence may differ by gid)
+            dvals_site, dtime_units_out, site_df = dt.create_dtime(
                 df0, self.calendar, self.dtime_units, self.dtime_resolution_hrs
             )
-            if len(dvals_site) != self.nt:
-                raise ValueError(f"{gid}: per-site DTIME length {len(dvals_site)} != global {self.nt}")
+            nt_site = len(dvals_site)
+
+            if "zone" in site_df.columns and site_df["zone"].nunique(dropna=True) > 1:
+                raise NotImplementedError(
+                    f"{gid}: multi-zone MET forcing is not supported yet (found multiple zone values in the time series). "
+                    "For now, export with a single zone per gid."
+                )
 
             # site meta
             row = self.df_loc_norm[self.df_loc_norm["gid"] == gid]
@@ -533,22 +517,18 @@ class Exporter:
             lat = float(row["lat"].iloc[0])
             lon = float(row["lon"].iloc[0])
             lon0360 = float(row["lon_0-360"].iloc[0])
-            zone_val = row["zone"].iloc[0]
-            zone_str = str(int(zone_val)).zfill(2)
+            zone_str = "01"
 
             # site MET dir + zone mapping (lon, lat, zone, id for this gid)
             met_dir = self._met_dir_for_gid(gid)
             met_dir.mkdir(parents=True, exist_ok=True)
             zm_path = met_dir / "zone_mappings.txt"
             if not zm_path.exists():
-                zm = self._zone_mappings_table()
-                row_zm = zm[zm["gid"] == gid]
-                if row_zm.empty:
-                    # shouldn't happen, but don't crash if df_loc_norm is out of sync
-                    continue
-                row_zm[["lon", "lat", "zone_str", "id"]].to_csv(
-                    zm_path, index=False, header=False, sep="\t"
-                )
+                # sites output: write per-site zone_mappings with id=1
+                pd.DataFrame(
+                    [[lon0360, lat, zone_str, 1]],
+                    columns=["lon", "lat", "zone_str", "id"],
+                ).to_csv(zm_path, index=False, header=False, sep="	")
 
             # each var: per-site packing + write/append
             for v in self.var_cols:
@@ -563,24 +543,16 @@ class Exporter:
                     rep = float(np.nanmin(vals)) if np.isfinite(vals).any() else 0.0
                     ao, sf = float(rep), 1.0
 
-                source_tag = getattr(self.adapter, "DRIVER_TAG", "ERA5")
-                path_nc = met_dir / self._format_nc_filename(
-                    filename or "{var}_z{zone}.nc",
-                    var=v,
-                    source=source_tag,
-                    years=years_span,
-                    gid=gid,
-                    zone=zone_str,
-                )
+                path_nc = met_dir / self._nc_filename(v)
                 if not path_nc.exists():
                     initialize_met_netcdf(
                         path_nc=path_nc,
                         var_name=v,
                         dims=('n','DTIME'),
-                        dim_lengths={'n': 1, 'DTIME': self.nt},
+                        dim_lengths={'n': 1, 'DTIME': nt_site},
                         dtime_name='DTIME',
-                        dtime_vals=self.dtime_vals,
-                        dtime_units=self.dtime_units_out,
+                        dtime_vals=dvals_site,
+                        dtime_units=dtime_units_out,
                         calendar=self.calendar,
                         coord_specs=[
                             {"name":"LATIXY","dtype":"f4","dims":("n",),"data":np.array([lat], dtype="float32"),
@@ -591,36 +563,47 @@ class Exporter:
                         add_offset=float(ao), scale_factor=float(sf),
                         dtype="i2", fill_value=32767,
                         chunks=self.chunks, write_pattern="by_site",
-                        append_attrs=nc_attrs, nc_format="NETCDF4_CLASSIC",
+                        append_attrs=nc_attrs,
+                        var_attrs=self._var_attrs(v),
+                        nc_format="NETCDF4_CLASSIC",
                     )
 
                 append_met_netcdf(
                     path_nc=path_nc,
                     var_name=v,
                     data=vals,
-                    indexers={"n": 0, "DTIME": slice(0, self.nt)},
+                    indexers={"n": 0, "DTIME": slice(0, nt_site)},
                 )
 
-        print("elm-sites export complete.")
+        print("sites export complete.")
 
     # ---------------------- private: helpers ----------------------
 
-    def _resolve_pack_scope(self, output_mode, pack_scope):
+    def _resolve_pack_scope(self, dom_mode: str, pack_scope):
+        """Determine packing strategy given Domain.mode and an optional override."""
         if pack_scope is None:
-            return "per-site" if output_mode == "elm-sites" else "global"
-        if output_mode == "elm-combined" and pack_scope != "global":
-            raise ValueError(f"{output_mode} requires pack_scope='global'.")
-        if output_mode == "elm-sites" and pack_scope not in ("per-site", "per_site", "site", "local"):
-            return "per-site"
-        return "per-site" if output_mode == "elm-sites" else "global"
+            return "per-site" if dom_mode == "sites" else "global"
 
-    def _file_attrs(self, output_mode: str, pack_scope: str) -> dict:
+        ps = str(pack_scope).strip().lower().replace("_", "-")
+        if dom_mode == "cellset":
+            if ps != "global":
+                raise ValueError("Domain(mode='cellset') requires pack_scope='global'.")
+            return "global"
+
+        # sites: keep it simple/strict for now
+        if ps in {"per-site", "site", "local"}:
+            return "per-site"
+        if ps in {"per", "per-site"}:
+            return "per-site"
+        return "per-site"
+
+    def _file_attrs(self, dom_mode: str, pack_scope: str) -> dict:
         """Merge user attrs with exporter provenance and return a new dict."""
         attrs = dict(self.append_attrs)  # copy user attrs if provided
 
         # Basic exporter provenance
         attrs.update({
-            "export_mode": output_mode,
+            "domain_mode": dom_mode,
             "pack_scope": pack_scope,
         })
 
@@ -669,6 +652,10 @@ class Exporter:
 
             df["gid"] = df["gid"].astype(str).str.strip()
 
+            # Prefer canonical site metadata from df_loc_norm (avoid merge suffixes)
+            # Some sources (notably FLUXNET variants) may include lat/lon columns.
+            df = df.drop(columns=[c for c in ("lat", "lon", "zone", "lon_0-360") if c in df.columns])
+
             merged = df.merge(self.df_loc_norm[["gid","lat","lon","zone"]], on="gid", how="inner")
             if merged.empty:
                 print("SKIP FILE: merge produced 0 rows.")
@@ -700,9 +687,9 @@ class Exporter:
                     continue
                 out = self.temp_dir / f"{gid}.parquet"
                 if out.exists():
-                    write(out, gdf, append=True)
+                    _parquet_write(out, gdf, append=True)
                 else:
-                    write(out, gdf)
+                    _parquet_write(out, gdf)
 
     def _pass1_to_parquet_raw(self):
         """
@@ -736,7 +723,7 @@ class Exporter:
                 raise KeyError("Expected a 'date' column in CSV input.")
 
             # Prefer canonical site metadata from df_loc_norm (avoid conflicts)
-            df = df.drop(columns=[c for c in ("lat", "lon", "zone") if c in df.columns])
+            df = df.drop(columns=[c for c in ("lat", "lon", "zone", "lon_0-360") if c in df.columns])
 
             merged = df.merge(
                 self.df_loc_norm[["gid", "lat", "lon", "zone"]],
@@ -760,9 +747,9 @@ class Exporter:
                 gdf = gdf.sort_values("date").drop_duplicates(subset="date", keep="last")
                 out = self.temp_dir / f"{gid}.parquet"
                 if out.exists():
-                    write(str(out), gdf, append=True)
+                    _parquet_write(out, gdf, append=True)
                 else:
-                    write(str(out), gdf)
+                    _parquet_write(out, gdf)
 
     def _compute_global_packing(self, parquet_files):
         vmin = {v: np.inf for v in self.var_cols}

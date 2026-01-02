@@ -9,7 +9,7 @@ import warnings
 
 from dapper.met.adapters.base import BaseAdapter
 from dapper.schemas.elm import elm_required_vars, is_nonnegative
-from dapper.utils import elm_utils as eu
+from dapper.elm import utils as eu
 
 
 class FluxnetAdapter(BaseAdapter):
