@@ -190,8 +190,38 @@ def sample_landuse_timeseries(
         weights=zw,
     )
 
-    order = tgt[gid_col].astype(str).tolist()
-    df0 = df_loc.set_index(gid_col).loc[order].reset_index()
+    # Normalize gid strings (defensive: avoids invisible whitespace / dtype issues)
+    df_loc[gid_col] = df_loc[gid_col].astype(str).str.strip()
+    tgt[gid_col] = tgt[gid_col].astype(str).str.strip()
+
+    order = tgt[gid_col].tolist()
+
+    # Align df_loc to targets without brittle .loc[...] indexing
+    cols = [gid_col]
+    for c in (lat_col, lon_col, weight_col):
+        if c in df_loc.columns:
+            cols.append(c)
+
+    df0 = tgt[[gid_col]].merge(df_loc[cols], on=gid_col, how="left")
+
+    # If anything is missing (or df_loc doesn't cover targets), derive lon/lat from geometry
+    if lat_col not in df0.columns:
+        df0[lat_col] = np.nan
+    if lon_col not in df0.columns:
+        df0[lon_col] = np.nan
+    if weight_col not in df0.columns:
+        df0[weight_col] = float(default_weight)
+
+    missing_ll = df0[lat_col].isna() | df0[lon_col].isna()
+    if missing_ll.any():
+        pts = tgt.geometry.apply(
+            lambda g: g if getattr(g, "geom_type", None) == "Point" else g.representative_point()
+        ).reset_index(drop=True)
+
+        df0.loc[missing_ll, lon_col] = [float(p.x) for p in pts[missing_ll.to_numpy()]]
+        df0.loc[missing_ll, lat_col] = [float(p.y) for p in pts[missing_ll.to_numpy()]]
+
+    df0[weight_col] = df0[weight_col].fillna(float(default_weight))
 
     spec = sampling.infer_latlon_spec(ds_src, lon_wrap=lon_wrap)
     od_lat_dim, od_lon_dim = spec.lat_dim, spec.lon_dim
