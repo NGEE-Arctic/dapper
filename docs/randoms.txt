@@ -1,2 +1,0 @@
-If you want 2 grid cells with the same met forcing but different surface/domain files - that's totally possible in the coupler bypass, as the CB just tries to match to the closest data point in the met forcing. if you only give it one point, it will use the same for both.
-

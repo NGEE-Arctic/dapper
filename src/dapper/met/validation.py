@@ -117,7 +117,22 @@ def make_quicklooks(
     if write_directory is None:
         if exporter is None:
             raise ValueError("Provide either `exporter` or `write_directory`.")
-        write_directory = exporter.write_directory
+
+        # Backwards/forwards compatible resolution of the export output root.
+        # Old Exporter used `write_directory`; refactor uses `group_dir`.
+        if getattr(exporter, "write_directory", None) is not None:
+            write_directory = exporter.write_directory
+        elif getattr(exporter, "group_dir", None) is not None:
+            write_directory = exporter.group_dir
+        elif getattr(exporter, "out_dir", None) is not None:
+            write_directory = exporter.out_dir
+        elif getattr(getattr(exporter, "domain", None), "run_dir", None) is not None:
+            write_directory = exporter.domain.run_dir
+        else:
+            raise AttributeError(
+                "Could not infer export output directory from exporter. "
+                "Pass write_directory=... explicitly."
+            )
     wd = Path(write_directory)
 
     out_dir = Path(out_dir) if out_dir is not None else (wd / "quicklooks")
@@ -334,7 +349,9 @@ def _quicklooks_elm_sites(
 
     for sd in subdirs:
         gid = sd.name
-        files = list(sd.glob("*.nc"))
+        met_dir = sd / "MET"
+        search_dir = met_dir if met_dir.exists() else sd
+        files = list(search_dir.glob("*.nc"))
         if not files:
             continue
 
@@ -395,9 +412,13 @@ def _quicklooks_elm_combined(
     df_loc_norm: pd.DataFrame,
     gids: Optional[List[str]],
 ) -> None:
-    from netCDF4 import Dataset as _DS, num2date as _n2d
+    from netCDF4 import Dataset as _DS
 
-    nc_files = list(wd.glob("*.nc"))
+    # --- find NetCDFs (support new layout: <run_dir>/MET/*.nc) ---
+    met_dir = wd / "MET"
+    search_dir = met_dir if met_dir.exists() else wd
+
+    nc_files = list(search_dir.glob("*.nc"))
     var_to_path = {}
     axis_src = None
     for p in nc_files:
@@ -420,21 +441,58 @@ def _quicklooks_elm_combined(
         t = _t_from_dtime_var(vt)
         lats = np.asarray(ds0.variables["lat"][:], dtype=float)
         lons = np.asarray(ds0.variables["lon"][:], dtype=float)
-    lat_key = {round(float(v), 6): i for i, v in enumerate(lats)}
-    lon_key = {round(float(v), 6): j for j, v in enumerate(lons)}
+
+    # Tolerances: enough to bridge float32/float64 representation noise,
+    # but still flag genuinely wrong coordinates.
+    def _step_tol(vals: np.ndarray, fallback: float) -> float:
+        u = np.unique(np.sort(vals))
+        if u.size < 2:
+            return fallback
+        step = np.min(np.diff(u))
+        return max(fallback, float(step) / 50.0)  # pretty tight
+
+    tol_lat = _step_tol(lats, fallback=1e-4)
+    tol_lon = _step_tol(lons, fallback=1e-4)
+
+    def _nearest_index(vals: np.ndarray, target: float) -> tuple[int, float, float]:
+        dif = np.abs(vals - target)
+        idx = int(dif.argmin())
+        return idx, float(vals[idx]), float(dif[idx])
 
     sel_gids = gids if gids else df_loc_norm["gid"].astype(str).tolist()
+
     for gid in sel_gids:
         row = df_loc_norm[df_loc_norm["gid"].astype(str) == str(gid)]
         if row.empty:
             print(f"[warn] gid not in df_loc_norm: {gid}")
             continue
-        plat = round(float(row["lat"].iloc[0]), 6)
-        plon = round(float(row["lon_0-360"].iloc[0]), 6)
-        iy = lat_key.get(plat, None); ix = lon_key.get(plon, None)
-        if iy is None or ix is None:
-            print(f"[warn] {gid}: cell ({plat},{plon}) not on output axes.")
-            continue
+
+        plat = float(row["lat"].iloc[0])
+
+        # Prefer lon_0-360 if present, else fall back to lon
+        if "lon_0-360" in row.columns:
+            plon = float(row["lon_0-360"].iloc[0])
+        else:
+            plon = float(row["lon"].iloc[0])
+
+        iy, lat_used, dlat = _nearest_index(lats, plat)
+
+        # lon wrap safety: try lon, lon+360, lon-360; pick closest
+        lon_cands = [plon, plon + 360.0, plon - 360.0]
+        best = None
+        for cand in lon_cands:
+            ix, lon_used, dlon = _nearest_index(lons, cand)
+            if best is None or dlon < best[2]:
+                best = (ix, lon_used, dlon, cand)
+        ix, lon_used, dlon, lon_cand_used = best
+
+        # Warn only if we're *meaningfully* off-axis
+        if dlat > tol_lat or dlon > tol_lon:
+            print(
+                f"[warn] {gid}: requested ({plat:.6f},{plon:.6f}) "
+                f"nearest axis ({lat_used:.6f},{lon_used:.6f}) "
+                f"Δ=({dlat:.3g},{dlon:.3g})"
+            )
 
         n = len(present); ncols = 3; nrows = int(np.ceil(n / ncols))
         fig, axes = plt.subplots(nrows, ncols, figsize=(ncols*5.0, nrows*2.6), sharex=True)
@@ -446,6 +504,7 @@ def _quicklooks_elm_combined(
                 arr = np.asarray(ds.variables[v][:, iy, ix])
                 if hasattr(arr, "mask"):
                     arr = np.ma.filled(arr, np.nan)
+
             ax = axes[i]
             ax.plot(t, arr, lw=0.8)
             ax.set_title(v, fontsize=10)
@@ -457,7 +516,7 @@ def _quicklooks_elm_combined(
         for j in range(n, len(axes)):
             axes[j].axis("off")
 
-        fig.suptitle(f"{gid}  ({plat}, {plon})", fontsize=12)
+        fig.suptitle(f"{gid}  ({lat_used:.5f}, {lon_used:.5f})", fontsize=12)
         fig.autofmt_xdate()
         fig.tight_layout(rect=[0,0,1,0.97])
         fig.savefig(out_dir / f"{gid}.png", dpi=150)
