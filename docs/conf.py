@@ -5,6 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
+# Ensure Sphinx can find src/ before installation
+import os
+import sys
+sys.path.insert(0, os.path.abspath("../src"))
+
+
 DOCS_DIR = Path(__file__).resolve().parent
 REPO_DIR = DOCS_DIR.parent
 SRC_DIR = REPO_DIR / "src"
