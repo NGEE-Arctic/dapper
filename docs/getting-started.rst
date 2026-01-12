@@ -3,62 +3,111 @@ Getting Started
 
 Before You Install
 ------------------
-For ``dapper`` to work properly, you will need to create a free account with `Google Earth Engine <https://code.earthengine.google.com/register>`_ if you don't have one.
+``dapper`` is designed to work with Google Earth Engine (GEE). To use the full workflow (including the tutorial notebooks), you will need:
 
-It is possible to make use of some ``dapper`` functionality without a GEE account, but tutorials, testing, etc. within ``dapper`` assume that the ``ee`` module is importable, and many of them assume that you can run ``ee.Authenticate()`` successfully.
+* A free GEE account and a GEE project
+* The ability to run ``ee.Authenticate()`` and ``ee.Initialize(...)`` from Python
+
+If you do not already have a GEE account, you can register here:
+`Google Earth Engine registration <https://code.earthengine.google.com/register>`_
+
+Some parts of ``dapper`` can be used without GEE, but most end-to-end tutorials assume that GEE authentication is working.
 
 
 Installation
-~~~~~~~~~~~~~~~~~~~~~~
-Due to ongoing ``dapper`` development, the only way to install the package currently is via a "live install." Instructions for this are provided below.
+~~~~~~~~~~~~
+``dapper`` is in active development.
 
-**Step 1**  
+* If you want the latest features and the most up-to-date tutorials, **a live (editable) install is recommended**.
+* If you want a stable snapshot that is easy to pin for reproducibility, install from **PyPI**.
 
-Clone this repository to your local machine. I recommend `Github Desktop <https://desktop.github.com/download/>`_ if you're not familiar with command-line git.
 
-**Step 2** 
+PyPI install (stable snapshot)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+This is the fastest way to install ``dapper`` without cloning the repo.
 
-Use the ``environment.yml`` file (it will be on your local machine in the root of the cloned repo) to create a virtual Python environment. You can use whatever package manager you prefer, but instructions here are for conda. I recommend installing `mamba <https://anaconda.org/conda-forge/mamba>`_ into your base environment to make package solving faster, but it's not necessary. If you do install it, you can just replace ``conda`` with ``mamba`` in the following commands.
+**Step 1**
 
-.. code-block:: bash
-
-   conda env create -f environment.yml  # This will automatically name your new environment "dapper" as it's specified in the environment.yml file
-
-**Step 3**  
-
-Perform a "live install" of the dapper repo using ``pip``. This allows you to update your local repo (via a *Fetch origin* in Github Desktop), and any new changes will be reflected immediately in the code that you're running. No need to recompile a package and reinstall it. 
-The following commands are for a Terminal/Command (or Anaconda) Prompt.
+Create and activate a clean environment (conda recommended):
 
 .. code-block:: bash
 
-   cd /path/to/cloned/dapper  # Navigate to where you cloned the repo
-   conda activate dapper      # Activate your dapper environment
-   pip install -e .           # Live-install the repo as an importable package
+   conda create -n dapper python=3.12
+   conda activate dapper
 
-**Step 4**  
+**Step 2**
 
-Test that your install works. Again, in a Terminal/Command Prompt shell:
+Install from PyPI:
 
 .. code-block:: bash
 
-   conda activate dapper 
-   ipython
-   import ee # Make sure you have ee installed--should be done automatically through environment.yml
-   from dapper.met.adapters import era5 # Just testing the ability to import dapper modules
+   pip install dapper-elm
 
-If you can import from the ``dapper`` package without error, you're good to go (but don't skip the next step).
+**Step 3**
 
-**Step 5** 
+Quick import test:
 
-If you haven't used the GEE API before, you'll need to authenticate before you can interact with GEE via Python. For more details, or if you get stuck, check out the `official guidance <https://developers.google.com/earth-engine/guides/auth>`_. However, it's likely the following code will work for you:
+.. code-block:: bash
+
+   python -c "import dapper; from dapper.met.adapters import era5; print('dapper import OK')"
+
+
+Live install (recommended)
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+A live install is the preferred setup if you expect to pull updates frequently while ``dapper`` evolves.
+
+**Step 1**
+
+Clone the repository to your local machine. If you're not comfortable with command-line git, `GitHub Desktop <https://desktop.github.com/download/>`_ works fine.
+
+**Step 2**
+
+Create the conda environment from ``environment.yml`` (recommended, since it tracks the dev dependencies used in the tutorials):
+
+.. code-block:: bash
+
+   cd /path/to/cloned/dapper
+   conda env create -f environment.yml
+   conda activate dapper
+
+**Step 3**
+
+Perform a live (editable) install:
+
+.. code-block:: bash
+
+   pip install -e .
+
+**Step 4**
+
+Quick import test:
+
+.. code-block:: bash
+
+   python -c "import dapper; from dapper.met.adapters import era5; print('dapper live install OK')"
+
+**Step 5**
+
+Keeping your live install up to date (typical workflow):
+
+.. code-block:: bash
+
+   cd /path/to/cloned/dapper
+   git pull
+   # no reinstall needed; your environment is using the repo checkout
+
+
+Google Earth Engine authentication
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+If you haven't used the GEE API before, you'll need to authenticate. The first time you run this, it should open a browser to grant access to your GEE account.
 
 .. code-block:: bash
 
    conda activate dapper
    ipython
    import ee
-   ee.Authenticate()  # This should open a browser to allow access to your GEE account and project
-   ee.Initialize(project='ee-yourprojectname')  # replace ee-yourprojectname with your actual GEE project name
+   ee.Authenticate()
+   ee.Initialize(project="ee-yourprojectname")  # replace with your actual GEE project name
 
-You will (should) not need to run ``ee.Authenticate()`` again as it stores your credentials locally.  
-You will, however, have to run ``ee.Initialize(project='my_project')`` each time you use the GEE Python API.
+You should not need to run ``ee.Authenticate()`` again (credentials are cached locally).
+You will, however, need to run ``ee.Initialize(project="...")`` in each fresh Python session.
