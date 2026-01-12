@@ -1,4 +1,6 @@
 # dapper/met/adapters/era5.py
+"""ERA5-Land adapter implementation."""
+
 from __future__ import annotations
 import numpy as np
 import pandas as pd
@@ -14,10 +16,10 @@ from dapper.elm import utils as eu  # for compute_humidities, packing defaults
 class ERA5Adapter(BaseAdapter):
     """ERA5-Land → ELM adapter.
 
-    This adapter implements the `BaseAdapter` interface for ERA5-Land hourly data.
+    This adapter implements the ``BaseAdapter`` interface for ERA5-Land hourly data.
     It handles source-specific details—file discovery, unit conversions, humidity
-    diagnostics, renaming to ELM short names, and nonnegativity enforcement—so the
-    upstream `Exporter` can remain source-agnostic.
+    diagnostics, renaming to ELM short names, and nonnegativity enforcement, so the
+    upstream ``Exporter`` can remain source-agnostic.
 
     Responsibilities
     ----------------
@@ -26,79 +28,28 @@ class ERA5Adapter(BaseAdapter):
     - **normalize_locations**: Validate and normalize the locations table
       (adds ``lon_0-360``, ensures/creates ``zone``, stable sorting).
     - **id_column_for_csv**: Declare the identifier column name in the input
-      CSVs. For ERA5 we require **``"gid"``**.
+      CSVs. For ERA5 we require ``gid``.
     - **preprocess_shard**: Convert one merged shard (CSV rows joined to
       locations) into canonical ELM columns. Steps include:
-      1) time filtering and optional “noleap” removal of Feb 29,
-      2) ERA5→ELM unit conversions (e.g., J/hr/m² → W/m², m/hr → mm/s),
-      3) optional humidity computation (RH/Q) if temperature, dewpoint, and
-         surface pressure are available,
-      4) renaming raw ERA5 fields to ELM short names via a mapping,
-      5) clipping canonical nonnegative variables,
-      6) returning only required columns in a deterministic order.
+
+      1. time filtering and optional “noleap” removal of Feb 29
+      2. ERA5→ELM unit conversions (e.g., J/hr/m² → W/m², m/hr → mm/s)
+      3. optional humidity computation (RH/Q) if temperature, dewpoint, and
+         surface pressure are available
+      4. renaming raw ERA5 fields to ELM short names via a mapping
+      5. clipping canonical nonnegative variables
+      6. returning only required columns in a deterministic order
+
     - **required_vars**: Report the canonical ELM variable names required for the
-      requested output format (e.g., ``"BYPASS"`` vs ``"DATM_MODE"``).
-    - **pack_params**: Provide robust (add_offset, scale_factor) for a canonical
+      requested output format.
+    - **pack_params**: Provide robust ``(add_offset, scale_factor)`` for a canonical
       ELM variable, given optional data to tune ranges.
-
-    Method Contracts
-    ----------------
-    discover_files(csv_directory, calendar) -> (csv_files, start_year, end_year)
-        Search ``csv_directory`` for ``*.csv`` and compute the inclusive year
-        bounds consistent with ``calendar`` (e.g., remove Feb 29 for ``"noleap"``).
-
-    normalize_locations(df_loc) -> pandas.DataFrame
-        Input must contain at least ``{"gid","lat","lon"}``.
-        Returns a new DataFrame with:
-        - ``gid`` coerced to stripped strings (no nulls),
-        - ``lon_0-360`` added (modulo 360),
-        - ``zone`` present (created if missing; default zone=1 if missing),
-        - rows sorted by (lat, lon).
-
-    id_column_for_csv(df_csv, id_col) -> str
-        Returns the name of the identifier column expected in CSVs.
-        For ERA5, this is always **``"gid"``** (raises if absent).
-
-    preprocess_shard(df_merged, start_year, end_year, calendar, dformat) -> pandas.DataFrame
-        Accepts a merged shard that already includes ERA5 raw fields plus
-        ``["gid","lat","lon","zone","date"]``. Produces a DataFrame containing
-        a subset of canonical ELM variables (short names) plus coordinates and
-        metadata: ``["LONGXY","LATIXY","time","gid","zone"]``.
-
-    required_vars(dformat) -> list[str]
-        Returns the canonical ELM short names required for the given format
-        (delegates to the ELM schema).
-
-    pack_params(elm_var, data=None) -> tuple[float, float]
-        Returns ``(add_offset, scale_factor)`` for integer packing. If
-        ``data`` is provided, it may be used to compute robust ranges.
-
-    Assumptions & Inputs
-    --------------------
-    - Input CSVs are time-sharded (e.g., yearly) and contain at least a ``date``
-      column and **``gid``**.
-    - The locations table (``df_loc``) contains at least ``gid``, ``lat``, ``lon``;
-      ``zone`` is optional.
-    - Temperature variables are in kelvin; pressures are in pascals; ERA5
-      accumulated energy fluxes are in J/m² over the step; precipitation is in
-      meters over the step—this adapter converts as needed to ELM units.
 
     Notes
     -----
-    - Humidity computation (RH, specific humidity) is performed only when
-      ``temperature_2m``, ``dewpoint_temperature_2m``, and ``surface_pressure`` are present.
+    - Humidity computation is performed only when ``temperature_2m``,
+      ``dewpoint_temperature_2m``, and ``surface_pressure`` are present.
     - Precipitation conversion uses ``m/hr → mm/s`` via division by ``3.6``.
-    - Short-name mapping and “required var” lists come from your ELM schema/
-      config (e.g., ``RAW_TO_ELM``, ``elm_required_vars``); make sure those are imported.
-    - Nonnegativity checks rely on an ``is_nonnegative(name)`` helper; ensure it
-      matches your canonical variable set.
-
-    Potential Pitfalls
-    ------------------
-    - If CSVs or ``df_loc`` do not use **``"gid"``**, preprocessing will raise;
-      adapt or pre-rename columns before calling the exporter.
-    - The wind vector → speed diagnostic is included; ELM typically consumes the
-      magnitude (``WIND``) after short-name remapping.
     """
     # These are just for netCDF metadata
     SOURCE_NAME = "ERA5-Land hourly reanalysis"
@@ -107,6 +58,8 @@ class ERA5Adapter(BaseAdapter):
     # ---------------- discovery & locations ----------------
 
     def discover_files(self, csv_directory, calendar):
+        """Discover ERA5 CSV shards in a directory and infer the inclusive year range."""
+        
         csv_directory = Path(csv_directory)
 
         # ignore directories; only pick real files that end with .csv (case-insensitive)
@@ -123,6 +76,8 @@ class ERA5Adapter(BaseAdapter):
         return csv_files, start_year, end_year
 
     def id_column_for_csv(self, df_csv, id_col):
+        """Return the required identifier column name expected in ERA5 CSV shards ("gid")."""
+        
         if "gid" not in df_csv.columns:
             raise KeyError("Expected 'gid' column in input CSV.")
         return "gid"
@@ -191,12 +146,16 @@ class ERA5Adapter(BaseAdapter):
         return df.sort_values(["time", "LATIXY", "LONGXY"]).reset_index(drop=True)
 
     def required_vars(self, dformat):
+        """Return the canonical ELM variables required for the requested output format."""
+        
         return elm_required_vars(dformat)
 
     # ---------------- packing ----------------
 
     def pack_params(self, elm_var, data=None):
         # Delegate to your existing robust packer (range→offset/scale)
+        """Return (add_offset, scale_factor) used to pack a variable for NetCDF output."""
+        
         ao, sf = eu.elm_var_packing_params(elm_var, data=(data if data is not None else []))
         return float(ao), float(sf)
 

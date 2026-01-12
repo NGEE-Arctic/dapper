@@ -457,7 +457,7 @@ SURFACE_VAR_AGG_VALID = {
     "auto",        # resolve by dtype at runtime
     "derived",     # derived from Domain (e.g., area/coords)
 
-    # explicit reducers (implemented in dapper.utils.zonal)
+    # explicit reducers (implemented in dapper.geo.zonal)
     "wmean",
     "wmode",
     "max",

@@ -1,4 +1,4 @@
-dapper.surf.sample
+﻿dapper.surf.sample
 ==================
 
 .. automodule:: dapper.surf.sample
@@ -9,4 +9,10 @@ dapper.surf.sample
    .. autosummary::
    
       sample_point_values
+   
+   .. rubric:: Classes
+
+   .. autosummary::
+   
+      SurfacePointSampler
    

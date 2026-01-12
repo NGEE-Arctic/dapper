@@ -1,4 +1,6 @@
 # dapper/surf/sample.py
+"""dapper module: surf.sample."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -98,6 +100,8 @@ class SurfacePointSampler:
         self.global_attrs = dict(self.ds.attrs)
 
     def close(self) -> None:
+        """Close any underlying datasets/resources held by the sampler."""
+        
         try:
             self.ds.close()
         except Exception:
@@ -110,6 +114,8 @@ class SurfacePointSampler:
         self.close()
 
     def sample(self, lat: float, lon: float) -> Dict[str, Any]:
+        """Sample surface variables at the provided locations and return a dict of arrays."""
+        
         lon_norm = _normalize_lon_to_array(lon, self.lon_vec)
         i = int(np.abs(self.lat_vec - lat).argmin())
         j = int(np.abs(self.lon_vec - lon_norm).argmin())

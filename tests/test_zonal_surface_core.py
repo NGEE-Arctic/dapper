@@ -7,7 +7,7 @@ from shapely.geometry import box
 
 from dapper.surf.sfile import SurfaceFile
 import dapper.surf.surface_var_specs as svs
-from dapper.utils import zonal
+from dapper.geo import zonal
 
 
 class FakeDomain:
@@ -263,7 +263,7 @@ def test_zonal_weights_reuse_does_not_recompute(tmp_path):
     def _boom(*args, **kwargs):
         raise RuntimeError("intersect_weights_rectilinear should NOT be called when weights are provided")
 
-    import dapper.utils.zonal as zonal_mod
+    import dapper.geo.zonal as zonal_mod
     zonal_mod.intersect_weights_rectilinear = _boom  # blunt monkeypatch without pytest fixture
 
     out = zonal.sample_gridded_dataset_polygons(

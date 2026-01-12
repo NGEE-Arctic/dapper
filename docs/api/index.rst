@@ -1,8 +1,10 @@
 API Reference
 =============
 
-.. autosummary::
-   :toctree: generated
-   :recursive:
+This section documents the public Python API.
 
-   dapper
+.. toctree::
+   :maxdepth: 2
+
+   top_level
+   modules

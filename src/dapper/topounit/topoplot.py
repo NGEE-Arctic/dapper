@@ -1,6 +1,8 @@
 # topounits/plotting.py
 # Helpers for pretty legends + plotting topounits (GeoDataFrames) on basemaps.
 
+"""Plotting utilities for topounits and domains."""
+
 from __future__ import annotations
 import geopandas as gpd
 

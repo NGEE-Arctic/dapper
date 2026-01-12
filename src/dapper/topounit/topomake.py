@@ -1,3 +1,5 @@
+"""Topographic unit generation utilities."""
+
 try:
     import ee  # type: ignore
 except Exception:  # pragma: no cover
@@ -67,8 +69,7 @@ def _require_single_band_image(img, sid):
 # -----------------------------------
 
 def choose_hand_image(desired_scale=None, hand_edges=None, verbose=False):
-    """
-    Auto-select among available HAND products based on a desired scale (m)
+    """Auto-select among available HAND products based on a desired scale (m)
     and/or fixed edges. If edges extend >100 m, prefer *_1000 variants.
     Returns (hand_image_single_band, native_scale_m).
     """
@@ -750,8 +751,7 @@ def add_topounit_image_samples(
     ensure_pixel_centers=True,
     verbose=False,
 ):
-    """
-    Attach additional sampled properties from arbitrary GEE images to each
+    """Attach additional sampled properties from arbitrary GEE images to each
     topounit.
 
     Parameters

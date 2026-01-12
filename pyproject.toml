@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dapper"
-version = "0.1.0"
+version = "1.0"
 description = "Data Preprocessing for ELM Runs"
 authors = [{ name = "Dapper contributors", email = "dapper@lanl.gov" }]
 readme = "README.md"
@@ -35,4 +35,4 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["dapper"]
+include = ["dapper", "dapper.*"]

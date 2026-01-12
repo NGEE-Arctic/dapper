@@ -1,0 +1,9 @@
+/* docs/_static/dapper_custom.css */
+
+.scroll-x { overflow-x: auto; }
+.scroll-x table { width: max-content; max-width: 100%; }
+
+table.docutils td, table.docutils th {
+  vertical-align: top;
+  padding: 0.35rem 0.5rem;
+}

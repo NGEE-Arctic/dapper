@@ -1,3 +1,5 @@
+"""Surface file construction, customization, and validation helpers."""
+
 from typing import Dict, Any, Optional, Tuple, Union, List, Literal
 import tempfile
 from pathlib import Path
@@ -180,6 +182,8 @@ def write_surface_nc(
     dapper_attrs: dict | None = None,
     add_created_utc: bool = True,
 ) -> str:
+    """Write a surface Dataset to NetCDF with ELM-friendly defaults and merged attributes."""
+    
     import datetime as _dt
 
     # ---- global attrs ----
@@ -530,7 +534,7 @@ def _surface_zonal_agg_policy_from_registry(
 ) -> tuple[dict[str, str], set[str]]:
     """
     Returns:
-      - agg_policy: var -> reducer name understood by dapper.utils.zonal
+      - agg_policy: var -> reducer name understood by dapper.geo.zonal
       - derived_vars: vars whose registry agg == "derived"
     """
     include_set = set(include) if include else None
@@ -575,18 +579,20 @@ class SurfaceFile:
     """
     Unified interface for building and editing ELM/ELM-style surface files.
 
-    - Wraps an in-memory xarray.Dataset (self.ds).
-    - Knows about the surface-variable registry in dapper.surf.schema (SC.REGISTRY).
+    - Wraps an in-memory xarray.Dataset (``self.ds``).
+    - Knows about the surface-variable registry (``dapper.surf.schema``; ``SC.REGISTRY``).
     - Can be constructed from:
-        * an existing NetCDF path (from_netcdf)
-        * a point sampled from the global half-degree surface (from_halfdegree_point)
-        * a Domain (from_domain) – currently a light stub you can extend.
 
-    Parameters are added via `add_params_from_df`, which:
-    - creates the named dimension if it does not exist yet, using the
-      distinct values of `id_col` from the DataFrame
-    - adds / overwrites 1D variables whose names come directly from
-      DataFrame column names (except id_col + drop_cols)
+      * an existing NetCDF path (``from_netcdf``)
+      * a point sampled from the global half-degree surface (``from_halfdegree_point``)
+      * a Domain (``from_domain``); currently a light stub you can extend
+
+    Parameters are added via ``add_params_from_df``. That method:
+
+    - creates the named dimension if it does not exist yet, using the distinct
+      values of ``id_col`` from the DataFrame
+    - adds/overwrites 1D variables whose names come directly from DataFrame
+      column names (except ``id_col`` and ``drop_cols``)
     """
 
     def __init__(
@@ -629,7 +635,7 @@ class SurfaceFile:
     ) -> "SurfaceFile":
         """
         Sample the global half-degree surface at (lat, lon) and return a 1x1 SurfaceFile.
-        Uses dapper.utils.sampling.sample_gridded_dataset_points.
+        Uses dapper.geo.sampling.sample_gridded_dataset_points.
         """
         ds_src = xr.open_dataset(src_path, decode_times=decode_times, chunks=chunks)
 
@@ -663,6 +669,8 @@ class SurfaceFile:
         lon_wrap: sampling.LonWrap = "auto",
         agg_policy: dict[str, str] | None = None,
     ) -> "SurfaceFile":
+        """Sample a global surface Dataset for a single-run Domain and return a SurfaceFile."""
+        
         if getattr(domain, "mode", None) == "sites":
             raise ValueError(
                 "SurfaceFile.from_domain expects a single-run Domain (mode='cellset'). "
@@ -1257,6 +1265,8 @@ class SurfaceFile:
         dapper_attrs: dict | None = None,
         add_created_utc: bool = True,
     ) -> str:
+        """Write this SurfaceFile to disk as NetCDF."""
+        
         path = Path(path)
 
         if path.exists() and not overwrite:

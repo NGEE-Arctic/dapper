@@ -1,4 +1,6 @@
 # dapper/met/exporter.py
+"""Meteorological data export pipelines."""
+
 import warnings
 import numpy as np
 import pandas as pd

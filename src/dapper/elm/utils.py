@@ -1,3 +1,5 @@
+"""dapper module: elm.utils."""
+
 import numpy as np
 import pandas as pd
 

@@ -1,4 +1,6 @@
 # Generic functions JPS
+"""Google Earth Engine helpers and sampling utilities."""
+
 try:
     import ee  # type: ignore
 except Exception:  # pragma: no cover
@@ -32,14 +34,10 @@ import pandas as pd
 import geopandas as gpd
 from pathlib import Path
 from datetime import datetime
+from shapely.ops import unary_union
 from shapely.geometry import Polygon, shape
 from dateutil.relativedelta import relativedelta
-from shapely.geometry import (
-        Point, Polygon, MultiPolygon,
-        LineString, MultiLineString,
-        GeometryCollection
-    )
-from shapely.ops import unary_union
+from shapely.geometry import Point, Polygon, MultiPolygon, LineString, MultiLineString, GeometryCollection
 
 from dapper.domains.domain import Domain
 from dapper.config.metsources import era5
@@ -287,6 +285,8 @@ def infer_id_field(columns, verbose=False):
 
 
 def kill_all_tasks(verbose=True):
+    """Cancel all Earth Engine tasks visible to the current account."""
+    
     tasks = ee.data.listOperations()
     for task in tasks:
         task_id = task["name"]
@@ -447,99 +447,68 @@ def featurecollection_to_df_loc(fc, name="gee"):
     dom = featurecollection_to_domain(fc, name=name)
     return dom.cells
 
-
 def sample_e5lh(params, domain_name=None, skip_tasks=False):
     """
-    Submit Google Earth Engine (GEE) export tasks for ERA5-Land Hourly time series
-    over many geometries (polygons or points), chunked by year range, and return a
-    locations table built from the submitted geometries.
+    Submit Google Earth Engine (GEE) export tasks for ERA5-Land Hourly time series.
 
-    This function prepares a GEE `ImageCollection` of
-    ``"ECMWF/ERA5_LAND/HOURLY"``; validates/expands requested bands; ensures each
-    geometry samples at least one native pixel center (falling back to points when
-    needed); partitions the requested date range into N-year batches; and (unless
-    ``skip_tasks=True``) starts one Drive export task per batch. It always returns a
-    small DataFrame derived from the final FeatureCollection (e.g., to persist `gid`
-    and coordinates locally).
+    This prepares the ERA5-Land Hourly ImageCollection (``"ECMWF/ERA5_LAND/HOURLY"``),
+    validates bands, ensures each geometry samples at least one pixel center (falling
+    back to points when needed), batches the requested date range into N-year chunks,
+    and (unless ``skip_tasks=True``) starts one Drive export task per batch.
 
     Parameters
     ----------
     params : dict
         Configuration dictionary. Expected keys (case-sensitive):
 
-        - **start_date** : str  
-          Start date in ``"YYYY-MM-DD"``.
+        - **start_date** (str): Start date in ``"YYYY-MM-DD"``.
+        - **end_date** (str): End date in ``"YYYY-MM-DD"``.
+        - **geometries**: One of the following:
 
-        - **end_date** : str  
-          End date in ``"YYYY-MM-DD"``.
+          * **str**: GEE asset ID for a FeatureCollection (e.g., ``"users/me/my_fc"``).
+          * **ee.FeatureCollection**: a pre-constructed collection.
+          * **GeoDataFrame**: must contain geometry and an ID column (see ``geometry_id_field``).
+          * **AOI**: ``dapper.domains.aoi.AOI`` instance; uses its internal GeoDataFrame.
+          * **Domain**: ``dapper.domains.domain.Domain`` instance; uses ``Domain.to_geometries()``.
 
-        - **geometries** : Union[str, ee.FeatureCollection, geopandas.GeoDataFrame, AOI, Domain]
-        One of:
-        * **str**: GEE asset ID for a FeatureCollection (e.g., "users/me/my_fc").
-        * **ee.FeatureCollection**: a pre-constructed collection.
-        * **GeoDataFrame**: must contain the geometry column and an ID column (see ``geometry_id_field``).
-        * **AOI**: ``dapper.domains.aoi.AOI`` instance; uses its internal GeoDataFrame (``gid`` + geometry).
-        * **Domain**: ``dapper.domains.domain.Domain`` instance; uses ``Domain.to_geometries()`` to get ``gid`` + geometry.
+        - **geometry_id_field** (str, optional): ID column in provided geometries.
+          Defaults to ``"gid"``. Values are copied into the ``"gid"`` property on each feature.
+        - **gee_bands** (str or list[str]): Which ERA5-Land bands to export. One of:
 
-        - **geometry_id_field** : str, optional  
-          Name of the ID column in the provided geometries. Defaults to ``"gid"``.
-          The value is copied into a property named ``"gid"`` on each feature.
+          * ``"all"``: all available bands (from ``era5.ALL_BANDS``)
+          * ``"elm"``: bands required to derive ELM variables (from ``era5.REQUIRED_RAW_BANDS``)
+          * a list of band names validated against the collection
 
-        - **gee_bands** : Union[str, list[str]]  
-          Which ERA5-Land bands to export. One of:
-          * ``"all"`` – use all available bands (from ``era5.ALL_BANDS``).
-          * ``"elm"`` – only bands required to derive ELM variables
-            (from ``era5.REQUIRED_RAW_BANDS``).
-          * list of band names – must be valid for the collection; validated via
-            ``validate_bands(..., gee_ic="ECMWF/ERA5_LAND/HOURLY")``.
+        - **gdrive_folder** (str): Google Drive folder name where CSV chunks are written.
+        - **job_name** (str): Base name used to build per-batch export descriptions/filenames.
+        - **gee_scale** (str or int or float): Sampling scale in meters. If ``"native"`` (or
+          a value < 11132), the native ERA5-Land scale of **11132 m** is used.
+        - **gee_years_per_task** (int, optional): Years per export batch (default: ``5``).
 
-        - **gdrive_folder** : str  
-          Google Drive folder name where CSV chunks are written.
+        The function sets ``params["gee_ic"] = "ECMWF/ERA5_LAND/HOURLY"`` internally.
 
-        - **job_name** : str  
-          Base name used to build per-batch export descriptions / filenames.
-
-        - **gee_scale** : Union[str, int, float]  
-          Sampling scale in meters. If ``"native"`` or a value < 11132, the native
-          ERA5-Land scale of **11132 m** is used. Otherwise, the numeric value is used.
-
-        - **gee_years_per_task** : int, optional  
-          Years per export batch. Defaults to ``5`` if not provided.
-
-        The function also sets ``params["gee_ic"] = "ECMWF/ERA5_LAND/HOURLY"`` internally.
+    domain_name : str, optional
+        Optional name for the returned Domain.
 
     skip_tasks : bool, default False
-        If ``True``, do everything except starting the GEE export tasks. Useful for
-        dry-runs to validate band names, date partitioning, and geometry handling.
+        If True, do everything except starting the GEE export tasks.
 
     Returns
     -------
-    dapper.domain.Domain
-        Domain describing the sampling locations. The underlying GeoDataFrame
-        (``domain.gdf``) contains at least ``"gid"``, ``"lon"``, ``"lat"``, plus
-        metadata columns such as ``"method"`` and ``"sampled_geometry"``.
+    Domain
+        Domain describing the sampling locations. The underlying GeoDataFrame contains
+        at least ``"gid"``, ``"lon"``, and ``"lat"``.
 
     Notes
     -----
-    - **Authentication**: Call ``ee.Initialize()`` (and sign in) before using this function.
-    - **Pixel-center alignment**: ERA5-Land Hourly is sampled at ~11.1 km native
-      resolution. Polygons that fail to include a pixel center can yield empty
-      samples; this function calls
-      ``ensure_pixel_centers_within_geometries(...)`` using a representative image
-      to guard against that (potentially converting polygons to points).
-    - **Batching**: Date batching is computed by
-      ``determine_gee_batches(start_date, end_date, max_date, years_per_task, ...)``.
-      Each batch becomes a single Drive export of all requested bands and all features.
-    - **Selectors**: CSVs include ``["gid", "date"] + params["gee_bands"]``.
-    - **Time stamps**: Dates are produced from ``system:time_start`` and formatted as
-      ``"YYYY-MM-dd HH:mm"`` in UTC.
+    - Call ``ee.Initialize()`` before using this function.
+    - CSV selectors include ``["gid", "date"] + params["gee_bands"]``.
+    - Dates are derived from ``system:time_start`` and formatted in UTC.
 
     Raises
     ------
     KeyError
-        If required keys are missing from ``params`` (e.g., ``gee_bands``,
-        ``gee_scale``, ``geometries``, ``start_date``, ``end_date``, ``gdrive_folder``,
-        or ``job_name``).
+        If required keys are missing from ``params``.
     ValueError
         If dates are malformed or ``geometries`` is an unsupported type.
     TypeError
@@ -549,21 +518,22 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
 
     Examples
     --------
-    >>> params = {
-    ...     "start_date": "1950-01-01",
-    ...     "end_date": "1951-12-31",
-    ...     "geometries": "users/me/my_sites_fc",
-    ...     "geometry_id_field": "gid",
-    ...     "gee_bands": "elm",
-    ...     "gee_scale": "native",
-    ...     "gee_years_per_task": 5,
-    ...     "gdrive_folder": "era5_exports",
-    ...     "job_name": "era5l_sites"
-    ... }
-    >>> df_loc = sample_e5lh(params)   # starts Drive export tasks
-    >>> df_loc.head()
-    """
+    ::
 
+        params = {
+            "start_date": "1950-01-01",
+            "end_date": "1951-12-31",
+            "geometries": "users/me/my_sites_fc",
+            "geometry_id_field": "gid",
+            "gee_bands": "elm",
+            "gee_scale": "native",
+            "gee_years_per_task": 5,
+            "gdrive_folder": "era5_exports",
+            "job_name": "era5l_sites",
+        }
+        domain = sample_e5lh(params)
+        domain.gdf.head()
+    """
     # Populate and validate requested bands
     if params["gee_bands"] == "all":
         params["gee_bands"] = era5.ALL_BANDS

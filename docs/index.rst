@@ -1,5 +1,7 @@
-Dapper Documentation
+dapper documentation
 ====================
+
+dapper is a toolkit for preparing ELM-ready inputs from common meteorological and land surface datasets.
 
 .. toctree::
    :maxdepth: 2
@@ -16,7 +18,7 @@ Dapper Documentation
 
 .. toctree::
    :maxdepth: 2
-   :caption: API
+   :caption: API Reference
 
    api/index
 
@@ -24,4 +26,10 @@ Dapper Documentation
    :maxdepth: 2
    :caption: Reference
 
-   surface-variables
+   reference/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: About
+
+   README

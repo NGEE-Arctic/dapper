@@ -1,3 +1,5 @@
+"""dapper module: io.attrs."""
+
 from __future__ import annotations
 
 from datetime import date, datetime

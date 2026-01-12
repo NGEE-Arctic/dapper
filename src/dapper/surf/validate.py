@@ -1,4 +1,6 @@
 # dapper/surf/validate.py
+"""dapper module: surf.validate."""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -24,9 +26,8 @@ class SurfaceValidator:
 
     Primary (format/layout) checks
     ------------------------------
-    V-001  dims: lat/lon-like dims exist and both have length == 1 (ERROR)
-    V-002  dims.sizes: expected sizes for common dims (WARN)
-           - time=12, natpft=17, lsmpft=17, nlevsoi=10, nlevslp=11, numurbl=3, numrad=2, nlevurb=5
+    V-001  dims: lat/lon like dims exist and both have length == 1 (ERROR)
+    V-002  dims.sizes: expected sizes for common dims (WARN) e.g. time=12, natpft=17, lsmpft=17, nlevsoi=10, nlevslp=11, numurbl=3, numrad=2, nlevurb=5
     V-003  schema.required: required variables per SCHEMA are present (ERROR)
     V-004  schema.choose_one_of: at least one var present in each group (ERROR)
     V-005  schema.conditional: if driver present → dependent vars present (WARN)
@@ -37,8 +38,7 @@ class SurfaceValidator:
     V-010  units.present: 'units' attribute exists (WARN)
     V-011  units.match_registry: exact match when REGISTRY.units not ''/'varies' (WARN)
     V-012  fillvalue.sane: floats have _FillValue (NaN ok), ints do not rely on NaN (WARN)
-    V-013  coordinates.present: LATIXY/LONGXY present (WARN);
-          optional INFO: lat/lon coord ≈ LATIXY/LONGXY
+    V-013  coordinates.present: LATIXY/LONGXY present (WARN); optional INFO: lat/lon coord ≈ LATIXY/LONGXY
 
     Soft (non-blocking) checks
     --------------------------
@@ -80,6 +80,8 @@ class SurfaceValidator:
 
     # ---------- public API: path-only ----------
     def validate(self, nc_path: str) -> pd.DataFrame:
+        """Run validation on a surface NetCDF and return a structured report."""
+        
         if not isinstance(nc_path, (str, bytes)):
             raise TypeError("validate() expects a NetCDF file path (str).")
         ds = xr.open_dataset(nc_path)

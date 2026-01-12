@@ -1,3 +1,5 @@
+"""dapper module: io.fs."""
+
 from __future__ import annotations
 
 import os

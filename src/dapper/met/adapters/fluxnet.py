@@ -1,3 +1,5 @@
+"""dapper module: met.adapters.fluxnet."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,10 +16,10 @@ from dapper.elm import utils as eu
 
 class FluxnetAdapter(BaseAdapter):
     """
-    AmeriFlux FLUXNET (ONEFlux) → ELM adapter.
+    AmeriFlux FLUXNET → ELM adapter.
 
     Assumptions
-    ----------
+    -----------
     - User provides a *single* FLUXNET CSV (FULLSET or SUBSET) per run.
     - CSV contains TIMESTAMP_START/TIMESTAMP_END (or TIMESTAMP) columns.
     - Missing values are coded as -9999.

@@ -1,4 +1,6 @@
 # dapper/met/writers.py
+"""dapper module: met.writers."""
+
 from __future__ import annotations
 import numpy as np
 from pathlib import Path

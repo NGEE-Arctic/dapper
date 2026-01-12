@@ -1,4 +1,6 @@
 # elm_surface_registry.py
+"""dapper module: surf.schema."""
+
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Tuple, Iterable, Optional, Any

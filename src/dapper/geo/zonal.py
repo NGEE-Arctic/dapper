@@ -1,4 +1,6 @@
 # src/dapper/geo/zonal.py
+"""Zonal (area-weighted) sampling utilities."""
+
 from __future__ import annotations
 
 import warnings
@@ -57,6 +59,8 @@ def _bounds_1d(vec: np.ndarray) -> np.ndarray:
 
 @dataclass(frozen=True)
 class RectilinearGrid:
+    """Lightweight description of a rectilinear lat/lon grid in a consistent lon wrap."""
+    
     lat_dim: str
     lon_dim: str
     lon_wrap: Literal["0_360", "-180_180"]
@@ -65,10 +69,14 @@ class RectilinearGrid:
 
     @property
     def nlat(self) -> int:
+        """Number of latitude cells."""
+        
         return len(self.lat_bnds) - 1
 
     @property
     def nlon(self) -> int:
+        """Number of longitude cells."""
+        
         return len(self.lon_bnds) - 1
 
 
@@ -81,6 +89,8 @@ def infer_rectilinear_grid(
     lon_var: str | None = None,
     lon_wrap: LonWrap = "auto",
 ) -> RectilinearGrid:
+    """Infer a rectilinear grid specification (bounds and lon wrap) from a Dataset."""
+    
     spec = sampling.infer_latlon_spec(
         ds,
         lat_dim=lat_dim,
@@ -119,10 +129,11 @@ def _candidate_ij_for_bounds(grid: RectilinearGrid, bounds_lonlat) -> tuple[np.n
 
 @dataclass(frozen=True)
 class ZonalWeights:
-    """
-    by_gid[gid] is a DataFrame with columns:
-      i_lat, i_lon, intersect_area_m2, weight
-    weight is normalized to sum to 1 for that gid.
+    """Zonal intersection weights grouped by feature id.
+
+    - ``by_gid[gid]`` is a pandas DataFrame with columns:
+      ``i_lat``, ``i_lon``, ``intersect_area_m2``, ``weight``.
+    - ``weight`` is normalized to sum to 1 for that ``gid``.
     """
     by_gid: dict[str, pd.DataFrame]
     lon_wrap: Literal["0_360", "-180_180"]
@@ -140,6 +151,8 @@ def intersect_weights_rectilinear(
     lon_wrap: LonWrap = "auto",
     min_frac: float = 0.0,
 ) -> ZonalWeights:
+    """Compute area-weighted intersections between target polygons and a rectilinear grid."""
+    
     grid = infer_rectilinear_grid(
         ds, lat_dim=lat_dim, lon_dim=lon_dim,
         lat_var=lat_var, lon_var=lon_var, lon_wrap=lon_wrap

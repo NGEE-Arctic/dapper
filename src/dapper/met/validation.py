@@ -1,4 +1,6 @@
 # dapper/met/validation.py 
+"""dapper module: met.validation."""
+
 from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional, Dict, List

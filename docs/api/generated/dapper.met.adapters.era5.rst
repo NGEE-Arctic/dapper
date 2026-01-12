@@ -1,4 +1,4 @@
-dapper.met.adapters.era5
+﻿dapper.met.adapters.era5
 ========================
 
 .. automodule:: dapper.met.adapters.era5

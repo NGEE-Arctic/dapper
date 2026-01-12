@@ -1,3 +1,5 @@
+"""Point sampling and lightweight NetCDF helpers."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -138,7 +140,7 @@ def infer_grid_metadata(
     """
     Infer basic (regular) grid metadata for provenance.
 
-    Returns keys that are safe to stash in global attrs (namespaced with dapper_).
+    Returns keys that are safe to stash in global attrs (namespaced with  ``dapper``).
     If resolution can't be inferred reliably, values may be omitted.
     """
     spec = infer_latlon_spec(
@@ -304,6 +306,8 @@ def write_netcdf(
     dapper_attrs: dict | None = None,
     add_created_utc: bool = True,
 ) -> Path:
+    """Write a Dataset to NetCDF with optional encoding and attribute handling."""
+    
     out_path = Path(out_path)
 
     encoding = {}

@@ -1,4 +1,5 @@
 # dapper/domains/domain.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -146,6 +147,13 @@ class Domain:
         path_out: Optional[Union[str, Path]] = None,
         run_group: Optional[str] = None,
     ) -> "Domain":
+        """Construct a Domain from a provided geometry table.
+        
+        The input can be a GeoDataFrame (preferred) or a DataFrame with a geometry column.
+        Use *mode* to choose between a single-run cellset or a multi-run sites container.
+        If *cells* is not provided, cells are derived from the provided/support geometry depending on *cell_kind*.
+        """
+        
         prov = _ensure_geodf(provided, id_col=id_col)
 
         if mode is None:
@@ -189,6 +197,8 @@ class Domain:
     # Back-compat-ish alias (you said you don’t care, but it’s convenient while refactoring)
     @classmethod
     def from_gdf(cls, gdf: Union[gpd.GeoDataFrame, pd.DataFrame], **kwargs) -> "Domain":
+        """Alias for :meth:`Domain.from_provided`."""
+        
         return cls.from_provided(gdf, **kwargs)
 
     @classmethod
@@ -203,6 +213,8 @@ class Domain:
         path_out: Optional[Union[str, Path]] = None,
         run_group: Optional[str] = None,
     ) -> "Domain":
+        """Construct a single-feature Domain from a shapely geometry."""
+        
         gdf = gpd.GeoDataFrame({"gid": [gid], "geometry": [geometry]}, crs="EPSG:4326")
         return cls.from_provided(gdf, name=name, mode=mode, cell_kind=cell_kind,
                                  path_out=Path(path_out) if path_out is not None else None,
@@ -221,6 +233,8 @@ class Domain:
         path_out: Optional[Union[str, Path]] = None,
         run_group: Optional[str] = None,
     ) -> "Domain":
+        """Load a geospatial file (e.g., GeoPackage, Shapefile) and construct a Domain."""
+        
         path = Path(path)
         gdf = gpd.read_file(path, layer=layer) if layer else gpd.read_file(path)
         if gdf.crs is None:
@@ -313,6 +327,8 @@ class Domain:
     # ----------------------------- core helpers -----------------------------
 
     def copy(self, **updates) -> "Domain":
+        """Return a shallow copy of this Domain with updated fields."""
+        
         return replace(self, **updates)
 
     def __len__(self) -> int:
@@ -320,20 +336,23 @@ class Domain:
 
     @property
     def gids(self) -> list[str]:
+        """List of ``gid`` values (as strings) for the current cell table."""
+        
         return self.cells["gid"].astype(str).tolist()
 
     @property
     def gdf(self) -> gpd.GeoDataFrame:
         """Backwards-compat alias for older code.
 
-        Historically dapper carried a single GeoDataFrame on the domain object
-        (often a df_loc-style table with columns like gid/lon/lat/geometry).
-        In the refactor we split that into provided/support/cells; the closest
-        old behavior is `cells` (the run-level geometry table).
+        Historically dapper exposed a single GeoDataFrame on the domain object
+        (often a ``df_loc``-style table with columns like gid/lon/lat/geometry).
+        The closest equivalent is :attr:`cells` (the run-level geometry table).
         """
         return self.cells
 
     def ensure_cells_lon_lat(self) -> "Domain":
+        """Ensure ``cells`` contains ``lon`` and ``lat`` columns, derived from geometry if needed."""
+        
         cel = _ensure_lon_lat(self.cells)
         if cel is self.cells:
             return self
@@ -380,6 +399,8 @@ class Domain:
         raise ValueError(f"Unknown step={step!r}")
 
     def with_step_support(self, step: StepName, gdf: gpd.GeoDataFrame) -> "Domain":
+        """Attach a step-specific support GeoDataFrame (for "met" or "topounits")."""
+        
         gdf2 = _ensure_geodf(gdf, id_col="gid")
         if step == "met":
             return self.copy(met_support=gdf2)
@@ -462,15 +483,20 @@ class Domain:
 
     @property
     def group_name(self) -> str:
+        """Name of the output group directory for this Domain."""
+        
         return str(self.run_group or self.name)
 
     @property
     def run_dir(self) -> Path:
         """
         Directory holding the main run outputs for this Domain instance.
-        - For top-level cellset OR top-level sites container: path_out/<group_name>
-        - For per-site/per-cellset run domains (created by iter_runs in sites mode):
-            path_out/<group_name>/<domain.name>
+
+        For top-level cellset or top-level sites container:
+            ``path_out/<group_name>``
+
+        For per-site/per-cellset run domains (created by ``iter_runs`` in sites mode):
+            ``path_out/<group_name>/<domain.name>``
         """
         root = self._require_path_out()
         base = root / self.group_name
@@ -500,24 +526,36 @@ class Domain:
         return self.run_dir
 
     def path_met_dir(self, run_id: str | None = None) -> Path:
+        """Path to the MET output directory for this Domain (or a specific run_id)."""
+        
         return self._run_dir_for(run_id) / "MET"
 
     @property
     def met_dir(self) -> Path:
+        """Convenience property for :meth:`Domain.path_met_dir`."""
+        
         return self.path_met_dir()
 
     # --- canonical filenames (exporters can override, but these are the defaults) ---
 
     def path_domain_nc(self, filename: str = "domain.nc", run_id: str | None = None) -> Path:
+        """Default output path for the domain NetCDF for this Domain (or a specific run_id)."""
+        
         return self._run_dir_for(run_id) / filename
 
     def path_surface_nc(self, filename: str = "surfdata.nc", run_id: str | None = None) -> Path:
+        """Default output path for the surface NetCDF for this Domain (or a specific run_id)."""
+        
         return self._run_dir_for(run_id) / filename
 
     def path_landuse_nc(self, filename: str = "landuse_timeseries.nc", run_id: str | None = None) -> Path:
+        """Default output path for the landuse NetCDF for this Domain (or a specific run_id)."""
+        
         return self._run_dir_for(run_id) / filename
 
     def path_zone_mappings(self, filename: str = "zone_mappings.txt", run_id: str | None = None) -> Path:
+        """Default output path for ``zone_mappings.txt`` (under the MET directory)."""
+        
         return self.path_met_dir(run_id) / filename
 
 
@@ -575,6 +613,8 @@ class Domain:
         return out
 
     def has_topounits(self) -> bool:
+        """Return True if this Domain has a non-empty topounits table attached."""
+        
         return self.topounits is not None and len(self.topounits) > 0
 
 
