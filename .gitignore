@@ -19,3 +19,13 @@ Thumbs.db
 .vscode/
 .venv/
 .env
+
+# build artifacts
+dist/
+build/
+*.egg-info/
+
+# virtual envs
+.venv*/
+venv*/
+ENV*/
