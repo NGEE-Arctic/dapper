@@ -34,6 +34,7 @@ Feel free to fork or branch the repo and make improvements. Open a pull request 
 - [Jemma Stachelek](https://github.com/jsta)
 - [Ross Spicer](https://github.com/rwspicer)
 - [Maggie Farley](https://github.com/maggiefarley)
+- [Claire Bachand](https://github.com/cbachand)
 
 ## Copyright/License
 O4898 (for copyright verification); see the [License](https://github.com/NGEE-Arctic/dapper/tree/main/license.md) file.
