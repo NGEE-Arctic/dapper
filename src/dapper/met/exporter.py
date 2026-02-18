@@ -633,7 +633,6 @@ class Exporter:
         for i, f in enumerate(self.csv_files):
             print(f"Processing file {i+1} of {len(self.csv_files)}: {f}")
             df = pd.read_csv(f, dtype={"gid": "string"})
-
             # Handle 'gid' column
             if "gid" not in df.columns:
                 # Single-site convenience: infer gid from df_loc_norm

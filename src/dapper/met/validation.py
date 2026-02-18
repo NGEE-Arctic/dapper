@@ -47,25 +47,56 @@ UNITS_RAW: Dict[str, str] = {
 
 def _t_from_dtime_var(vtime):
     """
-    Convert numeric DTIME (+ units) to pandas Timestamps for plotting,
-    avoiding cftime objects entirely.
+    Convert numeric DTIME (+ units) to python datetimes for plotting.
+
+    NOTE: We *must* respect the DTIME calendar attribute. In particular, when
+    calendar == "noleap" (365_day), adding real (Gregorian) timedeltas to a
+    pandas Timestamp will drift by one day after Feb 28 in leap years.
     """
-    import pandas as pd
-    import numpy as np
+    from datetime import datetime
 
     vals = np.asarray(vtime[:], dtype=float)
-    units = getattr(vtime, "units", "").lower()
-    origin = "1970-01-01 00:00:00"
-    if "since" in units:
-        origin = units.split("since", 1)[1].strip()
-    base = pd.to_datetime(origin)
+    units = getattr(vtime, "units", None)
+    cal = getattr(vtime, "calendar", "standard")
 
-    if "day" in units:
+    # Prefer CF-aware conversion (handles 'noleap' correctly).
+    if units:
+        try:
+            dts = num2date(vals, units=units, calendar=cal, only_use_cftime_datetimes=False)
+            dts = np.atleast_1d(dts)
+            out = []
+            for d in dts:
+                if isinstance(d, datetime):
+                    out.append(d)
+                else:
+                    # cftime -> python datetime (safe for noleap: it never produces Feb 29)
+                    sec_raw = float(getattr(d, "second", 0.0))
+                    sec = int(sec_raw)
+                    if hasattr(d, "microsecond"):
+                        usec = int(getattr(d, "microsecond", 0))
+                    else:
+                        usec = int(round((sec_raw - sec) * 1.0e6))
+                    out.append(
+                        datetime(
+                            int(d.year), int(d.month), int(d.day),
+                            int(getattr(d, "hour", 0)), int(getattr(d, "minute", 0)),
+                            sec, usec,
+                        )
+                    )
+            return out
+        except Exception:
+            pass
+
+    # Fallback: assume days/hours since origin in units string
+    units_l = (units or "").lower()
+    origin = "1970-01-01 00:00:00"
+    if "since" in units_l:
+        origin = units_l.split("since", 1)[1].strip()
+    base = pd.to_datetime(origin)
+    if "day" in units_l:
         t = base + pd.to_timedelta(vals, unit="D")
     else:
-        # default to hours if not clearly 'day'
         t = base + pd.to_timedelta(vals, unit="h")
-    # return something Matplotlib is happy with
     return t.to_pydatetime()
 
 # ----------------------- public entrypoint -----------------------
