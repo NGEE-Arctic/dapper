@@ -945,3 +945,6 @@ class Domain:
             rid = str(run_id)
             outputs[rid] = (group_dir / rid / "MET") if self.mode == "sites" else (group_dir / "MET")
         return outputs
+
+    def __str__(self) -> str:
+        return f"{self.cells}"
