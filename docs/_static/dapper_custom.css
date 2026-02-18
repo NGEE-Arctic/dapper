@@ -7,3 +7,17 @@ table.docutils td, table.docutils th {
   vertical-align: top;
   padding: 0.35rem 0.5rem;
 }
+
+.sidebar-drawer {
+    max-width: 8%;
+}
+
+.toc-drawer {
+	margin-left: auto;
+	max-width: 12%;
+}
+
+.content {
+    min-width: 82%;
+}
+
