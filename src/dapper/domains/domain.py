@@ -6,7 +6,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Optional, Union
 
-import math
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -946,3 +945,6 @@ class Domain:
             rid = str(run_id)
             outputs[rid] = (group_dir / rid / "MET") if self.mode == "sites" else (group_dir / "MET")
         return outputs
+
+    def __str__(self) -> str:
+        return f"{self.cells}"
