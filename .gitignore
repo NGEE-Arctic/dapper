@@ -29,3 +29,6 @@ build/
 .venv*/
 venv*/
 ENV*/
+
+# debug
+*.zip
