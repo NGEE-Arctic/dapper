@@ -89,8 +89,39 @@ def infer_rectilinear_grid(
     lon_var: str | None = None,
     lon_wrap: LonWrap = "auto",
 ) -> RectilinearGrid:
-    """Infer a rectilinear grid specification (bounds and lon wrap) from a Dataset."""
-    
+    """Infer a rectilinear grid specification (bounds and lon wrap) from a Dataset.
+
+    Preference order:
+      1) For rectilinear grids, use 1D coordinate vectors on (lat_dim, lon_dim) if present,
+         unless the caller explicitly provides lat_var/lon_var.
+      2) Otherwise fall back to sampling.infer_latlon_spec (e.g., LATIXY/LONGXY or provided vars).
+    """
+
+    # Prefer 1D coords on the dims for rectilinear grids.
+    # This avoids accidentally using derived 2D vars (LATIXY/LONGXY) that might be overridden.
+    if lat_var is None and lon_var is None and (lat_dim in ds.coords) and (lon_dim in ds.coords):
+        lat_da = ds.coords[lat_dim]
+        lon_da = ds.coords[lon_dim]
+        if lat_da.ndim == 1 and lon_da.ndim == 1:
+            lat_1d = np.asarray(lat_da.values, dtype=float)
+            lon_1d_raw = np.asarray(lon_da.values, dtype=float)
+
+            wrap = sampling.infer_lon_wrap(lon_1d_raw) if lon_wrap == "auto" else lon_wrap  # type: ignore[assignment]
+            if wrap not in ("0_360", "-180_180"):
+                raise ValueError(f"lon_wrap must resolve to '0_360' or '-180_180', got {wrap}")
+
+            # sampling.normalize_lon is scalar; vectorize here.
+            lon_1d = np.asarray([sampling.normalize_lon(float(v), wrap) for v in lon_1d_raw], dtype=float)
+
+            return RectilinearGrid(
+                lat_dim=lat_dim,
+                lon_dim=lon_dim,
+                lon_wrap=wrap,
+                lat_bnds=_bounds_1d(lat_1d),
+                lon_bnds=_bounds_1d(lon_1d),
+            )
+
+    # Fallback: infer from explicit lat/lon variables (e.g., LATIXY/LONGXY).
     spec = sampling.infer_latlon_spec(
         ds,
         lat_dim=lat_dim,
@@ -305,9 +336,21 @@ def sample_gridded_dataset_polygons(
         data_vars = [v for v in data_vars if v not in drop]
 
     # Determine dims (in case infer_latlon_spec changed them)
-    spec = sampling.infer_latlon_spec(ds, lat_dim=lat_dim, lon_dim=lon_dim, lat_var=lat_var, lon_var=lon_var, lon_wrap=lon_wrap)
-    lat_dim = spec.lat_dim
-    lon_dim = spec.lon_dim
+    # BUT: don't require 2D lat/lon vars for rectilinear grids where dims/coords already exist.
+    if (lat_dim in ds.dims) and (lon_dim in ds.dims):
+        # keep caller-provided dims
+        pass
+    else:
+        spec = sampling.infer_latlon_spec(
+            ds,
+            lat_dim=lat_dim,
+            lon_dim=lon_dim,
+            lat_var=lat_var,
+            lon_var=lon_var,
+            lon_wrap=lon_wrap,
+        )
+        lat_dim = spec.lat_dim
+        lon_dim = spec.lon_dim
 
     spatial_vars = [v for v in data_vars if (lat_dim in ds[v].dims and lon_dim in ds[v].dims)]
     non_spatial_vars = [v for v in data_vars if v not in spatial_vars]
