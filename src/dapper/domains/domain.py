@@ -6,7 +6,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Optional, Union
 
-import math
 import numpy as np
 import pandas as pd
 import geopandas as gpd
