@@ -1,4 +1,5 @@
 # docker buildx build --progress=plain -f Dockerfile -t dapper . 
+# docker run -it dapper /bin/bash
 
 # ----------------------------------------------------------------------
 # JupyterLab Notebook for analyzing E3SM-ELM land model output
@@ -24,6 +25,7 @@ RUN set -ex \
    'nc-time-axis' \
    'earthengine-api' \
    'geemap' \
+   'fastparquet' \
    'pygis' \
    ilamb>=2.7.3 \
    && mamba clean --all -f -y \
@@ -32,23 +34,16 @@ RUN set -ex \
    && fix-permissions "${CONDA_DIR}" \
    && fix-permissions "/home/${NB_USER}"
 
-# Make local directories to use with plotting of ELM output
-RUN mkdir "/home/${NB_USER}/vis_notebooks" \   
-   && mkdir "/home/${NB_USER}/inputdata" \
-   && mkdir "/home/${NB_USER}/output" \
-   && fix-permissions "/home/${NB_USER}/vis_notebooks" \
-   && fix-permissions "/home/${NB_USER}/inputdata" \
-   && fix-permissions "/home/${NB_USER}/output" \
-   && fix-permissions "/home/${NB_USER}"
-
 # Setup default user, when enter docker container
 USER ${NB_UID}
 WORKDIR "${HOME}"
 
-# Download, install dapper
-RUN git clone https://github.com/ngee-arctic/dapper \
-  && cd dapper \
-  && pip install -e .
+# Install dapper
+COPY --chown=${NB_UID} . "${HOME}/dapper"
+
+RUN \
+		cd "${HOME}/dapper" \
+		&& pip install -e .
 
 RUN \
 		python -c "import ILAMB; print(ILAMB.__version__)" \
