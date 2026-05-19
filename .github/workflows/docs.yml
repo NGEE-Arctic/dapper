@@ -54,7 +54,8 @@ jobs:
           python -c "import dapper; print('dapper imported from:', dapper.__file__)"
               
       - name: Build Sphinx
-        run: sphinx-build -b html docs docs/_build/html
+        run: |
+          sphinx-build -b html docs docs/_build/html
 
       # For pushes (main): hand off to Pages
       - name: Upload artifact for Pages

@@ -1,13 +1,11 @@
 from __future__ import annotations
-
-"""Sphinx configuration for dapper documentation."""
-
+import os
 from pathlib import Path
 import sys
 
+"""Sphinx configuration for dapper documentation."""
+
 # Ensure Sphinx can find src/ before installation
-import os
-import sys
 sys.path.insert(0, os.path.abspath("../src"))
 
 
@@ -21,6 +19,7 @@ author = "dapper contributors"
 
 try:
     import dapper  # noqa: F401
+
     release = getattr(dapper, "__version__", "")
 except Exception:
     release = ""
@@ -78,7 +77,7 @@ html_css_files = [
     "dapper_custom.css",
 ]
 
-python_use_unqualified_type_names = False # for handling mutiple imports of same name
+python_use_unqualified_type_names = False  # for handling mutiple imports of same name
 
 
 def _generate_surface_var_docs() -> None:
@@ -87,6 +86,7 @@ def _generate_surface_var_docs() -> None:
     if script.exists():
         # run via same interpreter to ensure imports resolve
         import subprocess
+
         subprocess.check_call([sys.executable, str(script)])
 
 
