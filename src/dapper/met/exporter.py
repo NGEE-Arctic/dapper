@@ -168,7 +168,7 @@ class Exporter:
         # (requires Domain.path_out to be set).
         self.group_dir = Path(out_dir) if out_dir is not None else self.domain.run_dir
 
-        self.calendar = calendar
+        self.calendar = dt.normalize_calendar(calendar)
         self.dtime_resolution_hrs = dtime_resolution_hrs
         self.dtime_units = dtime_units
         self.dformat = dformat

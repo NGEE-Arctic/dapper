@@ -6,6 +6,8 @@ import numpy as np
 from pathlib import Path
 from netCDF4 import Dataset
 
+from dapper.met.temporal import normalize_calendar
+
 # --------------------------- chunking helper ---------------------------
 
 def _infer_dt_hours(dtime_vals, dtime_units: str) -> float:
@@ -178,6 +180,7 @@ def initialize_met_netcdf(
     """
     path_nc = Path(path_nc)
     path_nc.parent.mkdir(parents=True, exist_ok=True)
+    calendar = normalize_calendar(calendar)
 
     # Auto-chunk if not provided
     if chunks is None:

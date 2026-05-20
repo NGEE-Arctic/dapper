@@ -102,7 +102,7 @@ class ERA5Adapter(BaseAdapter):
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date")
         df = df[(df["date"].dt.year >= start_year) & (df["date"].dt.year <= end_year)]
-        if str(calendar).lower() == "noleap":
+        if dt.is_noleap_calendar(calendar):
             df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
 
         # --- ERA5-specific unit conversions (kept local to adapter) ---

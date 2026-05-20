@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import warnings
 
+from dapper.met import temporal as dt
 from dapper.met.adapters.base import BaseAdapter
 from dapper.schemas.elm import elm_required_vars, is_nonnegative
 from dapper.elm import utils as eu
@@ -153,7 +154,7 @@ class FluxnetAdapter(BaseAdapter):
 
         # Year filtering / calendar
         df = df[(df["date"].dt.year >= start_year) & (df["date"].dt.year <= end_year)]
-        if str(calendar).lower() == "noleap":
+        if dt.is_noleap_calendar(calendar):
             df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
 
         # Ensure we have enough raw variables to build ELM vars

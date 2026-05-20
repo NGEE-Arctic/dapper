@@ -57,7 +57,8 @@ def _t_from_dtime_var(vtime):
 
     vals = np.asarray(vtime[:], dtype=float)
     units = getattr(vtime, "units", None)
-    cal = getattr(vtime, "calendar", "standard")
+    from dapper.met.temporal import normalize_calendar
+    cal = normalize_calendar(getattr(vtime, "calendar", "standard"))
 
     # Prefer CF-aware conversion (handles 'noleap' correctly).
     if units:

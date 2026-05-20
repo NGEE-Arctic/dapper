@@ -12,6 +12,29 @@ _CUMDAYS_NONLEAP = np.asarray(
     [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334], dtype=np.int64
 )
 
+_NOLEAP_CALENDAR_ALIASES = {
+    "noleap",
+    "no_leap",
+    "365_day",
+    "365day",
+}
+
+
+def normalize_calendar(calendar: str = "standard") -> str:
+    """Return a CF-compatible calendar name used consistently by dapper."""
+    cal = "standard" if calendar is None else str(calendar).strip().lower()
+    cal = cal.replace("-", "_").replace(" ", "_")
+    if not cal:
+        return "standard"
+    if cal in _NOLEAP_CALENDAR_ALIASES:
+        return "noleap"
+    return cal
+
+
+def is_noleap_calendar(calendar: str = "standard") -> bool:
+    """Return True when *calendar* is any supported no-leap calendar alias."""
+    return normalize_calendar(calendar) == "noleap"
+
 
 def _drop_feb29(times):
     """Drop Feb 29 timestamps from a 1D array-like of datetimes."""
@@ -22,6 +45,7 @@ def _drop_feb29(times):
 
 def _noleap_offset(dtime_units: str, target_times, ref_date):
     """Compute numeric offsets in a 365-day (noleap) calendar."""
+    dtime_units = str(dtime_units).strip().lower()
 
     tidx = pd.DatetimeIndex(target_times)
     ref = pd.Timestamp(ref_date)
@@ -34,28 +58,30 @@ def _noleap_offset(dtime_units: str, target_times, ref_date):
 
     ref_day0 = 365 * (ref.year - 1) + _CUMDAYS_NONLEAP[ref.month - 1] + (ref.day - 1)
 
-    # Fractional day from time-of-day
-    frac = (
-        tidx.hour.astype(np.float64) * 3600.0
-        + tidx.minute.astype(np.float64) * 60.0
-        + tidx.second.astype(np.float64)
-        + tidx.microsecond.astype(np.float64) / 1.0e6
-        + tidx.nanosecond.astype(np.float64) / 1.0e9
-    ) / 86400.0
-    ref_frac = (
+    # Use hours as the intermediate unit. This avoids tiny drift that made
+    # hourly "days since ..." values decode a few microseconds off.
+    seconds = (
+        np.asarray(tidx.hour, dtype=np.float64) * 3600.0
+        + np.asarray(tidx.minute, dtype=np.float64) * 60.0
+        + np.asarray(tidx.second, dtype=np.float64)
+        + np.asarray(tidx.microsecond, dtype=np.float64) / 1.0e6
+        + np.asarray(tidx.nanosecond, dtype=np.float64) / 1.0e9
+    )
+    ref_seconds = (
         ref.hour * 3600.0
         + ref.minute * 60.0
         + ref.second
         + ref.microsecond / 1.0e6
         + ref.nanosecond / 1.0e9
-    ) / 86400.0
+    )
 
-    days = (day0.astype(np.float64) + frac) - (float(ref_day0) + float(ref_frac))
+    hours = (day0 - ref_day0).astype(np.float64) * 24.0
+    hours = hours + (seconds - ref_seconds) / 3600.0
 
     if dtime_units == "days":
-        return days
+        return hours / 24.0
     if dtime_units == "hours":
-        return days * 24.0
+        return hours
     raise ValueError("Unsupported dtime_units: choose 'days' or 'hours'")
 
 
@@ -74,11 +100,14 @@ def create_dtime(
     if dtime_resolution_hrs <= 0:
         raise ValueError("dtime_resolution_hrs must be > 0.")
 
+    calendar = normalize_calendar(calendar)
+    dtime_units = str(dtime_units).strip().lower()
+
     df = df.copy()
     df["time"] = pd.to_datetime(df["time"])
     df = df.sort_values("time")
 
-    if calendar.lower() == "noleap":
+    if is_noleap_calendar(calendar):
         df = df[~((df["time"].dt.month == 2) & (df["time"].dt.day == 29))]
 
     # Variable categories (ELM-ish)
@@ -118,13 +147,15 @@ def create_dtime(
         target_times = pd.date_range(t0, t1, freq=rule, inclusive="both").to_numpy()
 
     # In noleap calendars we must *also* ensure the target grid contains no Feb 29.
-    if calendar.lower() == "noleap":
+    if is_noleap_calendar(calendar):
         target_times = _drop_feb29(target_times)
+    if len(target_times) == 0:
+        raise ValueError("No timestamps remain after applying calendar filtering.")
 
     ref_date = target_times[0]
 
     # Numeric DTIME
-    if calendar.lower() == "noleap":
+    if is_noleap_calendar(calendar):
         # IMPORTANT: DTIME must be computed in the declared calendar.
         # Using real (Gregorian) timedeltas in leap years will shift Mar 1 → Mar 2
         # and push the end of year into the next year when interpreted as 'noleap'.
@@ -189,7 +220,7 @@ def get_start_end_years(csv_filepaths, calendar: str = "standard"):
     dates["date"] = pd.to_datetime(dates["date"])
     dates.sort_values(by="date", inplace=True)
 
-    if calendar.lower() == "noleap":
+    if is_noleap_calendar(calendar):
         dates = dates[~((dates["date"].dt.month == 2) & (dates["date"].dt.day == 29))]
 
     dates["year"] = dates["date"].dt.year
