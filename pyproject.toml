@@ -23,9 +23,13 @@ dependencies = [
   "jupyter",
   "fastparquet",
   "netcdf4",
-  "intake-esm", # for Pangeo CMIP access
-  "gcsfs" # for Pangeo CMIP downloading
- ]
+  "intake-esm", # for Pangeo CMIP access # for Pangeo CMIP downloading
+  "gcsfs",
+  "jupytext>=1.19.3",
+  "matplotlib>=3.10.9",
+  "xyzservices>=2026.3.0",
+  "contextily>=1.7.0",
+]
 
 [project.urls]
 "Homepage" = "https://github.com/NGEE-Arctic/dapper"
@@ -37,3 +41,8 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["dapper", "dapper.*"]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.2.0",
+]
