@@ -57,7 +57,7 @@ class ERA5Adapter(BaseAdapter):
 
     # ---------------- discovery & locations ----------------
 
-    def discover_files(self, csv_directory, calendar):
+    def discover_files(self, csv_directory, calendar, *, clip_to_full_years=None):
         """Discover ERA5 CSV shards in a directory and infer the inclusive year range."""
         
         csv_directory = Path(csv_directory)
@@ -72,7 +72,13 @@ class ERA5Adapter(BaseAdapter):
         if not csv_files:
             raise FileNotFoundError(f"No .csv files found in {csv_directory}")
 
-        start_year, end_year = dt.get_start_end_years(csv_files, calendar=calendar)
+        if clip_to_full_years is None:
+            clip_to_full_years = True
+        start_year, end_year = dt.get_start_end_years(
+            csv_files,
+            calendar=calendar,
+            clip_to_full_years=bool(clip_to_full_years),
+        )
         return csv_files, start_year, end_year
 
     def id_column_for_csv(self, df_csv, id_col):

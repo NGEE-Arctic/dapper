@@ -5,7 +5,10 @@ import warnings
 import numpy as np
 import pandas as pd
 import datetime as _dt
+import inspect
 from pathlib import Path
+
+
 def _parquet_write(path, df, *, append: bool = False) -> None:
     """Write/append parquet using fastparquet.
 
@@ -16,6 +19,11 @@ def _parquet_write(path, df, *, append: bool = False) -> None:
     doesn't immediately fail in environments that haven't installed the optional
     Parquet dependency yet.
     """
+    df = df.copy()
+    for col in df.columns:
+        if pd.api.types.is_string_dtype(df[col].dtype):
+            df[col] = df[col].astype("object")
+
     try:
         from fastparquet import write as _fp_write
     except ModuleNotFoundError as e:
@@ -27,7 +35,7 @@ def _parquet_write(path, df, *, append: bool = False) -> None:
     _fp_write(str(path), df, append=bool(append))
 
 from dapper.io import fs as utils
-import dapper.met.temporal as dt 
+import dapper.met.temporal as dt
 from dapper.domains.domain import Domain
 from dapper.met.writers import initialize_met_netcdf, append_met_netcdf
 from dapper.geo.constants import LATLON_DECIMALS
@@ -102,6 +110,10 @@ class Exporter:
         Allow-/block-lists of ELM short names applied after preprocess. Meta
         columns ``{"gid","time","LATIXY","LONGXY","zone"}`` are always kept.
 
+    clip_to_full_years : bool or None, optional
+        Controls whether the discovered export year range is clipped to full
+        calendar years. ``None`` preserves the adapter default.
+
     Side Effects
     ------------
     - Creates a temporary directory of per-site parquet shards under ``out_dir``.
@@ -133,6 +145,7 @@ class Exporter:
         chunks=None,
         include_vars=None,
         exclude_vars=None,
+        clip_to_full_years: bool | None = None,
     ):
         """Create a MET exporter for a given Domain.
 
@@ -176,6 +189,7 @@ class Exporter:
         self.chunks = chunks
         self.include_vars = set(include_vars) if include_vars else None
         self.exclude_vars = set(exclude_vars) if exclude_vars else None
+        self.clip_to_full_years = clip_to_full_years
 
         # Meta columns we expect after preprocess
         self.meta_cols = {
@@ -244,9 +258,7 @@ class Exporter:
             self.df_loc_norm["zone"] = 1
 
         # Discover input shards
-        self.csv_files, self.start_year, self.end_year = self.adapter.discover_files(
-            self.src_path, self.calendar
-        )
+        self.csv_files, self.start_year, self.end_year = self._discover_files()
         self.group_dir.mkdir(parents=True, exist_ok=True)
 
         # 1) shards → parquet (ELM-prep)
@@ -378,6 +390,48 @@ class Exporter:
         long_name = self._elm_desc.get(var)
         if long_name:
             attrs["long_name"] = long_name
+        return attrs
+
+    def _attr_value(self, value):
+        if value is None:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if isinstance(value, (np.integer,)):
+            return int(value)
+        if isinstance(value, (np.floating,)):
+            return float(value)
+        text = str(value).strip()
+        return text if text else None
+
+    def _wkt_geometry_type(self, value):
+        text = self._attr_value(value)
+        if text is None:
+            return None
+        return text.split("(", 1)[0].strip().lower()
+
+    def _site_attrs(self, row: pd.Series) -> dict:
+        """Per-site metadata that should travel into each site NetCDF."""
+        attrs = {}
+        if "method" in row.index:
+            value = self._attr_value(row["method"])
+            if value is not None:
+                attrs["sampling_method"] = value
+        if "sampled_geometry" in row.index:
+            value = self._wkt_geometry_type(row["sampled_geometry"])
+            if value is not None:
+                attrs["sampling_geometry_type"] = value
+        if "source_file" in row.index:
+            value = self._attr_value(row["source_file"])
+            if value is not None:
+                attrs["source_geometry_file"] = value
+        if "feature_count" in row.index:
+            value = self._attr_value(row["feature_count"])
+            if value is not None:
+                attrs["source_feature_count"] = value
         return attrs
 
     def _clear_existing_outputs(self) -> None:
@@ -516,10 +570,12 @@ class Exporter:
             row = self.df_loc_norm[self.df_loc_norm["gid"] == gid]
             if row.empty:
                 continue
-            lat = float(row["lat"].iloc[0])
-            lon = float(row["lon"].iloc[0])
-            lon0360 = float(row["lon_0-360"].iloc[0])
+            site_row = row.iloc[0]
+            lat = float(site_row["lat"])
+            lon = float(site_row["lon"])
+            lon0360 = float(site_row["lon_0-360"])
             zone_str = "01"
+            site_attrs = self._site_attrs(site_row)
 
             # site MET dir + zone mapping (lon, lat, zone, id for this gid)
             met_dir = self._met_dir_for_gid(gid)
@@ -565,7 +621,7 @@ class Exporter:
                         add_offset=float(ao), scale_factor=float(sf),
                         dtype="i2", fill_value=32767,
                         chunks=self.chunks, write_pattern="by_site",
-                        append_attrs=nc_attrs,
+                        append_attrs={**nc_attrs, **site_attrs},
                         var_attrs=self._var_attrs(v),
                         nc_format="NETCDF4_CLASSIC",
                     )
@@ -580,6 +636,33 @@ class Exporter:
         print("sites export complete.")
 
     # ---------------------- private: helpers ----------------------
+
+    def _discover_files(self):
+        """Discover source files while preserving older adapter compatibility."""
+        discover = self.adapter.discover_files
+        try:
+            params = inspect.signature(discover).parameters
+        except (TypeError, ValueError):
+            params = {}
+
+        accepts_clip_kw = (
+            "clip_to_full_years" in params
+            or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        )
+        if accepts_clip_kw:
+            return discover(
+                self.src_path,
+                self.calendar,
+                clip_to_full_years=self.clip_to_full_years,
+            )
+
+        if self.clip_to_full_years is not None:
+            warnings.warn(
+                f"{self.adapter.__class__.__name__}.discover_files does not accept "
+                "'clip_to_full_years'; ignoring the requested value.",
+                UserWarning,
+            )
+        return discover(self.src_path, self.calendar)
 
     def _resolve_pack_scope(self, dom_mode: str, pack_scope):
         """Determine packing strategy given Domain.mode and an optional override."""
@@ -607,6 +690,13 @@ class Exporter:
         attrs.update({
             "domain_mode": dom_mode,
             "pack_scope": pack_scope,
+            "clip_to_full_years": (
+                "adapter_default"
+                if self.clip_to_full_years is None
+                else str(bool(self.clip_to_full_years)).lower()
+            ),
+            "export_start_year": int(self.start_year),
+            "export_end_year": int(self.end_year),
         })
 
         # Adapter-driven provenance

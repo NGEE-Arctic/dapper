@@ -3,7 +3,8 @@ import pandas as pd
 import pytest
 from netCDF4 import num2date
 
-from dapper.met.temporal import create_dtime, normalize_calendar
+from dapper.met.adapters.era5 import ERA5Adapter
+from dapper.met.temporal import create_dtime, get_start_end_years, normalize_calendar
 
 
 def _met_df(times):
@@ -27,6 +28,51 @@ def _decode_tuples(dtime_vals, dtime_units, calendar):
         only_use_cftime_datetimes=True,
     )
     return [(d.year, d.month, d.day, d.hour) for d in decoded]
+
+
+def _write_dates_csv(path, start, end, freq="1D"):
+    pd.DataFrame({"date": pd.date_range(start, end, freq=freq)}).to_csv(
+        path,
+        index=False,
+    )
+    return path
+
+
+def test_get_start_end_years_clips_partial_boundary_years_by_default(tmp_path):
+    csv_path = _write_dates_csv(tmp_path / "era5.csv", "2024-01-01", "2025-06-13")
+
+    assert get_start_end_years([csv_path], calendar="noleap") == (2024, 2024)
+
+
+def test_get_start_end_years_can_keep_partial_boundary_years(tmp_path):
+    csv_path = _write_dates_csv(tmp_path / "era5.csv", "2024-01-01", "2025-06-13")
+
+    assert get_start_end_years(
+        [csv_path],
+        calendar="noleap",
+        clip_to_full_years=False,
+    ) == (2024, 2025)
+
+
+def test_get_start_end_years_falls_back_when_no_full_year_exists(tmp_path):
+    csv_path = _write_dates_csv(tmp_path / "era5.csv", "2025-01-19", "2025-06-13")
+
+    assert get_start_end_years([csv_path], calendar="noleap") == (2025, 2025)
+
+
+def test_era5_adapter_discover_files_respects_clip_to_full_years(tmp_path):
+    _write_dates_csv(tmp_path / "era5.csv", "2024-01-01", "2025-06-13")
+    adapter = ERA5Adapter()
+
+    _, start_year, end_year = adapter.discover_files(tmp_path, calendar="noleap")
+    assert (start_year, end_year) == (2024, 2024)
+
+    _, start_year, end_year = adapter.discover_files(
+        tmp_path,
+        calendar="noleap",
+        clip_to_full_years=False,
+    )
+    assert (start_year, end_year) == (2024, 2025)
 
 
 def test_noleap_dtime_does_not_skip_march_1_after_leap_day():
@@ -110,3 +156,25 @@ def test_noleap_calendar_aliases_share_noleap_dtime_behavior(calendar):
         (2020, 3, 1, 1),
         (2020, 3, 1, 2),
     ]
+
+
+def test_downsample_keeps_rows_when_some_variables_are_all_nan():
+    times = pd.date_range("2020-01-01", "2020-01-01 06:00", freq="1h", inclusive="both")
+    df = _met_df(times)
+    df["TBOT"] = np.nan
+    df["FSDS"] = np.arange(len(df), dtype=float)
+
+    dtime_vals, dtime_units, aligned = create_dtime(
+        df,
+        calendar="noleap",
+        dtime_units="days",
+        dtime_resolution_hrs=3,
+    )
+
+    assert len(dtime_vals) == 3
+    assert aligned["time"].dt.strftime("%Y-%m-%d %H:%M").tolist() == [
+        "2020-01-01 00:00",
+        "2020-01-01 03:00",
+        "2020-01-01 06:00",
+    ]
+    assert aligned["FSDS"].notna().all()

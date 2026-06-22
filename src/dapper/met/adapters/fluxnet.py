@@ -41,7 +41,7 @@ class FluxnetAdapter(BaseAdapter):
     # ------------------------------------------------------------------
     # discovery
     # ------------------------------------------------------------------
-    def discover_files(self, csv_directory, calendar: str):
+    def discover_files(self, csv_directory, calendar: str, *, clip_to_full_years=None):
         p = Path(csv_directory)
 
         if p.is_file() and p.suffix.lower() == ".csv":
@@ -103,8 +103,13 @@ class FluxnetAdapter(BaseAdapter):
         if times.isna().all():
             raise ValueError("Could not parse any timestamps from FLUXNET CSV.")
 
-        start_year = int(times.dt.year.min())
-        end_year = int(times.dt.year.max())
+        if clip_to_full_years is None:
+            clip_to_full_years = False
+        start_year, end_year = dt.start_end_years_from_dates(
+            times,
+            calendar=calendar,
+            clip_to_full_years=bool(clip_to_full_years),
+        )
 
         return [csv_file], start_year, end_year
 

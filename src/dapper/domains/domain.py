@@ -594,6 +594,10 @@ class Domain:
         out[lon_col] = gdf["lon"].to_numpy(dtype="float64")
         out[lat_col] = gdf["lat"].to_numpy(dtype="float64")
 
+        for col in ("method", "sampled_geometry", "source_file", "feature_count"):
+            if col in gdf.columns:
+                out[col] = gdf[col].to_numpy()
+
         # Optional per-location zone labels (used by MET cellset decomposition).
         # If missing, default to 1. For sites-mode, exporters may override to a single zone.
         if "zone" in gdf.columns:
@@ -884,6 +888,7 @@ class Domain:
         overwrite: bool = False,
         append_attrs: dict | None = None,
         pack_scope=None,
+        clip_to_full_years: bool | None = None,
         **kwargs,
     ) -> dict[str, Path]:
         """
@@ -901,6 +906,9 @@ class Domain:
             Optional filename prefix for output NetCDFs. If provided, each var is written to '{filename}_{var}.nc'.
         overwrite : bool
             If False, raises if MET output(s) already exist.
+        clip_to_full_years : bool or None
+            Controls whether the export year range is clipped to complete
+            calendar years. None preserves the adapter default.
 
         Returns
         -------
@@ -932,6 +940,7 @@ class Domain:
             out_dir=group_dir,
             domain=self,
             append_attrs=append_attrs,
+            clip_to_full_years=clip_to_full_years,
             **kwargs,
         )
         ex.run(

@@ -135,7 +135,7 @@ def create_dtime(
         # Downsample (coarser): resample to the target cadence
         df = df.set_index("time")
         rule = f"{step_minutes}min"
-        df = df.resample(rule).mean(numeric_only=True).dropna().reset_index()
+        df = df.resample(rule).mean(numeric_only=True).dropna(how="all").reset_index()
         target_times = df["time"].drop_duplicates().sort_values().to_numpy()
     elif step_minutes == native_step_minutes:
         # Keep native timestamps (no-op)
@@ -210,25 +210,61 @@ def create_dtime(
     return dtime_vals.astype("float64"), dtime_attr, df_out
 
 
-def get_start_end_years(csv_filepaths, calendar: str = "standard"):
+def start_end_years_from_dates(
+    date_values,
+    calendar: str = "standard",
+    clip_to_full_years: bool = True,
+):
     """
-    Inspect CSVs (must contain a 'date' column) and return earliest/latest
-    full years present. If no full years, return min/max year in data.
+    Return the start/end years represented by a sequence of datetimes.
+
+    When ``clip_to_full_years`` is True, use the earliest/latest years that
+    contain both Jan 1 and Dec 31. If no full years are present, fall back to
+    the min/max years in the data.
     """
-    dates = [pd.read_csv(file, usecols=["date"]) for file in csv_filepaths]
-    dates = pd.concat(dates, ignore_index=True)
-    dates["date"] = pd.to_datetime(dates["date"])
+    dates = pd.DataFrame(
+        {"date": pd.to_datetime(pd.Series(date_values), errors="coerce")}
+    ).dropna(subset=["date"])
+    if dates.empty:
+        raise ValueError("No valid dates found while inferring start/end years.")
+
     dates.sort_values(by="date", inplace=True)
 
     if is_noleap_calendar(calendar):
         dates = dates[~((dates["date"].dt.month == 2) & (dates["date"].dt.day == 29))]
+        if dates.empty:
+            raise ValueError("No dates remain after applying noleap calendar filtering.")
 
     dates["year"] = dates["date"].dt.year
     dates["month_day"] = dates["date"].dt.month * 100 + dates["date"].dt.day
 
-    full = dates.groupby("year")["month_day"].agg(lambda x: {101, 1231}.issubset(set(x)))
-    full_years = full[full].index
+    if clip_to_full_years:
+        full = dates.groupby("year")["month_day"].agg(
+            lambda x: {101, 1231}.issubset(set(x))
+        )
+        full_years = full[full].index
 
-    if len(full_years) > 0:
-        return int(full_years[0]), int(full_years[-1])
+        if len(full_years) > 0:
+            return int(full_years[0]), int(full_years[-1])
+
     return int(dates["date"].dt.year.min()), int(dates["date"].dt.year.max())
+
+
+def get_start_end_years(
+    csv_filepaths,
+    calendar: str = "standard",
+    clip_to_full_years: bool = True,
+):
+    """
+    Inspect CSVs (must contain a 'date' column) and return earliest/latest
+    years present. By default, clip to full years when possible. If no full
+    years are present, or ``clip_to_full_years`` is False, return the min/max
+    year in data.
+    """
+    dates = [pd.read_csv(file, usecols=["date"]) for file in csv_filepaths]
+    dates = pd.concat(dates, ignore_index=True)
+    return start_end_years_from_dates(
+        dates["date"],
+        calendar=calendar,
+        clip_to_full_years=clip_to_full_years,
+    )

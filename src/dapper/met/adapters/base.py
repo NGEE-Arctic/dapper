@@ -14,7 +14,13 @@ class BaseAdapter(ABC):
 
     # ---------- discovery ----------
     @abstractmethod
-    def discover_files(self, csv_directory, calendar: str):
+    def discover_files(
+        self,
+        csv_directory,
+        calendar: str,
+        *,
+        clip_to_full_years: bool | None = None,
+    ):
         """Return (csv_files, start_year, end_year)."""
 
     # ---------- locations (default provided) ----------
