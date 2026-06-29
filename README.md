@@ -7,13 +7,35 @@
 
 
 ## About
-The E3SM Land Model (ELM) has become useful for a wide range of investigations across a broad array of scales--from single-site to global. Each ELM run requires a hefty set of data formatted in a particular way. Two of the required "types" of data are meteorological data (time series of "met forcings") and parameter files (customizable "surface file"). As ELM capability grows, the complexity of, for example, the surface files grows to accomodate new options and parameters. Additionally, met data is usually sampled at high temporal frequency (daily/subdaily). These data requirements place a large startup burden on (particularly new) users of ELM. 
+The E3SM Land Model (ELM) has become useful for a wide range of investigations
+across a broad array of scales--from single-site to global. Each ELM run
+requires a hefty set of data formatted in a particular way. Two of the required
+"types" of data are meteorological data (time series of "met forcings") and
+parameter files (customizable "surface file"). As ELM capability grows, the
+complexity of, for example, the surface files grows to accomodate new options
+and parameters. Additionally, met data is usually sampled at high temporal
+frequency (daily/subdaily). These data requirements place a large startup burden
+on (particularly new) users of ELM. 
 
-DaPPER provides tools to alleviate these burdens to some degree. DaPPER relies on Google Earth Engine and other APIs to make sampling met data and surface file data fast, scalable to very large domains, and flexible to different "types" of grid cells (e.g. arbitrary polygons like watersheds instead of rectangular grids). DaPPER is being developed with the goals of NGEE-Arctic Crosscut 3 in mind, which focuses on scaling and resolution experiments. However, the broader vision is to develop a toolkit that is useful across the E3SM project, not just NGEE. We also hope that DaPPER can provide some documentation and clarity regarding the creation and use of these input data, which to-date seems to be lacking.
+DaPPER provides tools to alleviate these burdens to some degree. DaPPER relies
+on Google Earth Engine and other APIs to make sampling met data and surface file
+data fast, scalable to very large domains, and flexible to different "types" of
+grid cells (e.g. arbitrary polygons like watersheds instead of rectangular
+grids). DaPPER is being developed with the goals of NGEE-Arctic Crosscut 3 in
+mind, which focuses on scaling and resolution experiments. However, the broader
+vision is to develop a toolkit that is useful across the E3SM project, not just
+NGEE. We also hope that DaPPER can provide some documentation and clarity
+regarding the creation and use of these input data, which to-date seems to be
+lacking.
 
-DaPPER is under development, which means that you should consider everything *beta* and subject to change daily. We try to alleviate this instability by maintaining a `dev` branch of the repo that can be very dynamic. The `main` branch is intended to be more stable. If you're not sure, just stick to the `main` repo.
+DaPPER is under development, which means that you should consider everything
+*beta* and subject to change daily. We try to alleviate this instability by
+maintaining a `dev` branch of the repo that can be very dynamic. The `main`
+branch is intended to be more stable. If you're not sure, just stick to the
+`main` repo.
 
-DaPPER's "lead developer" is Jon Schwenk at LANL, but many contribute code, ideas, and review (see Contributors below).
+DaPPER's "lead developer" is Jon Schwenk at LANL, but many contribute code,
+ideas, and review (see Contributors below).
 
 
 ## Getting started
@@ -23,7 +45,9 @@ Refer to the documentation [here](https://ngee-arctic.github.io/dapper/getting-s
 We have created some [jupyter notebooks](https://github.com/NGEE-Arctic/dapper/tree/main/docs/notebooks) to demonstrate ways to use `dapper` tools.
 
 ## Contributing & Contact
-Feel free to fork or branch the repo and make improvements. Open a pull request and we'll check it out. For suggestions and other general queations regarding `dapper`, email **dapper@lanl.gov**.
+Feel free to fork or branch the repo and make improvements. Open a pull request
+and we'll check it out. For suggestions and other general queations regarding
+`dapper`, email **dapper@lanl.gov**.
 
 ### Contributors
 
