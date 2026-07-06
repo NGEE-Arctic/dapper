@@ -713,7 +713,8 @@ class Domain:
             # preserve insertion order of dict keys
             sources = list(binning.keys())
 
-        return make_topounits_for_domain(
+        try:
+            make_topounits_for_domain(
             self,
             sources=sources,
             binning=binning,
@@ -728,6 +729,9 @@ class Domain:
             verbose=verbose,
             allow_slow_ncells=allow_slow_ncells,
         )
+        except RuntimeError as e:
+            print(e)
+            return None
 
     # ----------------------------- optional layout helper -----------------------------
 
