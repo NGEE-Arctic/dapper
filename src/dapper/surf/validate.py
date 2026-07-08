@@ -320,13 +320,14 @@ class SurfaceValidator:
 
     def _check_soft_consistency(self, ds: xr.Dataset) -> List[CheckResult]:
         r: List[CheckResult] = []
-        # sum(PCT_NAT_PFT) ≈ PCT_NATVEG (reduce across all non-PFT dims)
-        if "PCT_NATVEG" in ds and "PCT_NAT_PFT" in ds and "natpft" in ds["PCT_NAT_PFT"].dims:
+        # sum(PCT_NAT_PFT) ≈ 100 (natural-patch weights)
+        if "PCT_NAT_PFT" in ds and "natpft" in ds["PCT_NAT_PFT"].dims:
             pftsum = ds["PCT_NAT_PFT"].sum(dim="natpft", skipna=True)
-            # compare aggregated means (robust across extra dims)
-            diff = np.nanmean(np.abs(pftsum.values - np.asarray(ds["PCT_NATVEG"].values)))
-            r.append(CheckResult("V-105.consistency.pftsum", "WARN", diff <= 1e-3,
-                                 f"mean(|sum(PCT_NAT_PFT)-PCT_NATVEG|)={diff:.3e}"))
+            resid = np.abs(pftsum.values - 100.0)
+            mean_diff = float(np.nanmean(resid))
+            max_diff = float(np.nanmax(resid))
+            r.append(CheckResult("V-105.consistency.pftsum", "WARN", max_diff <= 1e-6,
+                                 f"mean(|sum(PCT_NAT_PFT)-100|)={mean_diff:.3e}; max={max_diff:.3e}"))
 
         # If any cell has PCT_URBAN>0 → URBAN_REGION_ID present
         if "PCT_URBAN" in ds:

@@ -187,7 +187,7 @@ def write_surface_nc(
     import datetime as _dt
 
     # ---- global attrs ----
-    ds2 = ds.copy(deep=False)
+    ds2 = _normalize_surface_fraction_closure(ds)
     merged = dict(ds2.attrs)
 
     if dapper_attrs:
@@ -202,14 +202,172 @@ def write_surface_nc(
 
     ds2.attrs = merged
 
+    closure_critical = {
+        "PCT_NAT_PFT", "PCT_CFT", "PCT_GLC_MEC",
+        "PCT_NATVEG", "PCT_CROP", "PCT_GLACIER", "PCT_WETLAND", "PCT_LAKE", "PCT_URBAN",
+    }
     enc: Dict[str, dict] = {}
     for v in ds2.data_vars:
         # Fill values must match dtype. Here we do float32 to match ELM surface expectations.
         if ds2[v].dtype.kind == "f":
-            enc[v] = {"dtype": "float32", "_FillValue": np.float32(-9.96921e36)}
+            if v in closure_critical:
+                enc[v] = {"dtype": "float64", "_FillValue": np.float64(-9.96921e36)}
+            else:
+                enc[v] = {"dtype": "float32", "_FillValue": np.float32(-9.96921e36)}
 
     ds2.to_netcdf(out_path, encoding=enc)
     return out_path
+
+
+def _scale_to_target_sum(
+    da: xr.DataArray,
+    *,
+    dim: str,
+    target: xr.DataArray,
+    eps: float = 1e-12,
+) -> xr.DataArray:
+    """Scale values along `dim` so their sum matches `target` where possible."""
+    work = da.astype(np.float64)
+    summed = work.sum(dim=dim, skipna=True)
+    valid = np.isfinite(summed) & (np.abs(summed) > eps) & np.isfinite(target)
+    safe_den = xr.where(valid, summed, 1.0)
+    factor = xr.where(valid, target.astype(np.float64) / safe_den, 1.0)
+    return work * factor
+
+
+def _snap_partition_sum(
+    da: xr.DataArray,
+    *,
+    dim: str,
+    target: xr.DataArray,
+    eps: float = 1e-15,
+) -> xr.DataArray:
+    """Force exact closure by assigning residual to the last band in float64."""
+    work = da.astype(np.float64)
+    if dim not in work.dims or int(work.sizes.get(dim, 0)) < 1:
+        return work
+
+    head = work.isel({dim: slice(0, -1)})
+    head_sum = head.sum(dim=dim, skipna=True)
+    last_src = work.isel({dim: -1})
+    candidate_last = target.astype(np.float64) - head_sum
+
+    valid = np.isfinite(target) & np.isfinite(head_sum)
+    snapped_last = xr.where(valid, candidate_last, last_src)
+    snapped_last = xr.where(np.abs(snapped_last) < eps, 0.0, snapped_last)
+
+    out = work.copy(deep=False)
+    out[{dim: -1}] = snapped_last
+    return out
+
+
+def _normalize_surface_fraction_closure(ds: xr.Dataset) -> xr.Dataset:
+    """Enforce closure on key fractional groups before writing a surface file."""
+    ds2 = ds.copy(deep=False)
+
+    # Landunit percentages should close to 100 across available classes.
+    landunit_scalar_names = ["PCT_NATVEG", "PCT_CROP", "PCT_WETLAND", "PCT_LAKE", "PCT_GLACIER"]
+    landunit_terms: list[xr.DataArray] = []
+    for name in landunit_scalar_names:
+        if name in ds2:
+            landunit_terms.append(ds2[name].astype(np.float64))
+
+    urban_group = None
+    if "PCT_URBAN" in ds2:
+        urban = ds2["PCT_URBAN"].astype(np.float64)
+        if "numurbl" in urban.dims:
+            urban_group = urban
+            landunit_terms.append(urban.sum(dim="numurbl", skipna=True))
+        else:
+            landunit_terms.append(urban)
+
+    if len(landunit_terms) >= 2:
+        current_total = sum(landunit_terms)
+        # Only adjust small drift; avoid force-normalizing partial datasets.
+        near_100 = np.abs(current_total - 100.0) <= 1.0
+        valid = np.isfinite(current_total) & (current_total > 1e-12) & near_100
+        factor = xr.where(valid, 100.0 / current_total, 1.0)
+
+        for name in landunit_scalar_names:
+            if name in ds2:
+                ds2[name] = ds2[name].astype(np.float64) * factor
+        if urban_group is not None:
+            ds2["PCT_URBAN"] = urban_group * factor
+        elif "PCT_URBAN" in ds2:
+            ds2["PCT_URBAN"] = ds2["PCT_URBAN"].astype(np.float64) * factor
+
+        # Force exact landunit closure by assigning residual to one component.
+        total_after = 0.0
+        for name in landunit_scalar_names:
+            if name in ds2:
+                total_after = total_after + ds2[name].astype(np.float64)
+        if "PCT_URBAN" in ds2:
+            urb = ds2["PCT_URBAN"].astype(np.float64)
+            if "numurbl" in urb.dims:
+                total_after = total_after + urb.sum(dim="numurbl", skipna=True)
+            else:
+                total_after = total_after + urb
+
+        resid = 100.0 - total_after
+
+        # Prefer scalar classes first; fallback to last urban class.
+        snapped = False
+        for name in ("PCT_GLACIER", "PCT_LAKE", "PCT_WETLAND", "PCT_CROP", "PCT_NATVEG"):
+            if name in ds2:
+                ds2[name] = ds2[name].astype(np.float64) + resid
+                snapped = True
+                break
+
+        if (not snapped) and ("PCT_URBAN" in ds2):
+            urb = ds2["PCT_URBAN"].astype(np.float64)
+            if "numurbl" in urb.dims and int(urb.sizes.get("numurbl", 0)) >= 1:
+                urb[{"numurbl": -1}] = urb.isel(numurbl=-1) + resid
+                ds2["PCT_URBAN"] = urb
+            else:
+                ds2["PCT_URBAN"] = urb + resid
+
+    # PFT partitions are natural-patch weights and must close to 100.
+    if "PCT_NAT_PFT" in ds2 and "natpft" in ds2["PCT_NAT_PFT"].dims:
+        pft = ds2["PCT_NAT_PFT"]
+        target = xr.full_like(
+            pft.isel(natpft=0, drop=True),
+            100.0,
+            dtype=np.float64,
+        )
+        ds2["PCT_NAT_PFT"] = _scale_to_target_sum(pft, dim="natpft", target=target)
+        ds2["PCT_NAT_PFT"] = _snap_partition_sum(ds2["PCT_NAT_PFT"], dim="natpft", target=target)
+
+    # Crop and glacier-class partitions should close to their parent percentages.
+    if "PCT_CFT" in ds2 and "cft" in ds2["PCT_CFT"].dims and "PCT_CROP" in ds2:
+        ds2["PCT_CFT"] = _scale_to_target_sum(ds2["PCT_CFT"], dim="cft", target=ds2["PCT_CROP"].astype(np.float64))
+        ds2["PCT_CFT"] = _snap_partition_sum(
+            ds2["PCT_CFT"],
+            dim="cft",
+            target=ds2["PCT_CROP"].astype(np.float64),
+        )
+    if "PCT_GLC_MEC" in ds2 and "nglcec" in ds2["PCT_GLC_MEC"].dims and "PCT_GLACIER" in ds2:
+        ds2["PCT_GLC_MEC"] = _scale_to_target_sum(
+            ds2["PCT_GLC_MEC"],
+            dim="nglcec",
+            target=ds2["PCT_GLACIER"].astype(np.float64),
+        )
+        ds2["PCT_GLC_MEC"] = _snap_partition_sum(
+            ds2["PCT_GLC_MEC"],
+            dim="nglcec",
+            target=ds2["PCT_GLACIER"].astype(np.float64),
+        )
+
+    # Unitless partition currently represented by irrigation split.
+    if "FSURF" in ds2 and "FGRD" in ds2:
+        fs = ds2["FSURF"].astype(np.float64)
+        fg = ds2["FGRD"].astype(np.float64)
+        total = fs + fg
+        valid = np.isfinite(total) & (total > 1e-12)
+        factor = xr.where(valid, 1.0 / total, 1.0)
+        ds2["FSURF"] = fs * factor
+        ds2["FGRD"] = fg * factor
+
+    return ds2
 
 
 class CustomizeError(ValueError):
