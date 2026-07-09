@@ -781,7 +781,7 @@ class Domain:
             sources = list(binning.keys())
 
         try:
-            make_topounits_for_domain(
+            return make_topounits_for_domain(
                 self,
                 sources=sources,
                 binning=binning,
