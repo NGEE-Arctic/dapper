@@ -56,7 +56,9 @@ def _ensure_geodf(
     gdf["gid"] = gdf["gid"].astype(str).str.strip()
     if gdf["gid"].duplicated().any():
         dups = gdf.loc[gdf["gid"].duplicated(), "gid"].tolist()
-        raise ValueError(f"Duplicate gid values detected: {dups[:10]} (and possibly more)")
+        raise ValueError(
+            f"Duplicate gid values detected: {dups[:10]} (and possibly more)"
+        )
     return gdf
 
 
@@ -118,8 +120,10 @@ class Domain:
     # --- optional topounits payload (filled after make_topounits) ---
     topounits: "gpd.GeoDataFrame | None" = None
     topounits_dim_name: str = "topounit"
-    topounits_id_col: str = "topounit_id"   # the column inside topounits holding unique ids
-    topounits_gid_col: str = "gid"          # column linking topounits -> parent cell/site gid
+    topounits_id_col: str = (
+        "topounit_id"  # the column inside topounits holding unique ids
+    )
+    topounits_gid_col: str = "gid"  # column linking topounits -> parent cell/site gid
 
     met_support: Optional[gpd.GeoDataFrame] = None
     topo_support: Optional[gpd.GeoDataFrame] = None
@@ -127,7 +131,6 @@ class Domain:
     domain_nc: Optional[Path] = None
     path_out: Optional[Path] = None
     run_group: Optional[str] = None  # if None, defaults to self.name
-
 
     # ----------------------------- constructors -----------------------------
 
@@ -147,12 +150,12 @@ class Domain:
         run_group: Optional[str] = None,
     ) -> "Domain":
         """Construct a Domain from a provided geometry table.
-        
+
         The input can be a GeoDataFrame (preferred) or a DataFrame with a geometry column.
         Use *mode* to choose between a single-run cellset or a multi-run sites container.
         If *cells* is not provided, cells are derived from the provided/support geometry depending on *cell_kind*.
         """
-        
+
         prov = _ensure_geodf(provided, id_col=id_col)
 
         if mode is None:
@@ -162,7 +165,11 @@ class Domain:
                 )
             mode = "cellset"
 
-        sup = _ensure_geodf(support, id_col=id_col) if support is not None else prov.copy()
+        sup = (
+            _ensure_geodf(support, id_col=id_col)
+            if support is not None
+            else prov.copy()
+        )
 
         if cell_kind is None:
             # Default behavior:
@@ -197,7 +204,7 @@ class Domain:
     @classmethod
     def from_gdf(cls, gdf: Union[gpd.GeoDataFrame, pd.DataFrame], **kwargs) -> "Domain":
         """Alias for :meth:`Domain.from_provided`."""
-        
+
         return cls.from_provided(gdf, **kwargs)
 
     @classmethod
@@ -213,11 +220,16 @@ class Domain:
         run_group: Optional[str] = None,
     ) -> "Domain":
         """Construct a single-feature Domain from a shapely geometry."""
-        
+
         gdf = gpd.GeoDataFrame({"gid": [gid], "geometry": [geometry]}, crs="EPSG:4326")
-        return cls.from_provided(gdf, name=name, mode=mode, cell_kind=cell_kind,
-                                 path_out=Path(path_out) if path_out is not None else None,
-                                 run_group=str(run_group) if run_group is not None else None,)
+        return cls.from_provided(
+            gdf,
+            name=name,
+            mode=mode,
+            cell_kind=cell_kind,
+            path_out=Path(path_out) if path_out is not None else None,
+            run_group=str(run_group) if run_group is not None else None,
+        )
 
     @classmethod
     def from_file(
@@ -233,7 +245,7 @@ class Domain:
         run_group: Optional[str] = None,
     ) -> "Domain":
         """Load a geospatial file (e.g., GeoPackage, Shapefile) and construct a Domain."""
-        
+
         path = Path(path)
         gdf = gpd.read_file(path, layer=layer) if layer else gpd.read_file(path)
         if gdf.crs is None:
@@ -327,7 +339,7 @@ class Domain:
 
     def copy(self, **updates) -> "Domain":
         """Return a shallow copy of this Domain with updated fields."""
-        
+
         return replace(self, **updates)
 
     def __len__(self) -> int:
@@ -336,7 +348,7 @@ class Domain:
     @property
     def gids(self) -> list[str]:
         """List of ``gid`` values (as strings) for the current cell table."""
-        
+
         return self.cells["gid"].astype(str).tolist()
 
     @property
@@ -351,7 +363,7 @@ class Domain:
 
     def ensure_cells_lon_lat(self) -> "Domain":
         """Ensure ``cells`` contains ``lon`` and ``lat`` columns, derived from geometry if needed."""
-        
+
         cel = _ensure_lon_lat(self.cells)
         if cel is self.cells:
             return self
@@ -399,7 +411,7 @@ class Domain:
 
     def with_step_support(self, step: StepName, gdf: gpd.GeoDataFrame) -> "Domain":
         """Attach a step-specific support GeoDataFrame (for "met" or "topounits")."""
-        
+
         gdf2 = _ensure_geodf(gdf, id_col="gid")
         if step == "met":
             return self.copy(met_support=gdf2)
@@ -421,7 +433,9 @@ class Domain:
         """
         base = self.support_for(step=step)
         g = base.to_crs(epsg=equal_area_epsg).copy()
-        g["geometry"] = g.geometry.simplify(tolerance_m, preserve_topology=preserve_topology)
+        g["geometry"] = g.geometry.simplify(
+            tolerance_m, preserve_topology=preserve_topology
+        )
         g = g.to_crs("EPSG:4326")
         return self.with_step_support(step, g)
 
@@ -442,34 +456,77 @@ class Domain:
         sup = self.support.set_index("gid", drop=False)
         cel = self.cells.set_index("gid", drop=False)
 
-        met = self.met_support.set_index("gid", drop=False) if self.met_support is not None else None
-        topo = self.topo_support.set_index("gid", drop=False) if self.topo_support is not None else None
+        met = (
+            self.met_support.set_index("gid", drop=False)
+            if self.met_support is not None
+            else None
+        )
+        topo = (
+            self.topo_support.set_index("gid", drop=False)
+            if self.topo_support is not None
+            else None
+        )
 
         for gid in prov.index:
             run_prov = prov.loc[[gid]].reset_index(drop=True)
-            run_sup = sup.loc[[gid]].reset_index(drop=True) if gid in sup.index else run_prov.copy()
-            run_cel = cel.loc[[gid]].reset_index(drop=True) if gid in cel.index else _make_site_points_from_support(run_sup)
+            run_sup = (
+                sup.loc[[gid]].reset_index(drop=True)
+                if gid in sup.index
+                else run_prov.copy()
+            )
+            run_cel = (
+                cel.loc[[gid]].reset_index(drop=True)
+                if gid in cel.index
+                else _make_site_points_from_support(run_sup)
+            )
 
-            run_met = met.loc[[gid]].reset_index(drop=True) if met is not None and gid in met.index else None
-            run_topo = topo.loc[[gid]].reset_index(drop=True) if topo is not None and gid in topo.index else None
+            run_met = (
+                met.loc[[gid]].reset_index(drop=True)
+                if met is not None and gid in met.index
+                else None
+            )
+            run_topo = (
+                topo.loc[[gid]].reset_index(drop=True)
+                if topo is not None and gid in topo.index
+                else None
+            )
 
-            yield gid, Domain(
-                name=str(gid),
-                mode="cellset",
-                provided=gpd.GeoDataFrame(run_prov, geometry="geometry", crs="EPSG:4326"),
-                support=gpd.GeoDataFrame(run_sup, geometry="geometry", crs="EPSG:4326"),
-                cells=gpd.GeoDataFrame(run_cel, geometry="geometry", crs="EPSG:4326"),
-                met_support=gpd.GeoDataFrame(run_met, geometry="geometry", crs="EPSG:4326") if run_met is not None else None,
-                topo_support=gpd.GeoDataFrame(run_topo, geometry="geometry", crs="EPSG:4326") if run_topo is not None else None,
-                # propagate output layout + group name
-                path_out=self.path_out,
-                run_group=(self.run_group or self.name),
-                # propagate topounits subset (so exporters in sites mode can see them)
-                topounits=self.topounits_for_gid(str(gid)) if self.has_topounits() else None,
-                topounits_dim_name=self.topounits_dim_name,
-                topounits_id_col=self.topounits_id_col,
-                topounits_gid_col=self.topounits_gid_col,
-                domain_nc=None,
+            yield (
+                gid,
+                Domain(
+                    name=str(gid),
+                    mode="cellset",
+                    provided=gpd.GeoDataFrame(
+                        run_prov, geometry="geometry", crs="EPSG:4326"
+                    ),
+                    support=gpd.GeoDataFrame(
+                        run_sup, geometry="geometry", crs="EPSG:4326"
+                    ),
+                    cells=gpd.GeoDataFrame(
+                        run_cel, geometry="geometry", crs="EPSG:4326"
+                    ),
+                    met_support=gpd.GeoDataFrame(
+                        run_met, geometry="geometry", crs="EPSG:4326"
+                    )
+                    if run_met is not None
+                    else None,
+                    topo_support=gpd.GeoDataFrame(
+                        run_topo, geometry="geometry", crs="EPSG:4326"
+                    )
+                    if run_topo is not None
+                    else None,
+                    # propagate output layout + group name
+                    path_out=self.path_out,
+                    run_group=(self.run_group or self.name),
+                    # propagate topounits subset (so exporters in sites mode can see them)
+                    topounits=self.topounits_for_gid(str(gid))
+                    if self.has_topounits()
+                    else None,
+                    topounits_dim_name=self.topounits_dim_name,
+                    topounits_id_col=self.topounits_id_col,
+                    topounits_gid_col=self.topounits_gid_col,
+                    domain_nc=None,
+                ),
             )
 
     # ----------------------------- output pathing -----------------------------
@@ -483,7 +540,7 @@ class Domain:
     @property
     def group_name(self) -> str:
         """Name of the output group directory for this Domain."""
-        
+
         return str(self.run_group or self.name)
 
     @property
@@ -526,37 +583,44 @@ class Domain:
 
     def path_met_dir(self, run_id: str | None = None) -> Path:
         """Path to the MET output directory for this Domain (or a specific run_id)."""
-        
+
         return self._run_dir_for(run_id) / "MET"
 
     @property
     def met_dir(self) -> Path:
         """Convenience property for :meth:`Domain.path_met_dir`."""
-        
+
         return self.path_met_dir()
 
     # --- canonical filenames (exporters can override, but these are the defaults) ---
 
-    def path_domain_nc(self, filename: str = "domain.nc", run_id: str | None = None) -> Path:
+    def path_domain_nc(
+        self, filename: str = "domain.nc", run_id: str | None = None
+    ) -> Path:
         """Default output path for the domain NetCDF for this Domain (or a specific run_id)."""
-        
+
         return self._run_dir_for(run_id) / filename
 
-    def path_surface_nc(self, filename: str = "surfdata.nc", run_id: str | None = None) -> Path:
+    def path_surface_nc(
+        self, filename: str = "surfdata.nc", run_id: str | None = None
+    ) -> Path:
         """Default output path for the surface NetCDF for this Domain (or a specific run_id)."""
-        
+
         return self._run_dir_for(run_id) / filename
 
-    def path_landuse_nc(self, filename: str = "landuse_timeseries.nc", run_id: str | None = None) -> Path:
+    def path_landuse_nc(
+        self, filename: str = "landuse_timeseries.nc", run_id: str | None = None
+    ) -> Path:
         """Default output path for the landuse NetCDF for this Domain (or a specific run_id)."""
-        
+
         return self._run_dir_for(run_id) / filename
 
-    def path_zone_mappings(self, filename: str = "zone_mappings.txt", run_id: str | None = None) -> Path:
+    def path_zone_mappings(
+        self, filename: str = "zone_mappings.txt", run_id: str | None = None
+    ) -> Path:
         """Default output path for ``zone_mappings.txt`` (under the MET directory)."""
-        
-        return self.path_met_dir(run_id) / filename
 
+        return self.path_met_dir(run_id) / filename
 
     def ensure_output_dirs(self, *, met: bool = True) -> None:
         """
@@ -570,7 +634,6 @@ class Domain:
             run_dom.run_dir.mkdir(parents=True, exist_ok=True)
             if met:
                 run_dom.met_dir.mkdir(parents=True, exist_ok=True)
-
 
     # ----------------------------- sampling glue -----------------------------
 
@@ -601,12 +664,16 @@ class Domain:
         # Optional per-location zone labels (used by MET cellset decomposition).
         # If missing, default to 1. For sites-mode, exporters may override to a single zone.
         if "zone" in gdf.columns:
-            out["zone"] = pd.to_numeric(gdf["zone"], errors="coerce").fillna(1).astype(int)
+            out["zone"] = (
+                pd.to_numeric(gdf["zone"], errors="coerce").fillna(1).astype(int)
+            )
         else:
             out["zone"] = 1
 
         if (out["zone"] < 1).any():
-            raise ValueError("Domain cells contain zone values < 1. Zones must be positive integers.")
+            raise ValueError(
+                "Domain cells contain zone values < 1. Zones must be positive integers."
+            )
 
         if frac_col in gdf.columns:
             w = gdf[frac_col].to_numpy(dtype="float64")
@@ -617,9 +684,8 @@ class Domain:
 
     def has_topounits(self) -> bool:
         """Return True if this Domain has a non-empty topounits table attached."""
-        
-        return self.topounits is not None and len(self.topounits) > 0
 
+        return self.topounits is not None and len(self.topounits) > 0
 
     def topounits_for_gid(self, gid: str):
         """
@@ -633,7 +699,6 @@ class Domain:
             # If no gid column, we can only support single-cell domains safely
             return gdf
         return gdf[gdf[gid_col].astype(str) == str(gid)].copy()
-
 
     def with_topounits(
         self,
@@ -666,7 +731,9 @@ class Domain:
         # normalize id column name -> 'topounit_id'
         if id_col != "topounit_id":
             if "topounit_id" in gdf.columns and id_col != "topounit_id":
-                raise ValueError("topounits already has 'topounit_id' plus the provided id_col; ambiguous.")
+                raise ValueError(
+                    "topounits already has 'topounit_id' plus the provided id_col; ambiguous."
+                )
             gdf = gdf.rename(columns={id_col: "topounit_id"})
         gdf["topounit_id"] = gdf["topounit_id"].astype(str)
 
@@ -715,20 +782,20 @@ class Domain:
 
         try:
             make_topounits_for_domain(
-            self,
-            sources=sources,
-            binning=binning,
-            combine=combine,
-            combine_order=combine_order,
-            max_topounits=max_topounits,
-            dem_source=dem_source,
-            export_scale=export_scale,
-            min_patch_pixels=min_patch_pixels,
-            target_pixels_per_topounit=target_pixels_per_topounit,
-            target_scale=target_scale,
-            verbose=verbose,
-            allow_slow_ncells=allow_slow_ncells,
-        )
+                self,
+                sources=sources,
+                binning=binning,
+                combine=combine,
+                combine_order=combine_order,
+                max_topounits=max_topounits,
+                dem_source=dem_source,
+                export_scale=export_scale,
+                min_patch_pixels=min_patch_pixels,
+                target_pixels_per_topounit=target_pixels_per_topounit,
+                target_scale=target_scale,
+                verbose=verbose,
+                allow_slow_ncells=allow_slow_ncells,
+            )
         except RuntimeError as e:
             print(e)
             return None
@@ -937,7 +1004,6 @@ class Domain:
                         f"{group_dir} already contains MET NetCDF outputs (overwrite=False)."
                     )
 
-
         ex = Exporter(
             adapter=adapter,
             src_path=src_path,
@@ -956,7 +1022,11 @@ class Domain:
         outputs: dict[str, Path] = {}
         for run_id, _ in self.iter_runs():
             rid = str(run_id)
-            outputs[rid] = (group_dir / rid / "MET") if self.mode == "sites" else (group_dir / "MET")
+            outputs[rid] = (
+                (group_dir / rid / "MET")
+                if self.mode == "sites"
+                else (group_dir / "MET")
+            )
         return outputs
 
     def __str__(self) -> str:
