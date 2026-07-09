@@ -70,6 +70,7 @@ and validation layers, not here.
 
 # --------- Compact helpers so we don't write one-var-per-line ----------
 
+
 @dataclass(frozen=True)
 class ParDef:
     """
@@ -91,6 +92,7 @@ class ParDef:
     attrs:
         Extra NetCDF attributes (long_name, standard_name, etc.).
     """
+
     dims: Tuple[str, ...]
     dtype: str = "float32"
     units: str = ""
@@ -135,11 +137,11 @@ def register_many(names: Iterable[str], v: ParDef) -> Dict[str, ParDef]:
 
 
 # Common dim-sets (reusable)
-DIMS_2D     = "lsmlat,lsmlon"
+DIMS_2D = "lsmlat,lsmlon"
 DIMS_TIME2D = "time,lsmlat,lsmlon"
-DIMS_SOIL   = "nlevsoi,lsmlat,lsmlon"
-DIMS_PFT    = "natpft,lsmlat,lsmlon"
-DIMS_SLOPE  = "nlevslp,lsmlat,lsmlon"
+DIMS_SOIL = "nlevsoi,lsmlat,lsmlon"
+DIMS_PFT = "natpft,lsmlat,lsmlon"
+DIMS_SLOPE = "nlevslp,lsmlat,lsmlon"
 # Future: add topounit, urban, column, etc., as they appear in report.rst.
 
 # ---------- Variable Registry (compact, grouped) ------------------------
@@ -180,7 +182,14 @@ SCHEMA: Dict[str, Dict] = {
         "vars": ["PCT_SAND", "PCT_CLAY", "ORGANIC", "PCT_GRVL"],
     },
     "TIER3_TOPO": {
-        "vars": ["SLOPE", "STDEV_ELEV", "STD_ELEV", "TOPO", "TERRAIN_CONFIG", "SKY_VIEW"],
+        "vars": [
+            "SLOPE",
+            "STDEV_ELEV",
+            "STD_ELEV",
+            "TOPO",
+            "TERRAIN_CONFIG",
+            "SKY_VIEW",
+        ],
     },
     "TIER4_WATER_ICE_URBAN": {
         "vars": [
@@ -194,12 +203,20 @@ SCHEMA: Dict[str, Dict] = {
         ],
         # conditional groups: evaluated by validator
         "conditional": [
-            {"if_var_present": "PCT_URBAN",   "then_require": ["URBAN_REGION_ID"]},
-            {"if_var_present": "PCT_GLACIER", "then_require": ["GLC_MEC", "PCT_GLC_MEC"]},
+            {"if_var_present": "PCT_URBAN", "then_require": ["URBAN_REGION_ID"]},
+            {
+                "if_var_present": "PCT_GLACIER",
+                "then_require": ["GLC_MEC", "PCT_GLC_MEC"],
+            },
         ],
     },
     "TIER5_CANOPY_MONTHLY": {
-        "vars": ["MONTHLY_LAI", "MONTHLY_SAI", "MONTHLY_HEIGHT_TOP", "MONTHLY_HEIGHT_BOT"],
+        "vars": [
+            "MONTHLY_LAI",
+            "MONTHLY_SAI",
+            "MONTHLY_HEIGHT_TOP",
+            "MONTHLY_HEIGHT_BOT",
+        ],
     },
     "TIER6_BGC_P": {
         "vars": ["APATITE_P", "LABILE_P", "OCCLUDED_P", "SECONDARY_P"],
@@ -214,25 +231,33 @@ EXPORT_POLICIES = {
         {
             "when": {"dims": ("time", "lsmlat", "lsmlon")},
             "policy": "MONTHLY_12_BANDS",
-            "band_name": lambda var, sizes: [f"{var}_m{m:02d}" for m in range(1, sizes.get("time", 0) + 1)],
+            "band_name": lambda var, sizes: [
+                f"{var}_m{m:02d}" for m in range(1, sizes.get("time", 0) + 1)
+            ],
             "note": "Export 12 monthly bands; optionally also annual_mean",
         },
         {
             "when": {"dims": ("nlevsoi", "lsmlat", "lsmlon")},
             "policy": "SOIL_TOP_LAYER_DEFAULT",
-            "band_name": lambda var, sizes: [f"{var}_L{l:02d}" for l in range(sizes.get("nlevsoi", 0))],
+            "band_name": lambda var, sizes: [
+                f"{var}_L{l:02d}" for l in range(sizes.get("nlevsoi", 0))
+            ],
             "note": "Default L00; optionally L00/L05/L09 stack",
         },
         {
             "when": {"dims": ("natpft", "lsmlat", "lsmlon")},
             "policy": "PFT_ALL_BANDS",
-            "band_name": lambda var, sizes: [f"{var}_pft{p:02d}" for p in range(sizes.get("natpft", 0))],
+            "band_name": lambda var, sizes: [
+                f"{var}_pft{p:02d}" for p in range(sizes.get("natpft", 0))
+            ],
             "note": "Export all PFT bands; optionally aggregated classes",
         },
         {
             "when": {"dims": ("nlevslp", "lsmlat", "lsmlon")},
             "policy": "SLOPE_REDUCE_DEFAULT",
-            "band_name": lambda var, sizes: [f"{var}_slp{b:02d}" for b in range(sizes.get("nlevslp", 0))],
+            "band_name": lambda var, sizes: [
+                f"{var}_slp{b:02d}" for b in range(sizes.get("nlevslp", 0))
+            ],
             "note": "Default reduce (weighted mean); optionally keep all bins",
         },
         {
@@ -251,6 +276,7 @@ EXPORT_POLICIES = {
 
 
 # ---------------------- Runtime utilities --------------------------------
+
 
 def expand_registry(as_json: bool = False) -> Dict[str, Dict]:
     """Return the full registry as plain dict (easy to dump/serialize)."""
@@ -305,7 +331,9 @@ def validate_against_schema(present_vars: Iterable[str]) -> Dict[str, List[str]]
     return {"errors": errors, "warnings": warnings}
 
 
-def propose_export_policy(var: str, sizes: Dict[str, int], ParDef: ParDef | None = None):
+def propose_export_policy(
+    var: str, sizes: Dict[str, int], ParDef: ParDef | None = None
+):
     """Return a compact policy dict for a variable, based on its dims and overrides."""
     # override first
     ov = EXPORT_POLICIES["overrides"].get(var)
@@ -321,9 +349,7 @@ def propose_export_policy(var: str, sizes: Dict[str, int], ParDef: ParDef | None
     for rule in EXPORT_POLICIES["rules"]:
         if dims == tuple(rule["when"]["dims"]):
             bands = (
-                rule["band_name"](var, sizes)
-                if callable(rule["band_name"])
-                else [var]
+                rule["band_name"](var, sizes) if callable(rule["band_name"]) else [var]
             )
             return {
                 "var": var,

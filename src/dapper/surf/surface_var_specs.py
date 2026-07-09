@@ -7,7 +7,7 @@ are added. Other modules (schema, validation, docs) should
 import this and *not* duplicate this information elsewhere.
 
 It was initially generated from a ChatGPT scrape of a public ELM surface file
-and E3SM Fortran code, assembled by Rich Fiorella. Jon then added more 
+and E3SM Fortran code, assembled by Rich Fiorella. Jon then added more
 parameters based on comparing a handful of ELM surface files. Additional
 parameters should be added to the SURFACE_VAR_SPECS dictionary below.
 """
@@ -15,426 +15,574 @@ parameters should be added to the SURFACE_VAR_SPECS dictionary below.
 from __future__ import annotations
 
 SURFACE_VAR_SPECS = {
-    'LONGXY': {'dims': 'lsmlat,lsmlon',
-            'doc': 'Longitude (degrees) of the centre of each land grid cell; '
-                   'used to compare the surface file with the domain and '
-                   'topography files.',
-            'required_level': 'required',
-            'units': 'degrees_east',
-            'contexts': ['core']},
- 'LATIXY': {'dims': 'lsmlat,lsmlon',
-            'doc': 'Latitude (degrees) of the centre of each land grid cell.',
-            'required_level': 'required',
-            'units': 'degrees_north',
-            'contexts': ['core']},
- 'LANDMASK': {'dims': 'lsmlat,lsmlon',
-              'doc': 'Binary mask (1 = land, 0 = not-land) defining which grid '
-                     'cells are part of the land model; read from the surface '
-                     'file or domain file.',
-              'required_level': 'required',
-              'units': 'unitless',
-              'contexts': ['core']},
- 'mask': {'dims': 'lsmlat,lsmlon',
-          'doc': 'Binary mask (1 = land, 0 = not-land) defining which grid '
-                 'cells are part of the land model; read from the surface file '
-                 'or domain file.',
-          'required_level': 'required',
-          'units': 'unitless',
-          'contexts': ['core']},
- 'LANDFRAC': {'dims': 'lsmlat,lsmlon',
-              'doc': 'Fraction of each grid cell that is land (0–1); used to '
-                     'weight surface properties; a missing variable causes a '
-                     'fatal error.',
-              'required_level': 'required',
-              'units': 'unitless',
-              'contexts': ['core', 'land_cover']},
- 'frac': {'dims': 'lsmlat,lsmlon',
-          'doc': 'Fraction of each grid cell that is land (0–1); used to '
-                 'weight surface properties; a missing variable causes a fatal '
-                 'error.',
-          'required_level': 'required',
-          'units': 'unitless',
-          'contexts': ['core', 'land_cover']},
- 'PFTDATA_MASK': {'dims': 'lsmlat,lsmlon',
-                  'doc': 'Mask marking land grid cells that contain valid '
-                         'plant functional type (PFT) data; if missing the '
-                         'code stops with an error.',
-                  'required_level': 'required',
-                  'units': 'unitless',
-                  'contexts': ['core', 'land_cover']},
- 'xCell': {'dims': 'lsmlat,lsmlon',
-           'doc': 'Unstructured grid coordinates (e.g., MPAS x) when using an '
-                  'irregular mesh; the code reads them only if they exist.',
-           'required_level': 'optional',
-           'units': 'unknown',
-           'contexts': ['unstructured_grid']},
- 'yCell': {'dims': 'lsmlat,lsmlon',
-           'doc': 'Unstructured grid coordinates (e.g., MPAS y) when using an '
-                  'irregular mesh; the code reads them only if they exist.',
-           'required_level': 'optional',
-           'units': 'unknown',
-           'contexts': ['unstructured_grid']},
- 'GLCMASK': {'dims': 'lsmlat,lsmlon',
-             'doc': 'Glacier mask read from a separate glacier file; ensures '
-                    'that glacier cells are a subset of the land mask.',
-             'required_level': 'optional',
-             'attrs': {'requirement': 'Optional (only used when a glacier mask '
-                                      'file is provided)'},
-             'units': 'unitless',
-             'contexts': ['glaciers']},
- 'TOPO': {'dims': 'lsmlat,lsmlon',
-          'doc': 'Mean elevation (m) of each land grid cell read from the '
-                 'topography file; required by surfrd_get_topo.',
-          'required_level': 'required',
-          'units': 'm',
-          'contexts': ['grid_topography']},
- 'STDEV_ELEV': {'dims': 'lsmlat,lsmlon',
-                'doc': 'Standard deviation of elevation (m) used by the TOP '
-                       'solar-radiation parameterization; if STDEV_ELEV is '
-                       'missing the code tries STD_ELEV.',
-                'required_level': 'conditional',
-                'attrs': {'requirement': 'Required when TOP solar-radiation is '
-                                         'used; optional otherwise'},
-                'units': 'm',
-                'contexts': ['grid_topography', 'topographic_radiation']},
- 'STD_ELEV': {'dims': 'lsmlat,lsmlon',
-              'doc': 'Standard deviation of elevation (m) used by the TOP '
-                     'solar-radiation parameterization; alternative name to '
-                     'STDEV_ELEV.',
-              'required_level': 'conditional',
-              'attrs': {'requirement': 'Required when TOP solar-radiation is '
-                                       'used; optional otherwise'},
-              'units': 'm',
-              'contexts': ['grid_topography', 'topographic_radiation']},
- 'SKY_VIEW': {'dims': 'lsmlat,lsmlon',
-              'doc': 'Sky-view factor (0–1) describing horizon obstruction by '
-                     'surrounding terrain; needed by the TOP solar-radiation '
-                     'scheme.',
-              'required_level': 'conditional',
-              'attrs': {'requirement': 'Required when TOP solar-radiation is '
-                                       'used; optional otherwise'},
-              'units': 'unitless',
-              'contexts': ['grid_topography', 'topographic_radiation']},
- 'TERRAIN_CONFIG': {'dims': 'lsmlat,lsmlon',
-                    'doc': 'Terrain configuration parameter used in the TOP '
-                           'scheme to account for terrain-induced shading.',
-                    'required_level': 'conditional',
-                    'attrs': {'requirement': 'Required when TOP '
-                                             'solar-radiation is used; '
-                                             'optional otherwise'},
-                    'units': 'unitless',
-                    'contexts': ['grid_topography', 'topographic_radiation']},
- 'SINSL_COSAS': {'dims': 'lsmlat,lsmlon',
-                 'doc': 'sin(slope) * cos(aspect) for each grid cell; used in '
-                        'solar-radiation calculations.',
-                 'required_level': 'conditional',
-                 'attrs': {'requirement': 'Required when TOP solar-radiation '
-                                          'is used; optional otherwise'},
-                 'units': 'unitless',
-                 'contexts': ['grid_topography', 'topographic_radiation']},
- 'SINSL_SINAS': {'dims': 'lsmlat,lsmlon',
-                 'doc': 'sin(slope) * sin(aspect) for each grid cell; used '
-                        'with SINSL_COSAS.',
-                 'required_level': 'conditional',
-                 'attrs': {'requirement': 'Required when TOP solar-radiation '
-                                          'is used; optional otherwise'},
-                 'units': 'unitless',
-                 'contexts': ['grid_topography', 'topographic_radiation']},
- 'PCT_WETLAND': {'dims': 'topounit,lsmlat,lsmlon',
-                 'doc': 'Percentage (0–100) of each grid cell area covered by '
-                        'wetlands within each topounit.',
-                 'required_level': 'required',
-                 'units': 'percent',
-                 'contexts': ['land_cover', 'inland_water', 'topounits']},
- 'PCT_LAKE': {'dims': 'topounit,lsmlat,lsmlon',
-              'doc': 'Percentage of each grid cell area that is lake within '
-                     'each topounit; used for lake landunit weighting.',
-              'required_level': 'required',
-              'units': 'percent',
-              'contexts': ['land_cover', 'inland_water', 'topounits']},
- 'PCT_GLACIER': {'dims': 'topounit,lsmlat,lsmlon',
-                 'doc': 'Fraction of grid cell area covered by simple glacier '
-                        'landunits within each topounit.',
-                 'required_level': 'conditional',
-                 'attrs': {'requirement': 'Required unless glacier MEC '
-                                          'landunits are used; optional when '
-                                          'create_glacier_mec_landunit is '
-                                          'true'},
-                 'units': 'percent',
-                 'contexts': ['land_cover', 'glaciers', 'topounits']},
- 'PCT_URBAN': {'dims': 'topounit,numurbl,lsmlat,lsmlon',
-               'doc': 'Fraction of each grid cell that is urban, for each '
-                      'density class in the multi-density urban scheme.',
-               'required_level': 'conditional',
-               'attrs': {'requirement': 'Required when the multi-density urban '
-                                        'model is used (nlevurb > 0); optional '
-                                        'otherwise'},
-               'units': 'percent',
-               'contexts': ['land_cover', 'urban', 'topounits']},
- 'URBAN_REGION_ID': {'dims': 'topounit,lsmlat,lsmlon',
-                     'doc': 'Integer identifier linking urban grid cells to '
-                            'regional urban morphology datasets.',
-                     'required_level': 'conditional',
-                     'attrs': {'requirement': 'Required when PCT_URBAN is '
-                                              'used; optional otherwise'},
-                     'units': 'unitless',
-                     'contexts': ['urban', 'topounits']},
- 'PCT_GLC_MEC': {'dims': 'topounit,nglcec,lsmlat,lsmlon',
-                 'doc': 'Percent of grid cell area assigned to mechanistic '
-                        'glacier classes (accumulation/ablation, etc.).',
-                 'required_level': 'conditional',
-                 'attrs': {'requirement': 'Required when glacier MEC landunits '
-                                          'are created; optional otherwise'},
-                 'units': 'percent',
-                 'contexts': ['land_cover', 'glaciers', 'topounits']},
- 'TOPO_GLC_MEC': {'dims': 'topounit,nglcec,lsmlat,lsmlon',
-                  'doc': 'Elevation (m) of each mechanistic glacier class.',
-                  'required_level': 'conditional',
-                  'attrs': {'requirement': 'Required when glacier MEC '
-                                           'landunits are used; optional '
-                                           'otherwise'},
-                  'units': 'm',
-                  'contexts': ['grid_topography', 'glaciers', 'topounits']},
- 'PCT_NATVEG': {'dims': 'topounit,lsmlat,lsmlon',
-                'doc': 'Percent of grid cell area covered by natural '
-                       'vegetation (non-crop vegetated landunit).',
-                'required_level': 'required',
-                'units': 'percent',
-                'contexts': ['land_cover', 'topounits']},
- 'PCT_CROP': {'dims': 'topounit,lsmlat,lsmlon',
-              'doc': 'Percent of grid cell area covered by cropland.',
-              'required_level': 'required',
-              'units': 'percent',
-              'contexts': ['land_cover', 'crops_irrigation', 'topounits']},
- 'PCT_HCP': {'dims': 'topounit,lsmlat,lsmlon',
-             'doc': 'Fraction of natural vegetation landunit that is '
-                    'high-centered polygons (polygonal tundra).',
-             'required_level': 'conditional',
-             'attrs': {'requirement': 'Required when use_polygonal_tundra is '
-                                      'true; optional otherwise'},
-             'units': 'percent',
-             'contexts': ['land_cover', 'polygonal_tundra', 'topounits']},
- 'PCT_FCP': {'dims': 'topounit,lsmlat,lsmlon',
-             'doc': 'Fraction of natural vegetation that is flat-centered '
-                    'polygons.',
-             'required_level': 'conditional',
-             'attrs': {'requirement': 'Required when use_polygonal_tundra is '
-                                      'true; optional otherwise'},
-             'units': 'percent',
-             'contexts': ['land_cover', 'polygonal_tundra', 'topounits']},
- 'PCT_LCP': {'dims': 'topounit,lsmlat,lsmlon',
-             'doc': 'Fraction of natural vegetation that is low-centered '
-                    'polygons.',
-             'required_level': 'conditional',
-             'attrs': {'requirement': 'Required when use_polygonal_tundra is '
-                                      'true; optional otherwise'},
-             'units': 'percent',
-             'contexts': ['land_cover', 'polygonal_tundra', 'topounits']},
- 'PCT_CFT': {'dims': 'topounit,cft,lsmlat,lsmlon',
-             'doc': 'Fraction of vegetated area allocated to each crop '
-                    'functional type; code aborts if missing when cft '
-                    'dimension exists.',
-             'required_level': 'conditional',
-             'attrs': {'requirement': 'Required when the surface file includes '
-                                      'crop functional types (cft_size > 0)'},
-             'units': 'percent',
-             'contexts': ['land_cover', 'crops_irrigation', 'topounits']},
- 'NFERT': {'dims': 'topounit,cft,lsmlat,lsmlon',
-           'doc': 'Nitrogen fertilizer application for each crop functional '
-                  'type; if absent, values default to zero.',
-           'required_level': 'optional',
-           'attrs': {'requirement': 'Optional (values default to zero when '
-                                    'absent)'},
-           'units': 'unknown',
-           'contexts': ['crops_irrigation', 'topounits']},
- 'PFERT': {'dims': 'topounit,cft,lsmlat,lsmlon',
-           'doc': 'Phosphorus fertilizer application for each crop functional '
-                  'type; treated like NFERT.',
-           'required_level': 'optional',
-           'units': 'unknown',
-           'contexts': ['crops_irrigation', 'topounits', 'phosphorus_cycle']},
- 'PCT_NAT_PFT': {'dims': 'topounit,natpft,lsmlat,lsmlon',
-                 'doc': 'Fraction of vegetated area allocated to each natural '
-                        'plant functional type; code aborts if missing.',
-                 'required_level': 'required',
-                 'units': 'percent',
-                 'contexts': ['land_cover', 'topounits']},
- 'FIRRIG': {'dims': 'topounit,lsmlat,lsmlon',
-            'doc': 'Fraction (0–1) of cropland that is irrigated; read only '
-                   'when irrigation data are enabled (firrig_data).',
-            'required_level': 'conditional',
-            'attrs': {'requirement': 'Required when firrig_data is true; '
-                                     'optional otherwise'},
-            'units': 'unitless',
-            'contexts': ['crops_irrigation', 'topounits']},
- 'FSURF': {'dims': 'topounit,lsmlat,lsmlon',
-           'doc': 'Fraction of irrigation water applied via surface '
-                  'irrigation; required with FIRRIG when irrigation data are '
-                  'used.',
-           'required_level': 'conditional',
-           'attrs': {'requirement': 'Required when firrig_data is true; '
-                                    'optional otherwise'},
-           'units': 'unitless',
-           'contexts': ['crops_irrigation', 'topounits']},
- 'FGRD': {'dims': 'topounit,lsmlat,lsmlon',
-          'doc': 'Fraction of irrigation water applied via '
-                 'ground/sprinkler/drip; complements FSURF.',
-          'required_level': 'conditional',
-          'attrs': {'requirement': 'Required when firrig_data is true; '
-                                   'optional otherwise'},
-          'units': 'unitless',
-          'contexts': ['crops_irrigation', 'topounits']},
- 'MaxTopounitElv': {'dims': 'lsmlat,lsmlon',
-                    'doc': 'Maximum elevation (m) among topounits for each '
-                           'grid cell; read only if present.',
-                    'required_level': 'optional',
-                    'attrs': {'requirement': 'Optional (not required, but '
-                                             'improves topounit '
-                                             'characterization)'},
-                    'units': 'm',
-                    'contexts': ['grid_topography', 'topounits']},
- 'topoPerGrid': {'dims': 'lsmlat,lsmlon',
-                 'doc': 'Number of topounits in each grid cell; if absent, the '
-                        'number of topounits is set to 1.',
-                 'required_level': 'optional',
-                 'units': 'unitless',
-                 'contexts': ['grid_topography', 'topounits']},
- 'TopounitFracArea': {'dims': 'topounit,lsmlat,lsmlon',
-                      'doc': 'Fraction of the grid cell’s area represented by '
-                             'each topounit; read only if present.',
-                      'required_level': 'optional',
-                      'units': 'unitless',
-                      'contexts': ['grid_topography', 'topounits']},
- 'TopounitAveElv': {'dims': 'topounit,lsmlat,lsmlon',
-                    'doc': 'Average elevation (m) of each topounit; optional '
-                           'if available.',
-                    'required_level': 'optional',
-                    'units': 'm',
-                    'contexts': ['grid_topography', 'topounits']},
- 'TopounitElv': {'dims': 'topounit,lsmlat,lsmlon',
-                 'doc': 'Average elevation (m) of each topounit; optional if '
-                        'available.',
-                 'required_level': 'optional',
-                 'units': 'm',
-                 'contexts': ['grid_topography', 'topounits']},
- 'TopounitSlope': {'dims': 'topounit,lsmlat,lsmlon',
-                   'doc': 'Slope (degrees) of each topounit; not currently '
-                          'used but may improve topographic representation.',
-                   'required_level': 'optional',
-                   'units': 'degrees',
-                   'contexts': ['grid_topography', 'topounits']},
- 'TopounitAspect': {'dims': 'topounit,lsmlat,lsmlon',
-                    'doc': 'Aspect (azimuth) of each topounit; optional and '
-                           'unused by default.',
-                    'required_level': 'optional',
-                    'units': 'degrees',
-                    'contexts': ['grid_topography', 'topounits']},
- 'TOPO2': {'dims': 'lsmlat,lsmlon',
-           'doc': 'Second topography field used in the ELM topounit framework; '
-                  'read only if present.',
-           'required_level': 'optional',
-           'units': 'unknown',
-           'contexts': ['grid_topography', 'topounits']},
- 'AREA': {'dims': 'lsmlat,lsmlon',
-          'doc': 'Area (m2) of each land grid cell; used to weight '
-                 'land-surface properties and to compare with '
-                 'domain/topography.',
-          'required_level': 'required',
-          'units': 'm2',
-          'contexts': ['core', 'grid_topography']},
- 'LANDFRAC_PFT': {'dims': 'lsmlat,lsmlon',
-                  'doc': 'Fraction (0–1) of the global gridcell that is land '
-                         'in the PFT landunit; used to weight PFT tiles '
-                         'relative to the gridcell.',
-                  'required_level': 'required',
-                  'units': 'unitless',
-                  'contexts': ['core', 'land_cover']},
- 'SLOPE': {'dims': 'lsmlat,lsmlon',
-           'doc': 'Mean surface slope (degrees) for each land grid cell; used '
-                  'in topographic and hydrologic parameterizations.',
-           'required_level': 'required',
-           'units': 'degrees',
-           'contexts': ['grid_topography']},
- 'PCT_SAND': {'dims': 'nlevsoi,lsmlat,lsmlon',
-              'doc': 'Soil sand percentage by mass (0–100) in each soil layer; '
-                     'controls hydraulic and thermal properties.',
-              'required_level': 'required',
-              'units': 'percent',
-              'contexts': ['soil_properties']},
- 'PCT_CLAY': {'dims': 'nlevsoi,lsmlat,lsmlon',
-              'doc': 'Soil clay percentage by mass (0–100) in each soil layer; '
-                     'controls hydraulic and thermal properties.',
-              'required_level': 'required',
-              'units': 'percent',
-              'contexts': ['soil_properties']},
- 'ORGANIC': {'dims': 'nlevsoi,lsmlat,lsmlon',
-             'doc': 'Soil organic matter or organic carbon per layer; used in '
-                    'biogeochemical and thermal calculations.',
-             'required_level': 'optional',
-             'units': 'unknown',
-             'contexts': ['soil_properties']},
- 'PCT_GRVL': {'dims': 'nlevsoi,lsmlat,lsmlon',
-              'doc': 'Percent gravel content (0–100) in each soil layer; '
-                     'affects soil water storage and hydraulic conductivity.',
-              'required_level': 'optional',
-              'units': 'percent',
-              'contexts': ['soil_properties']},
- 'GLC_MEC': {'dims': 'lsmlat,lsmlon',
-             'doc': 'Integer glacier elevation-class index for each grid cell '
-                    'when using mechanistic glacier (MEC) landunits.',
-             'required_level': 'conditional',
-             'attrs': {'requirement': 'Required when glacier MEC landunits are '
-                                      'used; optional otherwise'},
-             'units': 'unitless',
-             'contexts': ['glaciers']},
- 'MONTHLY_LAI': {'dims': 'time,lsmlat,lsmlon',
-                 'doc': 'Leaf area index (LAI; m2 leaf per m2 ground) monthly '
-                        'climatology; time is typically 12 months.',
-                 'required_level': 'optional',
-                 'units': 'unitless',
-                 'contexts': ['vegetation_structure']},
- 'MONTHLY_SAI': {'dims': 'time,lsmlat,lsmlon',
-                 'doc': 'Stem area index (SAI) monthly climatology; time is '
-                        'typically 12 months.',
-                 'required_level': 'optional',
-                 'units': 'unitless',
-                 'contexts': ['vegetation_structure']},
- 'MONTHLY_HEIGHT_TOP': {'dims': 'time,lsmlat,lsmlon',
-                        'doc': 'Monthly climatology of canopy top height (m) '
-                               'for vegetated landunits.',
-                        'required_level': 'optional',
-                        'units': 'm',
-                        'contexts': ['vegetation_structure']},
- 'MONTHLY_HEIGHT_BOT': {'dims': 'time,lsmlat,lsmlon',
-                        'doc': 'Monthly climatology of canopy bottom height '
-                               '(m) for vegetated landunits.',
-                        'required_level': 'optional',
-                        'units': 'm',
-                        'contexts': ['vegetation_structure']},
- 'APATITE_P': {'dims': 'lsmlat,lsmlon',
-               'doc': 'Soil phosphorus pool in apatite (primary mineral) form; '
-                      'used by phosphorus biogeochemistry when enabled.',
-               'required_level': 'optional',
-               'units': 'unknown',
-               'contexts': ['phosphorus_cycle']},
- 'LABILE_P': {'dims': 'lsmlat,lsmlon',
-              'doc': 'Soil labile (readily available) phosphorus pool; used by '
-                     'P-cycle parameterizations.',
-              'required_level': 'optional',
-              'units': 'unknown',
-              'contexts': ['phosphorus_cycle']},
- 'OCCLUDED_P': {'dims': 'lsmlat,lsmlon',
-                'doc': 'Soil occluded phosphorus pool (sorbed or otherwise '
-                       'inaccessible); part of multi-pool P parameterization.',
-                'required_level': 'optional',
-                'units': 'unknown',
-                'contexts': ['phosphorus_cycle']},
- 'SECONDARY_P': {'dims': 'lsmlat,lsmlon',
-                 'doc': 'Soil secondary mineral phosphorus pool; intermediate '
-                        'in reactivity between apatite and labile pools.',
-                 'required_level': 'optional',
-                 'units': 'unknown',
-                 'contexts': ['phosphorus_cycle']}}
+    "LONGXY": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Longitude (degrees) of the centre of each land grid cell; "
+        "used to compare the surface file with the domain and "
+        "topography files.",
+        "required_level": "required",
+        "units": "degrees_east",
+        "contexts": ["core"],
+    },
+    "LATIXY": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Latitude (degrees) of the centre of each land grid cell.",
+        "required_level": "required",
+        "units": "degrees_north",
+        "contexts": ["core"],
+    },
+    "LANDMASK": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Binary mask (1 = land, 0 = not-land) defining which grid "
+        "cells are part of the land model; read from the surface "
+        "file or domain file.",
+        "required_level": "required",
+        "units": "unitless",
+        "contexts": ["core"],
+    },
+    "mask": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Binary mask (1 = land, 0 = not-land) defining which grid "
+        "cells are part of the land model; read from the surface file "
+        "or domain file.",
+        "required_level": "required",
+        "units": "unitless",
+        "contexts": ["core"],
+    },
+    "LANDFRAC": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Fraction of each grid cell that is land (0–1); used to "
+        "weight surface properties; a missing variable causes a "
+        "fatal error.",
+        "required_level": "required",
+        "units": "unitless",
+        "contexts": ["core", "land_cover"],
+    },
+    "frac": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Fraction of each grid cell that is land (0–1); used to "
+        "weight surface properties; a missing variable causes a fatal "
+        "error.",
+        "required_level": "required",
+        "units": "unitless",
+        "contexts": ["core", "land_cover"],
+    },
+    "PFTDATA_MASK": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Mask marking land grid cells that contain valid "
+        "plant functional type (PFT) data; if missing the "
+        "code stops with an error.",
+        "required_level": "required",
+        "units": "unitless",
+        "contexts": ["core", "land_cover"],
+    },
+    "xCell": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Unstructured grid coordinates (e.g., MPAS x) when using an "
+        "irregular mesh; the code reads them only if they exist.",
+        "required_level": "optional",
+        "units": "unknown",
+        "contexts": ["unstructured_grid"],
+    },
+    "yCell": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Unstructured grid coordinates (e.g., MPAS y) when using an "
+        "irregular mesh; the code reads them only if they exist.",
+        "required_level": "optional",
+        "units": "unknown",
+        "contexts": ["unstructured_grid"],
+    },
+    "GLCMASK": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Glacier mask read from a separate glacier file; ensures "
+        "that glacier cells are a subset of the land mask.",
+        "required_level": "optional",
+        "attrs": {
+            "requirement": "Optional (only used when a glacier mask file is provided)"
+        },
+        "units": "unitless",
+        "contexts": ["glaciers"],
+    },
+    "TOPO": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Mean elevation (m) of each land grid cell read from the "
+        "topography file; required by surfrd_get_topo.",
+        "required_level": "required",
+        "units": "m",
+        "contexts": ["grid_topography"],
+    },
+    "STDEV_ELEV": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Standard deviation of elevation (m) used by the TOP "
+        "solar-radiation parameterization; if STDEV_ELEV is "
+        "missing the code tries STD_ELEV.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when TOP solar-radiation is "
+            "used; optional otherwise"
+        },
+        "units": "m",
+        "contexts": ["grid_topography", "topographic_radiation"],
+    },
+    "STD_ELEV": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Standard deviation of elevation (m) used by the TOP "
+        "solar-radiation parameterization; alternative name to "
+        "STDEV_ELEV.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when TOP solar-radiation is "
+            "used; optional otherwise"
+        },
+        "units": "m",
+        "contexts": ["grid_topography", "topographic_radiation"],
+    },
+    "SKY_VIEW": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Sky-view factor (0–1) describing horizon obstruction by "
+        "surrounding terrain; needed by the TOP solar-radiation "
+        "scheme.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when TOP solar-radiation is "
+            "used; optional otherwise"
+        },
+        "units": "unitless",
+        "contexts": ["grid_topography", "topographic_radiation"],
+    },
+    "TERRAIN_CONFIG": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Terrain configuration parameter used in the TOP "
+        "scheme to account for terrain-induced shading.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when TOP "
+            "solar-radiation is used; "
+            "optional otherwise"
+        },
+        "units": "unitless",
+        "contexts": ["grid_topography", "topographic_radiation"],
+    },
+    "SINSL_COSAS": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "sin(slope) * cos(aspect) for each grid cell; used in "
+        "solar-radiation calculations.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when TOP solar-radiation "
+            "is used; optional otherwise"
+        },
+        "units": "unitless",
+        "contexts": ["grid_topography", "topographic_radiation"],
+    },
+    "SINSL_SINAS": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "sin(slope) * sin(aspect) for each grid cell; used with SINSL_COSAS.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when TOP solar-radiation "
+            "is used; optional otherwise"
+        },
+        "units": "unitless",
+        "contexts": ["grid_topography", "topographic_radiation"],
+    },
+    "PCT_WETLAND": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Percentage (0–100) of each grid cell area covered by "
+        "wetlands within each topounit.",
+        "required_level": "required",
+        "units": "percent",
+        "contexts": ["land_cover", "inland_water", "topounits"],
+    },
+    "PCT_LAKE": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Percentage of each grid cell area that is lake within "
+        "each topounit; used for lake landunit weighting.",
+        "required_level": "required",
+        "units": "percent",
+        "contexts": ["land_cover", "inland_water", "topounits"],
+    },
+    "PCT_GLACIER": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Fraction of grid cell area covered by simple glacier "
+        "landunits within each topounit.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required unless glacier MEC "
+            "landunits are used; optional when "
+            "create_glacier_mec_landunit is "
+            "true"
+        },
+        "units": "percent",
+        "contexts": ["land_cover", "glaciers", "topounits"],
+    },
+    "PCT_URBAN": {
+        "dims": "topounit,numurbl,lsmlat,lsmlon",
+        "doc": "Fraction of each grid cell that is urban, for each "
+        "density class in the multi-density urban scheme.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when the multi-density urban "
+            "model is used (nlevurb > 0); optional "
+            "otherwise"
+        },
+        "units": "percent",
+        "contexts": ["land_cover", "urban", "topounits"],
+    },
+    "URBAN_REGION_ID": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Integer identifier linking urban grid cells to "
+        "regional urban morphology datasets.",
+        "required_level": "conditional",
+        "attrs": {"requirement": "Required when PCT_URBAN is used; optional otherwise"},
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "PCT_GLC_MEC": {
+        "dims": "topounit,nglcec,lsmlat,lsmlon",
+        "doc": "Percent of grid cell area assigned to mechanistic "
+        "glacier classes (accumulation/ablation, etc.).",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when glacier MEC landunits "
+            "are created; optional otherwise"
+        },
+        "units": "percent",
+        "contexts": ["land_cover", "glaciers", "topounits"],
+    },
+    "TOPO_GLC_MEC": {
+        "dims": "topounit,nglcec,lsmlat,lsmlon",
+        "doc": "Elevation (m) of each mechanistic glacier class.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when glacier MEC "
+            "landunits are used; optional "
+            "otherwise"
+        },
+        "units": "m",
+        "contexts": ["grid_topography", "glaciers", "topounits"],
+    },
+    "PCT_NATVEG": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Percent of grid cell area covered by natural "
+        "vegetation (non-crop vegetated landunit).",
+        "required_level": "required",
+        "units": "percent",
+        "contexts": ["land_cover", "topounits"],
+    },
+    "PCT_CROP": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Percent of grid cell area covered by cropland.",
+        "required_level": "required",
+        "units": "percent",
+        "contexts": ["land_cover", "crops_irrigation", "topounits"],
+    },
+    "PCT_HCP": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Fraction of natural vegetation landunit that is "
+        "high-centered polygons (polygonal tundra).",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when use_polygonal_tundra is "
+            "true; optional otherwise"
+        },
+        "units": "percent",
+        "contexts": ["land_cover", "polygonal_tundra", "topounits"],
+    },
+    "PCT_FCP": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Fraction of natural vegetation that is flat-centered polygons.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when use_polygonal_tundra is "
+            "true; optional otherwise"
+        },
+        "units": "percent",
+        "contexts": ["land_cover", "polygonal_tundra", "topounits"],
+    },
+    "PCT_LCP": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Fraction of natural vegetation that is low-centered polygons.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when use_polygonal_tundra is "
+            "true; optional otherwise"
+        },
+        "units": "percent",
+        "contexts": ["land_cover", "polygonal_tundra", "topounits"],
+    },
+    "PCT_CFT": {
+        "dims": "topounit,cft,lsmlat,lsmlon",
+        "doc": "Fraction of vegetated area allocated to each crop "
+        "functional type; code aborts if missing when cft "
+        "dimension exists.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when the surface file includes "
+            "crop functional types (cft_size > 0)"
+        },
+        "units": "percent",
+        "contexts": ["land_cover", "crops_irrigation", "topounits"],
+    },
+    "NFERT": {
+        "dims": "topounit,cft,lsmlat,lsmlon",
+        "doc": "Nitrogen fertilizer application for each crop functional "
+        "type; if absent, values default to zero.",
+        "required_level": "optional",
+        "attrs": {"requirement": "Optional (values default to zero when absent)"},
+        "units": "unknown",
+        "contexts": ["crops_irrigation", "topounits"],
+    },
+    "PFERT": {
+        "dims": "topounit,cft,lsmlat,lsmlon",
+        "doc": "Phosphorus fertilizer application for each crop functional "
+        "type; treated like NFERT.",
+        "required_level": "optional",
+        "units": "unknown",
+        "contexts": ["crops_irrigation", "topounits", "phosphorus_cycle"],
+    },
+    "PCT_NAT_PFT": {
+        "dims": "topounit,natpft,lsmlat,lsmlon",
+        "doc": "Fraction of vegetated area allocated to each natural "
+        "plant functional type; code aborts if missing.",
+        "required_level": "required",
+        "units": "percent",
+        "contexts": ["land_cover", "topounits"],
+    },
+    "FIRRIG": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Fraction (0–1) of cropland that is irrigated; read only "
+        "when irrigation data are enabled (firrig_data).",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when firrig_data is true; optional otherwise"
+        },
+        "units": "unitless",
+        "contexts": ["crops_irrigation", "topounits"],
+    },
+    "FSURF": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Fraction of irrigation water applied via surface "
+        "irrigation; required with FIRRIG when irrigation data are "
+        "used.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when firrig_data is true; optional otherwise"
+        },
+        "units": "unitless",
+        "contexts": ["crops_irrigation", "topounits"],
+    },
+    "FGRD": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Fraction of irrigation water applied via "
+        "ground/sprinkler/drip; complements FSURF.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when firrig_data is true; optional otherwise"
+        },
+        "units": "unitless",
+        "contexts": ["crops_irrigation", "topounits"],
+    },
+    "MaxTopounitElv": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Maximum elevation (m) among topounits for each "
+        "grid cell; read only if present.",
+        "required_level": "optional",
+        "attrs": {
+            "requirement": "Optional (not required, but "
+            "improves topounit "
+            "characterization)"
+        },
+        "units": "m",
+        "contexts": ["grid_topography", "topounits"],
+    },
+    "topoPerGrid": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Number of topounits in each grid cell; if absent, the "
+        "number of topounits is set to 1.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["grid_topography", "topounits"],
+    },
+    "TopounitFracArea": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Fraction of the grid cell’s area represented by "
+        "each topounit; read only if present.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["grid_topography", "topounits"],
+    },
+    "TopounitAveElv": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Average elevation (m) of each topounit; optional if available.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["grid_topography", "topounits"],
+    },
+    "TopounitElv": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Average elevation (m) of each topounit; optional if available.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["grid_topography", "topounits"],
+    },
+    "TopounitSlope": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Slope (degrees) of each topounit; not currently "
+        "used but may improve topographic representation.",
+        "required_level": "optional",
+        "units": "degrees",
+        "contexts": ["grid_topography", "topounits"],
+    },
+    "TopounitAspect": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Aspect (azimuth) of each topounit; optional and unused by default.",
+        "required_level": "optional",
+        "units": "degrees",
+        "contexts": ["grid_topography", "topounits"],
+    },
+    "TOPO2": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Second topography field used in the ELM topounit framework; "
+        "read only if present.",
+        "required_level": "optional",
+        "units": "unknown",
+        "contexts": ["grid_topography", "topounits"],
+    },
+    "AREA": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Area (m2) of each land grid cell; used to weight "
+        "land-surface properties and to compare with "
+        "domain/topography.",
+        "required_level": "required",
+        "units": "m2",
+        "contexts": ["core", "grid_topography"],
+    },
+    "LANDFRAC_PFT": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Fraction (0–1) of the global gridcell that is land "
+        "in the PFT landunit; used to weight PFT tiles "
+        "relative to the gridcell.",
+        "required_level": "required",
+        "units": "unitless",
+        "contexts": ["core", "land_cover"],
+    },
+    "SLOPE": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Mean surface slope (degrees) for each land grid cell; used "
+        "in topographic and hydrologic parameterizations.",
+        "required_level": "required",
+        "units": "degrees",
+        "contexts": ["grid_topography"],
+    },
+    "PCT_SAND": {
+        "dims": "nlevsoi,lsmlat,lsmlon",
+        "doc": "Soil sand percentage by mass (0–100) in each soil layer; "
+        "controls hydraulic and thermal properties.",
+        "required_level": "required",
+        "units": "percent",
+        "contexts": ["soil_properties"],
+    },
+    "PCT_CLAY": {
+        "dims": "nlevsoi,lsmlat,lsmlon",
+        "doc": "Soil clay percentage by mass (0–100) in each soil layer; "
+        "controls hydraulic and thermal properties.",
+        "required_level": "required",
+        "units": "percent",
+        "contexts": ["soil_properties"],
+    },
+    "ORGANIC": {
+        "dims": "nlevsoi,lsmlat,lsmlon",
+        "doc": "Soil organic matter or organic carbon per layer; used in "
+        "biogeochemical and thermal calculations.",
+        "required_level": "optional",
+        "units": "unknown",
+        "contexts": ["soil_properties"],
+    },
+    "PCT_GRVL": {
+        "dims": "nlevsoi,lsmlat,lsmlon",
+        "doc": "Percent gravel content (0–100) in each soil layer; "
+        "affects soil water storage and hydraulic conductivity.",
+        "required_level": "optional",
+        "units": "percent",
+        "contexts": ["soil_properties"],
+    },
+    "GLC_MEC": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Integer glacier elevation-class index for each grid cell "
+        "when using mechanistic glacier (MEC) landunits.",
+        "required_level": "conditional",
+        "attrs": {
+            "requirement": "Required when glacier MEC landunits are "
+            "used; optional otherwise"
+        },
+        "units": "unitless",
+        "contexts": ["glaciers"],
+    },
+    "MONTHLY_LAI": {
+        "dims": "time,lsmlat,lsmlon",
+        "doc": "Leaf area index (LAI; m2 leaf per m2 ground) monthly "
+        "climatology; time is typically 12 months.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure"],
+    },
+    "MONTHLY_SAI": {
+        "dims": "time,lsmlat,lsmlon",
+        "doc": "Stem area index (SAI) monthly climatology; time is "
+        "typically 12 months.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure"],
+    },
+    "MONTHLY_HEIGHT_TOP": {
+        "dims": "time,lsmlat,lsmlon",
+        "doc": "Monthly climatology of canopy top height (m) for vegetated landunits.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["vegetation_structure"],
+    },
+    "MONTHLY_HEIGHT_BOT": {
+        "dims": "time,lsmlat,lsmlon",
+        "doc": "Monthly climatology of canopy bottom height "
+        "(m) for vegetated landunits.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["vegetation_structure"],
+    },
+    "APATITE_P": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Soil phosphorus pool in apatite (primary mineral) form; "
+        "used by phosphorus biogeochemistry when enabled.",
+        "required_level": "optional",
+        "units": "unknown",
+        "contexts": ["phosphorus_cycle"],
+    },
+    "LABILE_P": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Soil labile (readily available) phosphorus pool; used by "
+        "P-cycle parameterizations.",
+        "required_level": "optional",
+        "units": "unknown",
+        "contexts": ["phosphorus_cycle"],
+    },
+    "OCCLUDED_P": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Soil occluded phosphorus pool (sorbed or otherwise "
+        "inaccessible); part of multi-pool P parameterization.",
+        "required_level": "optional",
+        "units": "unknown",
+        "contexts": ["phosphorus_cycle"],
+    },
+    "SECONDARY_P": {
+        "dims": "lsmlat,lsmlon",
+        "doc": "Soil secondary mineral phosphorus pool; intermediate "
+        "in reactivity between apatite and labile pools.",
+        "required_level": "optional",
+        "units": "unknown",
+        "contexts": ["phosphorus_cycle"],
+    },
+}
 
 # -----------------------------------------------------------------------------
 # Zonal-sampling aggregation policy
@@ -454,9 +602,8 @@ SURFACE_VAR_SPECS = {
 
 SURFACE_VAR_AGG_VALID = {
     # meta
-    "auto",        # resolve by dtype at runtime
-    "derived",     # derived from Domain (e.g., area/coords)
-
+    "auto",  # resolve by dtype at runtime
+    "derived",  # derived from Domain (e.g., area/coords)
     # explicit reducers (implemented in dapper.geo.zonal)
     "wmean",
     "wmode",
@@ -469,8 +616,9 @@ SURFACE_VAR_AGG_VALID = {
 SURFACE_VAR_DERIVED = {
     "LONGXY",  # domain lon
     "LATIXY",  # domain lat
-    "AREA",    # domain cell area (m2)
+    "AREA",  # domain cell area (m2)
 }
+
 
 def _add_default_agg_policies() -> None:
     """Ensure every SURFACE_VAR_SPECS entry has an 'agg' policy."""
@@ -500,5 +648,6 @@ def _add_default_agg_policies() -> None:
     if invalid:
         bad = ", ".join([f"{v}={a}" for v, a in invalid[:25]])
         raise ValueError(f"Invalid agg policies in SURFACE_VAR_SPECS: {bad}")
+
 
 _add_default_agg_policies()
