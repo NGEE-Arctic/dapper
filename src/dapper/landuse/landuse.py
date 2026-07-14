@@ -12,87 +12,9 @@ import geopandas as gpd
 
 from dapper.geo import sampling
 from dapper.domains.domain import Domain
+from dapper.surf.fraction_closure import normalize_fraction_closure
 
 LonWrap = Literal["auto", "0_360", "-180_180"]
-
-
-def _scale_to_target_sum(
-    da: xr.DataArray,
-    *,
-    dim: str,
-    target: xr.DataArray,
-    eps: float = 1e-12,
-) -> xr.DataArray:
-    """Scale values along `dim` so their sum matches `target` where possible."""
-    work = da.astype(np.float64)
-    summed = work.sum(dim=dim, skipna=True)
-    valid = np.isfinite(summed) & (np.abs(summed) > eps) & np.isfinite(target)
-    safe_den = xr.where(valid, summed, 1.0)
-    factor = xr.where(valid, target.astype(np.float64) / safe_den, 1.0)
-    return work * factor
-
-
-def _normalize_landuse_fraction_closure(ds: xr.Dataset) -> xr.Dataset:
-    """Enforce closure on fraction-like landuse outputs before writing."""
-    ds2 = ds.copy(deep=False)
-
-    landunit_scalar_names = ["PCT_NATVEG", "PCT_CROP", "PCT_WETLAND", "PCT_LAKE", "PCT_GLACIER"]
-    landunit_terms: list[xr.DataArray] = []
-    for name in landunit_scalar_names:
-        if name in ds2:
-            landunit_terms.append(ds2[name].astype(np.float64))
-
-    urban_group = None
-    if "PCT_URBAN" in ds2:
-        urban = ds2["PCT_URBAN"].astype(np.float64)
-        if "numurbl" in urban.dims:
-            urban_group = urban
-            landunit_terms.append(urban.sum(dim="numurbl", skipna=True))
-        else:
-            landunit_terms.append(urban)
-
-    if len(landunit_terms) >= 2:
-        current_total = sum(landunit_terms)
-        near_100 = np.abs(current_total - 100.0) <= 1.0
-        valid = np.isfinite(current_total) & (current_total > 1e-12) & near_100
-        factor = xr.where(valid, 100.0 / current_total, 1.0)
-
-        for name in landunit_scalar_names:
-            if name in ds2:
-                ds2[name] = ds2[name].astype(np.float64) * factor
-        if urban_group is not None:
-            ds2["PCT_URBAN"] = urban_group * factor
-        elif "PCT_URBAN" in ds2:
-            ds2["PCT_URBAN"] = ds2["PCT_URBAN"].astype(np.float64) * factor
-
-    if "PCT_NAT_PFT" in ds2 and "natpft" in ds2["PCT_NAT_PFT"].dims:
-        target = xr.full_like(
-            ds2["PCT_NAT_PFT"].isel(natpft=0, drop=True),
-            100.0,
-            dtype=np.float64,
-        )
-        ds2["PCT_NAT_PFT"] = _scale_to_target_sum(ds2["PCT_NAT_PFT"], dim="natpft", target=target)
-
-    if "PCT_CFT" in ds2 and "cft" in ds2["PCT_CFT"].dims and "PCT_CROP" in ds2:
-        ds2["PCT_CFT"] = _scale_to_target_sum(ds2["PCT_CFT"], dim="cft", target=ds2["PCT_CROP"].astype(np.float64))
-
-    if "PCT_GLC_MEC" in ds2 and "nglcec" in ds2["PCT_GLC_MEC"].dims and "PCT_GLACIER" in ds2:
-        ds2["PCT_GLC_MEC"] = _scale_to_target_sum(
-            ds2["PCT_GLC_MEC"],
-            dim="nglcec",
-            target=ds2["PCT_GLACIER"].astype(np.float64),
-        )
-
-    if "FSURF" in ds2 and "FGRD" in ds2:
-        fs = ds2["FSURF"].astype(np.float64)
-        fg = ds2["FGRD"].astype(np.float64)
-        total = fs + fg
-        valid = np.isfinite(total) & (total > 1e-12)
-        factor = xr.where(valid, 1.0 / total, 1.0)
-        ds2["FSURF"] = fs * factor
-        ds2["FGRD"] = fg * factor
-
-    return ds2
 
 def sample_landuse_timeseries(
     src_path: str | Path,
@@ -349,7 +271,7 @@ def sample_landuse_timeseries(
         csv_path = out_path.with_suffix(out_path.suffix + ".zonal_weights.csv")
         dfw_all.to_csv(csv_path, index=False)
 
-    out = _normalize_landuse_fraction_closure(out)
+    out = normalize_fraction_closure(out)
     _write_nc(out, out_path)
 
     df_summary = pd.DataFrame({gid_col: order, "sample_ncells": ncells, "sample_area_total_m2": area_m2})

@@ -329,6 +329,36 @@ class SurfaceValidator:
             r.append(CheckResult("V-105.consistency.pftsum", "WARN", max_diff <= 1e-6,
                                  f"mean(|sum(PCT_NAT_PFT)-100|)={mean_diff:.3e}; max={max_diff:.3e}"))
 
+        # landunit closure ≈ 100 across available classes (incl urban aggregate)
+        landunit_terms: List[xr.DataArray] = []
+        for name in ("PCT_NATVEG", "PCT_CROP", "PCT_WETLAND", "PCT_LAKE", "PCT_GLACIER"):
+            if name in ds:
+                landunit_terms.append(ds[name].astype("float64"))
+        if "PCT_URBAN" in ds:
+            urb = ds["PCT_URBAN"].astype("float64")
+            if "numurbl" in urb.dims:
+                landunit_terms.append(urb.sum(dim="numurbl", skipna=True))
+            else:
+                landunit_terms.append(urb)
+        if len(landunit_terms) >= 2:
+            lsum = sum(landunit_terms)
+            lresid = np.abs(np.asarray(lsum.values, dtype="float64") - 100.0)
+            mean_diff = float(np.nanmean(lresid))
+            max_diff = float(np.nanmax(lresid))
+            r.append(CheckResult("V-108.consistency.landunitsum", "WARN", max_diff <= 1e-6,
+                                 f"mean(|landunit_sum-100|)={mean_diff:.3e}; max={max_diff:.3e}"))
+
+        # topounit area weights should close to 100 across topounit dim.
+        for top_var in ("PCT_TOPUNIT", "TopounitFracArea"):
+            if top_var in ds and "topounit" in ds[top_var].dims:
+                tsum = ds[top_var].sum(dim="topounit", skipna=True)
+                tresid = np.abs(np.asarray(tsum.values, dtype="float64") - 100.0)
+                mean_diff = float(np.nanmean(tresid))
+                max_diff = float(np.nanmax(tresid))
+                r.append(CheckResult("V-109.consistency.topounitsum", "WARN", max_diff <= 1e-6,
+                                     f"{top_var}: mean(|sum-100|)={mean_diff:.3e}; max={max_diff:.3e}"))
+                break
+
         # If any cell has PCT_URBAN>0 → URBAN_REGION_ID present
         if "PCT_URBAN" in ds:
             urb_max = np.nanmax(np.asarray(ds["PCT_URBAN"].values))
