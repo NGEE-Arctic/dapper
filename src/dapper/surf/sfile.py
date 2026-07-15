@@ -206,7 +206,8 @@ def write_surface_nc(
     closure_critical = closure_critical_variables(ds2.data_vars)
     enc: Dict[str, dict] = {}
     for v in ds2.data_vars:
-        # Fill values must match dtype. Here we do float32 to match ELM surface expectations.
+        # Fill values must match dtype. Most float vars are written as float32,
+        # while closure-critical fractions stay float64 to preserve exact sums.
         if ds2[v].dtype.kind == "f":
             if v in closure_critical:
                 enc[v] = {"dtype": "float64", "_FillValue": np.float64(-9.96921e36)}
