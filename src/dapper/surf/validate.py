@@ -348,16 +348,14 @@ class SurfaceValidator:
             r.append(CheckResult("V-108.consistency.landunitsum", "WARN", max_diff <= 1e-6,
                                  f"mean(|landunit_sum-100|)={mean_diff:.3e}; max={max_diff:.3e}"))
 
-        # topounit area weights should close to 100 across topounit dim.
-        for top_var in ("PCT_TOPUNIT", "TopounitFracArea"):
-            if top_var in ds and "topounit" in ds[top_var].dims:
-                tsum = ds[top_var].sum(dim="topounit", skipna=True)
-                tresid = np.abs(np.asarray(tsum.values, dtype="float64") - 100.0)
-                mean_diff = float(np.nanmean(tresid))
-                max_diff = float(np.nanmax(tresid))
-                r.append(CheckResult("V-109.consistency.topounitsum", "WARN", max_diff <= 1e-6,
-                                     f"{top_var}: mean(|sum-100|)={mean_diff:.3e}; max={max_diff:.3e}"))
-                break
+        # TopounitFracArea is a decimal fraction; sum over topounit should close to 1.
+        if "TopounitFracArea" in ds and "topounit" in ds["TopounitFracArea"].dims:
+            tsum = ds["TopounitFracArea"].sum(dim="topounit", skipna=True)
+            tresid = np.abs(np.asarray(tsum.values, dtype="float64") - 1.0)
+            mean_diff = float(np.nanmean(tresid))
+            max_diff = float(np.nanmax(tresid))
+            r.append(CheckResult("V-109.consistency.topounitfracsum", "WARN", max_diff <= 1e-6,
+                                 f"TopounitFracArea: mean(|sum-1|)={mean_diff:.3e}; max={max_diff:.3e}"))
 
         # If any cell has PCT_URBAN>0 → URBAN_REGION_ID present
         if "PCT_URBAN" in ds:

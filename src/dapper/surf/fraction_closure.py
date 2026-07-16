@@ -179,11 +179,10 @@ def normalize_fraction_closure(ds: xr.Dataset) -> xr.Dataset:
             target=ds2["PCT_GLACIER"].astype(np.float64),
         )
 
-    # Topounit area weights can appear under either canonical name.
-    for top_var in ("PCT_TOPUNIT", "TopounitFracArea"):
-        tgt_top = _full_like_from_partition(ds2, var_name=top_var, dim="topounit", value=100.0)
-        if tgt_top is not None:
-            _close_partition(ds2, var_name=top_var, dim="topounit", target=tgt_top)
+    # TopounitFracArea is a decimal fraction (0-1) and should sum to 1.0 over topounit.
+    tgt_top = _full_like_from_partition(ds2, var_name="TopounitFracArea", dim="topounit", value=1.0)
+    if tgt_top is not None:
+        _close_partition(ds2, var_name="TopounitFracArea", dim="topounit", target=tgt_top)
 
     _close_unit_partition(ds2, left="FSURF", right="FGRD")
 
@@ -203,7 +202,6 @@ def closure_critical_variables(present_vars: Iterable[str]) -> set[str]:
         "PCT_WETLAND",
         "PCT_LAKE",
         "PCT_URBAN",
-        "PCT_TOPUNIT",
         "TopounitFracArea",
         "FSURF",
         "FGRD",
