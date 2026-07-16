@@ -242,7 +242,8 @@ def test_topounit_landunit_closure_exact():
     np.testing.assert_allclose(total.values, 100.0, atol=1e-12, rtol=0.0)
 
 
-def test_topounit_weight_aliases_close_to_100():
+def test_topounit_fracarea_closure_exact():
+    """TopounitFracArea should close to 1.0 (not 100) across topounit dimension."""
     ds = xr.Dataset(
         coords={
             "topounit": np.arange(3, dtype=np.int32),
@@ -251,11 +252,61 @@ def test_topounit_weight_aliases_close_to_100():
         }
     )
 
-    ds["PCT_TOPUNIT"] = xr.DataArray(
-        np.array([[[40.0]], [[30.0]], [[29.999999]]], dtype=np.float64),
+    ds["TopounitFracArea"] = xr.DataArray(
+        np.array([[[0.40]], [[0.30]], [[0.29999999]]], dtype=np.float64),
         dims=("topounit", "lsmlat", "lsmlon"),
     )
 
     fixed = normalize_fraction_closure(ds)
-    tot = fixed["PCT_TOPUNIT"].sum(dim="topounit")
-    np.testing.assert_allclose(tot.values, 100.0, atol=1e-12, rtol=0.0)
+    tot = fixed["TopounitFracArea"].sum(dim="topounit")
+    np.testing.assert_allclose(tot.values, 1.0, atol=1e-12, rtol=0.0)
+
+
+
+
+
+def test_add_topounits_expands_pct_nat_pft():
+    """After add_topounits_from_domain, PCT_NAT_PFT must gain the topounit dimension."""
+    import pandas as pd
+    from unittest.mock import MagicMock
+    from dapper.surf.sfile import SurfaceFile
+
+    # 2 cells (lsmlat=2), 4 PFTs, 1 longitude — uniform 25% per PFT per cell
+    natpft_vals = np.ones((4, 2, 1), dtype=np.float64) * 25.0
+    ds = xr.Dataset(
+        {
+            "PCT_NAT_PFT": xr.DataArray(natpft_vals, dims=("natpft", "lsmlat", "lsmlon")),
+            "PCT_NATVEG":  xr.DataArray(np.ones((2, 1)) * 100.0, dims=("lsmlat", "lsmlon")),
+        },
+        coords={
+            "natpft":  np.arange(4, dtype=np.int32),
+            "lsmlat":  np.arange(2, dtype=np.int32),
+            "lsmlon":  np.arange(1, dtype=np.int32),
+        },
+    )
+
+    sf = SurfaceFile(ds)
+
+    # Build a minimal mock domain with 2 cells and 2 topounits each
+    topounits_df = pd.DataFrame({
+        "gid":             ["0", "0", "1", "1"],
+        "topounit_id":     ["tu0", "tu1", "tu2", "tu3"],
+        "TopounitPctOfCell": [60.0, 40.0, 50.0, 50.0],
+    })
+    df_loc = pd.DataFrame({"gid": ["0", "1"]})
+
+    domain = MagicMock()
+    domain.topounits = topounits_df
+    domain.to_df_loc.return_value = df_loc
+
+    sf.add_topounits_from_domain(domain)
+
+    out = sf.ds
+    assert "topounit" in out["PCT_NAT_PFT"].dims, "PCT_NAT_PFT must have topounit dim after add_topounits_from_domain"
+    # Dim order: topounit before natpft, spatial last
+    dims = list(out["PCT_NAT_PFT"].dims)
+    assert dims.index("topounit") < dims.index("natpft"), "topounit must precede natpft"
+    assert dims[-2:] == ["lsmlat", "lsmlon"], "spatial dims must be last"
+    # Each topounit still has PFT fractions summing to 100
+    pft_sum = out["PCT_NAT_PFT"].sum(dim="natpft")
+    np.testing.assert_allclose(pft_sum.values, 100.0, atol=1e-10, rtol=0.0)
