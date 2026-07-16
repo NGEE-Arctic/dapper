@@ -1032,6 +1032,14 @@ class SurfaceFile:
         """
         Attach topounits + per-cell weights to the surface dataset.
 
+        This method:
+        - Adds a topounit dimension and coordinate to the dataset
+        - Creates a topounit fraction variable (default: TopounitFracArea) with values
+          normalized to decimal fractions (0.0-1.0, summing to 1.0 per cell)
+        - Expands topounit-indexed variables in SURFACE_VAR_SPECS (e.g., PCT_NAT_PFT)
+          to include the topounit dimension via uniform broadcast, where all topounits
+          in a cell inherit the parent cell's distribution
+
         Expects domain.topounits to exist and contain:
         - gid_col (links topounit -> cell gid)
         - id_col  (unique id per topounit across the whole run)
