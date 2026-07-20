@@ -858,6 +858,35 @@ SURFACE_VAR_SPECS = {
         "units": "m",
         "contexts": ["hydrology", "inland_water", "topounits"],
     },
+    "SOIL_COLOR": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Soil color; categorical index affecting soil albedo parameterization.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["soil_properties", "topounits"],
+    },
+    "SOIL_ORDER": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Soil order; categorical soil classification for pedogenic properties.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["soil_properties", "topounits"],
+    },
+    "SLP_P10": {
+        "dims": "nlevslp,topounit,lsmlat,lsmlon",
+        "doc": "Slope at quantiles (minimum and 10 to 100 percentile); "
+        "topographic distribution parameter.",
+        "required_level": "optional",
+        "units": "km km^-1",
+        "contexts": ["grid_topography", "topounits"],
+    },
+    "aveDTB": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Average depth to bedrock of the subgrid; critical for groundwater dynamics.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["soil_properties", "grid_topography", "topounits"],
+    },
 }
 
 # -----------------------------------------------------------------------------
