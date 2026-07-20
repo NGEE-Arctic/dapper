@@ -887,6 +887,54 @@ SURFACE_VAR_SPECS = {
         "units": "m",
         "contexts": ["soil_properties", "grid_topography", "topounits"],
     },
+    "EF1_BTR": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for broadleaf tree (BTR); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "EF1_CRP": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for crop (CRP); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "EF1_FDT": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for deciduous forest (FDT); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "EF1_FET": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for evergreen forest (FET); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "EF1_GRS": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for grass (GRS); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "EF1_SHR": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for shrub (SHR); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
 }
 
 # -----------------------------------------------------------------------------
