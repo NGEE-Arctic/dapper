@@ -935,6 +935,58 @@ SURFACE_VAR_SPECS = {
         "units": "unitless",
         "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
     },
+    "Ws": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "VIC Ws parameter for the ARNO Curve; maximum soil moisture storage.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "abm": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Agricultural fire peak month; seasonal indicator for fire occurrence.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["land_cover", "disturbance", "topounits"],
+    },
+    "gdp": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "GDP (parameter); economic/anthropogenic activity indicator.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["anthropogenic", "topounits"],
+    },
+    "peatf": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Peatland fraction; fraction of grid cell area classified as peat soils.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["soil_properties", "land_cover", "topounits"],
+    },
+    "parEro_c1": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Scalar parameter for rainfall-driven hillslope erosion; "
+        "controls erosion from precipitation.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["grid_topography", "disturbance", "topounits"],
+    },
+    "parEro_c2": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Scalar parameter for runoff-driven hillslope erosion; "
+        "controls erosion from surface runoff.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["grid_topography", "hydrology", "disturbance", "topounits"],
+    },
+    "parEro_c3": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Scalar parameter for transport capacity of hillslope overland flow; "
+        "controls sediment transport capacity.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["grid_topography", "hydrology", "disturbance", "topounits"],
+    },
 }
 
 # -----------------------------------------------------------------------------
