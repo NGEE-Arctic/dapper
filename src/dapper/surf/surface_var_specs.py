@@ -800,6 +800,64 @@ SURFACE_VAR_SPECS = {
         "units": "unitless",
         "contexts": ["urban", "topounits"],
     },
+    "Ds": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "VIC Ds parameter for the ARNO curve; fractional saturated area "
+        "infiltration parameter.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "Dsmax": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "VIC Dsmax parameter for the ARNO curve; maximum infiltration rate.",
+        "required_level": "optional",
+        "units": "mm/day",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "F0": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Maximum gridcell fractional inundated area; controls wetland extent.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["hydrology", "inland_water", "topounits"],
+    },
+    "FMAX": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Maximum fractional saturated area; upper bound on inundation fraction.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "P3": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Coefficient for qflx_surf_lag for finundated; surface runoff delay parameter.",
+        "required_level": "optional",
+        "units": "s/mm",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "ZWT0": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Decay factor for finundated; controls inundated area decay with water table.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "binfl": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "VIC b parameter for the Variable Infiltration Capacity Curve; "
+        "infiltration nonlinearity.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "LAKEDEPTH": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Lake depth; average water depth for lake landunit.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["hydrology", "inland_water", "topounits"],
+    },
 }
 
 # -----------------------------------------------------------------------------
