@@ -217,7 +217,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["land_cover", "glaciers", "topounits"],
     },
     "PCT_URBAN": {
-        "dims": "topounit,numurbl,lsmlat,lsmlon",
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
         "doc": "Fraction of each grid cell that is urban, for each "
         "density class in the multi-density urban scheme.",
         "required_level": "conditional",
@@ -239,7 +239,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["urban", "topounits"],
     },
     "PCT_GLC_MEC": {
-        "dims": "topounit,nglcec,lsmlat,lsmlon",
+        "dims": "nglcec,topounit,lsmlat,lsmlon",
         "doc": "Percent of grid cell area assigned to mechanistic "
         "glacier classes (accumulation/ablation, etc.).",
         "required_level": "conditional",
@@ -251,7 +251,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["land_cover", "glaciers", "topounits"],
     },
     "TOPO_GLC_MEC": {
-        "dims": "topounit,nglcec,lsmlat,lsmlon",
+        "dims": "nglcec,topounit,lsmlat,lsmlon",
         "doc": "Elevation (m) of each mechanistic glacier class.",
         "required_level": "conditional",
         "attrs": {
@@ -312,7 +312,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["land_cover", "polygonal_tundra", "topounits"],
     },
     "PCT_CFT": {
-        "dims": "topounit,cft,lsmlat,lsmlon",
+        "dims": "cft,topounit,lsmlat,lsmlon",
         "doc": "Fraction of vegetated area allocated to each crop "
         "functional type; code aborts if missing when cft "
         "dimension exists.",
@@ -325,7 +325,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["land_cover", "crops_irrigation", "topounits"],
     },
     "NFERT": {
-        "dims": "topounit,cft,lsmlat,lsmlon",
+        "dims": "cft,topounit,lsmlat,lsmlon",
         "doc": "Nitrogen fertilizer application for each crop functional "
         "type; if absent, values default to zero.",
         "required_level": "optional",
@@ -334,7 +334,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["crops_irrigation", "topounits"],
     },
     "PFERT": {
-        "dims": "topounit,cft,lsmlat,lsmlon",
+        "dims": "cft,topounit,lsmlat,lsmlon",
         "doc": "Phosphorus fertilizer application for each crop functional "
         "type; treated like NFERT.",
         "required_level": "optional",
@@ -342,7 +342,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["crops_irrigation", "topounits", "phosphorus_cycle"],
     },
     "PCT_NAT_PFT": {
-        "dims": "topounit,natpft,lsmlat,lsmlon",
+        "dims": "natpft,topounit,lsmlat,lsmlon",
         "doc": "Fraction of vegetated area allocated to each natural "
         "plant functional type; code aborts if missing.",
         "required_level": "required",
@@ -385,8 +385,8 @@ SURFACE_VAR_SPECS = {
     },
     "MaxTopounitElv": {
         "dims": "lsmlat,lsmlon",
-        "doc": "Maximum elevation (m) among topounits for each "
-        "grid cell; read only if present.",
+        "doc": "Maximum topounits elevation in each grid cell; a summary "
+        "statistic reflecting the highest elevation among topounits.",
         "required_level": "optional",
         "attrs": {
             "requirement": "Optional (not required, but "
@@ -443,10 +443,10 @@ SURFACE_VAR_SPECS = {
     },
     "TOPO2": {
         "dims": "lsmlat,lsmlon",
-        "doc": "Second topography field used in the ELM topounit framework; "
-        "read only if present.",
+        "doc": "Weighted average of topounits elevation in each grid cell; "
+        "a summary statistic for topounit-based elevation characterization.",
         "required_level": "optional",
-        "units": "unknown",
+        "units": "m",
         "contexts": ["grid_topography", "topounits"],
     },
     "AREA": {
@@ -476,36 +476,36 @@ SURFACE_VAR_SPECS = {
         "contexts": ["grid_topography"],
     },
     "PCT_SAND": {
-        "dims": "nlevsoi,lsmlat,lsmlon",
+        "dims": "nlevsoi,topounit,lsmlat,lsmlon",
         "doc": "Soil sand percentage by mass (0–100) in each soil layer; "
         "controls hydraulic and thermal properties.",
         "required_level": "required",
         "units": "percent",
-        "contexts": ["soil_properties"],
+        "contexts": ["soil_properties", "topounits"],
     },
     "PCT_CLAY": {
-        "dims": "nlevsoi,lsmlat,lsmlon",
+        "dims": "nlevsoi,topounit,lsmlat,lsmlon",
         "doc": "Soil clay percentage by mass (0–100) in each soil layer; "
         "controls hydraulic and thermal properties.",
         "required_level": "required",
         "units": "percent",
-        "contexts": ["soil_properties"],
+        "contexts": ["soil_properties", "topounits"],
     },
     "ORGANIC": {
-        "dims": "nlevsoi,lsmlat,lsmlon",
-        "doc": "Soil organic matter or organic carbon per layer; used in "
+        "dims": "nlevsoi,topounit,lsmlat,lsmlon",
+        "doc": "Organic matter density per soil layer; used in "
         "biogeochemical and thermal calculations.",
         "required_level": "optional",
-        "units": "unknown",
-        "contexts": ["soil_properties"],
+        "units": "kg/m3 (assumed carbon content 0.58 gC per gOM)",
+        "contexts": ["soil_properties", "topounits"],
     },
     "PCT_GRVL": {
-        "dims": "nlevsoi,lsmlat,lsmlon",
+        "dims": "nlevsoi,topounit,lsmlat,lsmlon",
         "doc": "Percent gravel content (0–100) in each soil layer; "
         "affects soil water storage and hydraulic conductivity.",
         "required_level": "optional",
         "units": "percent",
-        "contexts": ["soil_properties"],
+        "contexts": ["soil_properties", "topounits"],
     },
     "GLC_MEC": {
         "dims": "lsmlat,lsmlon",
@@ -520,67 +520,67 @@ SURFACE_VAR_SPECS = {
         "contexts": ["glaciers"],
     },
     "MONTHLY_LAI": {
-        "dims": "time,lsmlat,lsmlon",
+        "dims": "time,lsmpft,topounit,lsmlat,lsmlon",
         "doc": "Leaf area index (LAI; m2 leaf per m2 ground) monthly "
         "climatology; time is typically 12 months.",
         "required_level": "optional",
         "units": "unitless",
-        "contexts": ["vegetation_structure"],
+        "contexts": ["vegetation_structure", "topounits"],
     },
     "MONTHLY_SAI": {
-        "dims": "time,lsmlat,lsmlon",
+        "dims": "time,lsmpft,topounit,lsmlat,lsmlon",
         "doc": "Stem area index (SAI) monthly climatology; time is "
         "typically 12 months.",
         "required_level": "optional",
         "units": "unitless",
-        "contexts": ["vegetation_structure"],
+        "contexts": ["vegetation_structure", "topounits"],
     },
     "MONTHLY_HEIGHT_TOP": {
-        "dims": "time,lsmlat,lsmlon",
+        "dims": "time,lsmpft,topounit,lsmlat,lsmlon",
         "doc": "Monthly climatology of canopy top height (m) for vegetated landunits.",
         "required_level": "optional",
         "units": "m",
-        "contexts": ["vegetation_structure"],
+        "contexts": ["vegetation_structure", "topounits"],
     },
     "MONTHLY_HEIGHT_BOT": {
-        "dims": "time,lsmlat,lsmlon",
+        "dims": "time,lsmpft,topounit,lsmlat,lsmlon",
         "doc": "Monthly climatology of canopy bottom height "
         "(m) for vegetated landunits.",
         "required_level": "optional",
         "units": "m",
-        "contexts": ["vegetation_structure"],
+        "contexts": ["vegetation_structure", "topounits"],
     },
     "APATITE_P": {
-        "dims": "lsmlat,lsmlon",
-        "doc": "Soil phosphorus pool in apatite (primary mineral) form; "
-        "used by phosphorus biogeochemistry when enabled.",
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Apatite phosphorus; soil phosphorus pool in apatite "
+        "(primary mineral) form; used by phosphorus biogeochemistry when enabled.",
         "required_level": "optional",
-        "units": "unknown",
-        "contexts": ["phosphorus_cycle"],
+        "units": "gP/m2",
+        "contexts": ["phosphorus_cycle", "topounits"],
     },
     "LABILE_P": {
-        "dims": "lsmlat,lsmlon",
-        "doc": "Soil labile (readily available) phosphorus pool; used by "
-        "P-cycle parameterizations.",
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Labile inorganic phosphorus; soil labile (readily available) "
+        "phosphorus pool; used by P-cycle parameterizations.",
         "required_level": "optional",
-        "units": "unknown",
-        "contexts": ["phosphorus_cycle"],
+        "units": "gP/m2",
+        "contexts": ["phosphorus_cycle", "topounits"],
     },
     "OCCLUDED_P": {
-        "dims": "lsmlat,lsmlon",
-        "doc": "Soil occluded phosphorus pool (sorbed or otherwise "
-        "inaccessible); part of multi-pool P parameterization.",
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Occluded phosphorus; soil occluded phosphorus pool (sorbed or "
+        "otherwise inaccessible); part of multi-pool P parameterization.",
         "required_level": "optional",
-        "units": "unknown",
-        "contexts": ["phosphorus_cycle"],
+        "units": "gP/m2",
+        "contexts": ["phosphorus_cycle", "topounits"],
     },
     "SECONDARY_P": {
-        "dims": "lsmlat,lsmlon",
-        "doc": "Soil secondary mineral phosphorus pool; intermediate "
-        "in reactivity between apatite and labile pools.",
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Secondary mineral phosphorus; soil secondary mineral phosphorus "
+        "pool; intermediate in reactivity between apatite and labile pools.",
         "required_level": "optional",
-        "units": "unknown",
-        "contexts": ["phosphorus_cycle"],
+        "units": "gP/m2",
+        "contexts": ["phosphorus_cycle", "topounits"],
     },
 }
 
