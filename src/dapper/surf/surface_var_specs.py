@@ -582,6 +582,70 @@ SURFACE_VAR_SPECS = {
         "units": "gP/m2",
         "contexts": ["phosphorus_cycle", "topounits"],
     },
+    "ALB_IMPROAD_DIF": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Diffuse albedo of impervious road; spectral-dependent surface "
+        "reflectance for urban impervious surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_IMPROAD_DIR": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Direct albedo of impervious road; spectral-dependent surface "
+        "reflectance for urban impervious surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_PERROAD_DIF": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Diffuse albedo of pervious road; spectral-dependent surface "
+        "reflectance for urban pervious surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_PERROAD_DIR": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Direct albedo of pervious road; spectral-dependent surface "
+        "reflectance for urban pervious surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_ROOF_DIF": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Diffuse albedo of roof; spectral-dependent surface reflectance "
+        "for urban roof surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_ROOF_DIR": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Direct albedo of roof; spectral-dependent surface reflectance "
+        "for urban roof surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_WALL_DIF": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Diffuse albedo of wall; spectral-dependent surface reflectance "
+        "for urban wall surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_WALL_DIR": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Direct albedo of wall; spectral-dependent surface reflectance "
+        "for urban wall surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
 }
 
 # -----------------------------------------------------------------------------
