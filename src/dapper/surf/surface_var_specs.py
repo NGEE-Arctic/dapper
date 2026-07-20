@@ -646,6 +646,160 @@ SURFACE_VAR_SPECS = {
         "units": "unitless",
         "contexts": ["urban", "topounits"],
     },
+    "CV_IMPROAD": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Volumetric heat capacity of impervious road; thermal mass "
+        "property affecting diurnal temperature variations.",
+        "required_level": "optional",
+        "units": "J/m^3*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "CV_ROOF": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Volumetric heat capacity of roof; thermal mass property "
+        "affecting building heat dynamics.",
+        "required_level": "optional",
+        "units": "J/m^3*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "CV_WALL": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Volumetric heat capacity of wall; thermal mass property "
+        "affecting wall temperature dynamics.",
+        "required_level": "optional",
+        "units": "J/m^3*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "TK_IMPROAD": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Thermal conductivity of impervious road; controls heat diffusion "
+        "through urban surface layers.",
+        "required_level": "optional",
+        "units": "W/m*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "TK_ROOF": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Thermal conductivity of roof; controls heat transfer through "
+        "building roof material.",
+        "required_level": "optional",
+        "units": "W/m*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "TK_WALL": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Thermal conductivity of wall; controls heat transfer through "
+        "building wall material.",
+        "required_level": "optional",
+        "units": "W/m*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "EM_IMPROAD": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Emissivity of impervious road; controls longwave radiation "
+        "emission from urban surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "EM_PERROAD": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Emissivity of pervious road; controls longwave radiation "
+        "emission from pervious urban surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "EM_ROOF": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Emissivity of roof; controls longwave radiation emission "
+        "from building roof.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "EM_WALL": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Emissivity of wall; controls longwave radiation emission "
+        "from building walls.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "HT_ROOF": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Height of roof; geometric property defining building structure.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["urban", "topounits"],
+    },
+    "THICK_ROOF": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Thickness of roof; structural property affecting heat capacity.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["urban", "topounits"],
+    },
+    "THICK_WALL": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Thickness of wall; structural property affecting heat capacity.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["urban", "topounits"],
+    },
+    "NLEV_IMPROAD": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Number of impervious road layers; structural discretization for "
+        "temperature calculation.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "T_BUILDING_MAX": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Maximum interior building temperature; upper limit constraint "
+        "for urban heating/cooling.",
+        "required_level": "optional",
+        "units": "K",
+        "contexts": ["urban", "topounits"],
+    },
+    "T_BUILDING_MIN": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Minimum interior building temperature; lower limit constraint "
+        "for urban heating/cooling.",
+        "required_level": "optional",
+        "units": "K",
+        "contexts": ["urban", "topounits"],
+    },
+    "CANYON_HWR": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Canyon height to width ratio; urban geometric parameter affecting "
+        "radiation and wind.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "WIND_HGT_CANYON": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Height of wind in canyon; reference height for urban wind profile.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["urban", "topounits"],
+    },
+    "WTLUNIT_ROOF": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Fraction of roof; weight for urban landunit distribution.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "WTROAD_PERV": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Fraction of pervious road; weight for pervious surface distribution.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
 }
 
 # -----------------------------------------------------------------------------
