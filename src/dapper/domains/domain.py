@@ -974,7 +974,10 @@ class Domain:
         out_dir : Path-like, optional
             Override output root. Defaults to Domain.run_dir.
         filename : str, optional
-            Optional filename prefix for output NetCDFs. If provided, each var is written to '{filename}_{var}.nc'.
+            Optional filename template for output NetCDFs. Supports two formats:
+            - Template with {var} placeholder: 'ERA5_{var}_1950-2025_z01' generates 'ERA5_TBOT_1950-2025_z01.nc'
+            - Simple prefix (legacy): 'prefix' generates 'prefix_TBOT.nc'
+            The '.nc' extension is added automatically.
         overwrite : bool
             If False, raises if MET output(s) already exist.
         clip_to_full_years : bool or None

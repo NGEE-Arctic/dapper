@@ -12,6 +12,7 @@ import geopandas as gpd
 
 from dapper.geo import sampling
 from dapper.domains.domain import Domain
+from dapper.surf.fraction_closure import normalize_fraction_closure
 
 LonWrap = Literal["auto", "0_360", "-180_180"]
 
@@ -270,6 +271,7 @@ def sample_landuse_timeseries(
         csv_path = out_path.with_suffix(out_path.suffix + ".zonal_weights.csv")
         dfw_all.to_csv(csv_path, index=False)
 
+    out = normalize_fraction_closure(out)
     _write_nc(out, out_path)
 
     df_summary = pd.DataFrame({gid_col: order, "sample_ncells": ncells, "sample_area_total_m2": area_m2})

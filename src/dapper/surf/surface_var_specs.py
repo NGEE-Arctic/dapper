@@ -217,7 +217,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["land_cover", "glaciers", "topounits"],
     },
     "PCT_URBAN": {
-        "dims": "topounit,numurbl,lsmlat,lsmlon",
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
         "doc": "Fraction of each grid cell that is urban, for each "
         "density class in the multi-density urban scheme.",
         "required_level": "conditional",
@@ -239,7 +239,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["urban", "topounits"],
     },
     "PCT_GLC_MEC": {
-        "dims": "topounit,nglcec,lsmlat,lsmlon",
+        "dims": "nglcec,topounit,lsmlat,lsmlon",
         "doc": "Percent of grid cell area assigned to mechanistic "
         "glacier classes (accumulation/ablation, etc.).",
         "required_level": "conditional",
@@ -251,7 +251,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["land_cover", "glaciers", "topounits"],
     },
     "TOPO_GLC_MEC": {
-        "dims": "topounit,nglcec,lsmlat,lsmlon",
+        "dims": "nglcec,topounit,lsmlat,lsmlon",
         "doc": "Elevation (m) of each mechanistic glacier class.",
         "required_level": "conditional",
         "attrs": {
@@ -312,7 +312,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["land_cover", "polygonal_tundra", "topounits"],
     },
     "PCT_CFT": {
-        "dims": "topounit,cft,lsmlat,lsmlon",
+        "dims": "cft,topounit,lsmlat,lsmlon",
         "doc": "Fraction of vegetated area allocated to each crop "
         "functional type; code aborts if missing when cft "
         "dimension exists.",
@@ -325,7 +325,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["land_cover", "crops_irrigation", "topounits"],
     },
     "NFERT": {
-        "dims": "topounit,cft,lsmlat,lsmlon",
+        "dims": "cft,topounit,lsmlat,lsmlon",
         "doc": "Nitrogen fertilizer application for each crop functional "
         "type; if absent, values default to zero.",
         "required_level": "optional",
@@ -334,7 +334,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["crops_irrigation", "topounits"],
     },
     "PFERT": {
-        "dims": "topounit,cft,lsmlat,lsmlon",
+        "dims": "cft,topounit,lsmlat,lsmlon",
         "doc": "Phosphorus fertilizer application for each crop functional "
         "type; treated like NFERT.",
         "required_level": "optional",
@@ -342,7 +342,7 @@ SURFACE_VAR_SPECS = {
         "contexts": ["crops_irrigation", "topounits", "phosphorus_cycle"],
     },
     "PCT_NAT_PFT": {
-        "dims": "topounit,natpft,lsmlat,lsmlon",
+        "dims": "natpft,topounit,lsmlat,lsmlon",
         "doc": "Fraction of vegetated area allocated to each natural "
         "plant functional type; code aborts if missing.",
         "required_level": "required",
@@ -385,8 +385,8 @@ SURFACE_VAR_SPECS = {
     },
     "MaxTopounitElv": {
         "dims": "lsmlat,lsmlon",
-        "doc": "Maximum elevation (m) among topounits for each "
-        "grid cell; read only if present.",
+        "doc": "Maximum topounits elevation in each grid cell; a summary "
+        "statistic reflecting the highest elevation among topounits.",
         "required_level": "optional",
         "attrs": {
             "requirement": "Optional (not required, but "
@@ -443,10 +443,10 @@ SURFACE_VAR_SPECS = {
     },
     "TOPO2": {
         "dims": "lsmlat,lsmlon",
-        "doc": "Second topography field used in the ELM topounit framework; "
-        "read only if present.",
+        "doc": "Weighted average of topounits elevation in each grid cell; "
+        "a summary statistic for topounit-based elevation characterization.",
         "required_level": "optional",
-        "units": "unknown",
+        "units": "m",
         "contexts": ["grid_topography", "topounits"],
     },
     "AREA": {
@@ -476,36 +476,36 @@ SURFACE_VAR_SPECS = {
         "contexts": ["grid_topography"],
     },
     "PCT_SAND": {
-        "dims": "nlevsoi,lsmlat,lsmlon",
+        "dims": "nlevsoi,topounit,lsmlat,lsmlon",
         "doc": "Soil sand percentage by mass (0–100) in each soil layer; "
         "controls hydraulic and thermal properties.",
         "required_level": "required",
         "units": "percent",
-        "contexts": ["soil_properties"],
+        "contexts": ["soil_properties", "topounits"],
     },
     "PCT_CLAY": {
-        "dims": "nlevsoi,lsmlat,lsmlon",
+        "dims": "nlevsoi,topounit,lsmlat,lsmlon",
         "doc": "Soil clay percentage by mass (0–100) in each soil layer; "
         "controls hydraulic and thermal properties.",
         "required_level": "required",
         "units": "percent",
-        "contexts": ["soil_properties"],
+        "contexts": ["soil_properties", "topounits"],
     },
     "ORGANIC": {
-        "dims": "nlevsoi,lsmlat,lsmlon",
-        "doc": "Soil organic matter or organic carbon per layer; used in "
+        "dims": "nlevsoi,topounit,lsmlat,lsmlon",
+        "doc": "Organic matter density per soil layer; used in "
         "biogeochemical and thermal calculations.",
         "required_level": "optional",
-        "units": "unknown",
-        "contexts": ["soil_properties"],
+        "units": "kg/m3 (assumed carbon content 0.58 gC per gOM)",
+        "contexts": ["soil_properties", "topounits"],
     },
     "PCT_GRVL": {
-        "dims": "nlevsoi,lsmlat,lsmlon",
+        "dims": "nlevsoi,topounit,lsmlat,lsmlon",
         "doc": "Percent gravel content (0–100) in each soil layer; "
         "affects soil water storage and hydraulic conductivity.",
         "required_level": "optional",
         "units": "percent",
-        "contexts": ["soil_properties"],
+        "contexts": ["soil_properties", "topounits"],
     },
     "GLC_MEC": {
         "dims": "lsmlat,lsmlon",
@@ -520,67 +520,472 @@ SURFACE_VAR_SPECS = {
         "contexts": ["glaciers"],
     },
     "MONTHLY_LAI": {
-        "dims": "time,lsmlat,lsmlon",
+        "dims": "time,lsmpft,topounit,lsmlat,lsmlon",
         "doc": "Leaf area index (LAI; m2 leaf per m2 ground) monthly "
         "climatology; time is typically 12 months.",
         "required_level": "optional",
         "units": "unitless",
-        "contexts": ["vegetation_structure"],
+        "contexts": ["vegetation_structure", "topounits"],
     },
     "MONTHLY_SAI": {
-        "dims": "time,lsmlat,lsmlon",
+        "dims": "time,lsmpft,topounit,lsmlat,lsmlon",
         "doc": "Stem area index (SAI) monthly climatology; time is "
         "typically 12 months.",
         "required_level": "optional",
         "units": "unitless",
-        "contexts": ["vegetation_structure"],
+        "contexts": ["vegetation_structure", "topounits"],
     },
     "MONTHLY_HEIGHT_TOP": {
-        "dims": "time,lsmlat,lsmlon",
+        "dims": "time,lsmpft,topounit,lsmlat,lsmlon",
         "doc": "Monthly climatology of canopy top height (m) for vegetated landunits.",
         "required_level": "optional",
         "units": "m",
-        "contexts": ["vegetation_structure"],
+        "contexts": ["vegetation_structure", "topounits"],
     },
     "MONTHLY_HEIGHT_BOT": {
-        "dims": "time,lsmlat,lsmlon",
+        "dims": "time,lsmpft,topounit,lsmlat,lsmlon",
         "doc": "Monthly climatology of canopy bottom height "
         "(m) for vegetated landunits.",
         "required_level": "optional",
         "units": "m",
-        "contexts": ["vegetation_structure"],
+        "contexts": ["vegetation_structure", "topounits"],
     },
     "APATITE_P": {
-        "dims": "lsmlat,lsmlon",
-        "doc": "Soil phosphorus pool in apatite (primary mineral) form; "
-        "used by phosphorus biogeochemistry when enabled.",
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Apatite phosphorus; soil phosphorus pool in apatite "
+        "(primary mineral) form; used by phosphorus biogeochemistry when enabled.",
         "required_level": "optional",
-        "units": "unknown",
-        "contexts": ["phosphorus_cycle"],
+        "units": "gP/m2",
+        "contexts": ["phosphorus_cycle", "topounits"],
     },
     "LABILE_P": {
-        "dims": "lsmlat,lsmlon",
-        "doc": "Soil labile (readily available) phosphorus pool; used by "
-        "P-cycle parameterizations.",
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Labile inorganic phosphorus; soil labile (readily available) "
+        "phosphorus pool; used by P-cycle parameterizations.",
         "required_level": "optional",
-        "units": "unknown",
-        "contexts": ["phosphorus_cycle"],
+        "units": "gP/m2",
+        "contexts": ["phosphorus_cycle", "topounits"],
     },
     "OCCLUDED_P": {
-        "dims": "lsmlat,lsmlon",
-        "doc": "Soil occluded phosphorus pool (sorbed or otherwise "
-        "inaccessible); part of multi-pool P parameterization.",
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Occluded phosphorus; soil occluded phosphorus pool (sorbed or "
+        "otherwise inaccessible); part of multi-pool P parameterization.",
         "required_level": "optional",
-        "units": "unknown",
-        "contexts": ["phosphorus_cycle"],
+        "units": "gP/m2",
+        "contexts": ["phosphorus_cycle", "topounits"],
     },
     "SECONDARY_P": {
-        "dims": "lsmlat,lsmlon",
-        "doc": "Soil secondary mineral phosphorus pool; intermediate "
-        "in reactivity between apatite and labile pools.",
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Secondary mineral phosphorus; soil secondary mineral phosphorus "
+        "pool; intermediate in reactivity between apatite and labile pools.",
         "required_level": "optional",
-        "units": "unknown",
-        "contexts": ["phosphorus_cycle"],
+        "units": "gP/m2",
+        "contexts": ["phosphorus_cycle", "topounits"],
+    },
+    "ALB_IMPROAD_DIF": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Diffuse albedo of impervious road; spectral-dependent surface "
+        "reflectance for urban impervious surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_IMPROAD_DIR": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Direct albedo of impervious road; spectral-dependent surface "
+        "reflectance for urban impervious surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_PERROAD_DIF": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Diffuse albedo of pervious road; spectral-dependent surface "
+        "reflectance for urban pervious surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_PERROAD_DIR": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Direct albedo of pervious road; spectral-dependent surface "
+        "reflectance for urban pervious surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_ROOF_DIF": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Diffuse albedo of roof; spectral-dependent surface reflectance "
+        "for urban roof surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_ROOF_DIR": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Direct albedo of roof; spectral-dependent surface reflectance "
+        "for urban roof surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_WALL_DIF": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Diffuse albedo of wall; spectral-dependent surface reflectance "
+        "for urban wall surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "ALB_WALL_DIR": {
+        "dims": "numrad,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Direct albedo of wall; spectral-dependent surface reflectance "
+        "for urban wall surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "CV_IMPROAD": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Volumetric heat capacity of impervious road; thermal mass "
+        "property affecting diurnal temperature variations.",
+        "required_level": "optional",
+        "units": "J/m^3*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "CV_ROOF": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Volumetric heat capacity of roof; thermal mass property "
+        "affecting building heat dynamics.",
+        "required_level": "optional",
+        "units": "J/m^3*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "CV_WALL": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Volumetric heat capacity of wall; thermal mass property "
+        "affecting wall temperature dynamics.",
+        "required_level": "optional",
+        "units": "J/m^3*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "TK_IMPROAD": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Thermal conductivity of impervious road; controls heat diffusion "
+        "through urban surface layers.",
+        "required_level": "optional",
+        "units": "W/m*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "TK_ROOF": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Thermal conductivity of roof; controls heat transfer through "
+        "building roof material.",
+        "required_level": "optional",
+        "units": "W/m*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "TK_WALL": {
+        "dims": "nlevurb,numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Thermal conductivity of wall; controls heat transfer through "
+        "building wall material.",
+        "required_level": "optional",
+        "units": "W/m*K",
+        "contexts": ["urban", "topounits"],
+    },
+    "EM_IMPROAD": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Emissivity of impervious road; controls longwave radiation "
+        "emission from urban surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "EM_PERROAD": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Emissivity of pervious road; controls longwave radiation "
+        "emission from pervious urban surfaces.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "EM_ROOF": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Emissivity of roof; controls longwave radiation emission "
+        "from building roof.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "EM_WALL": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Emissivity of wall; controls longwave radiation emission "
+        "from building walls.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "HT_ROOF": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Height of roof; geometric property defining building structure.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["urban", "topounits"],
+    },
+    "THICK_ROOF": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Thickness of roof; structural property affecting heat capacity.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["urban", "topounits"],
+    },
+    "THICK_WALL": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Thickness of wall; structural property affecting heat capacity.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["urban", "topounits"],
+    },
+    "NLEV_IMPROAD": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Number of impervious road layers; structural discretization for "
+        "temperature calculation.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "T_BUILDING_MAX": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Maximum interior building temperature; upper limit constraint "
+        "for urban heating/cooling.",
+        "required_level": "optional",
+        "units": "K",
+        "contexts": ["urban", "topounits"],
+    },
+    "T_BUILDING_MIN": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Minimum interior building temperature; lower limit constraint "
+        "for urban heating/cooling.",
+        "required_level": "optional",
+        "units": "K",
+        "contexts": ["urban", "topounits"],
+    },
+    "CANYON_HWR": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Canyon height to width ratio; urban geometric parameter affecting "
+        "radiation and wind.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "WIND_HGT_CANYON": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Height of wind in canyon; reference height for urban wind profile.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["urban", "topounits"],
+    },
+    "WTLUNIT_ROOF": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Fraction of roof; weight for urban landunit distribution.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "WTROAD_PERV": {
+        "dims": "numurbl,topounit,lsmlat,lsmlon",
+        "doc": "Fraction of pervious road; weight for pervious surface distribution.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["urban", "topounits"],
+    },
+    "Ds": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "VIC Ds parameter for the ARNO curve; fractional saturated area "
+        "infiltration parameter.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "Dsmax": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "VIC Dsmax parameter for the ARNO curve; maximum infiltration rate.",
+        "required_level": "optional",
+        "units": "mm/day",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "F0": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Maximum gridcell fractional inundated area; controls wetland extent.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["hydrology", "inland_water", "topounits"],
+    },
+    "FMAX": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Maximum fractional saturated area; upper bound on inundation fraction.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "P3": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Coefficient for qflx_surf_lag for finundated; surface runoff delay parameter.",
+        "required_level": "optional",
+        "units": "s/mm",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "ZWT0": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Decay factor for finundated; controls inundated area decay with water table.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "binfl": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "VIC b parameter for the Variable Infiltration Capacity Curve; "
+        "infiltration nonlinearity.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "LAKEDEPTH": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Lake depth; average water depth for lake landunit.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["hydrology", "inland_water", "topounits"],
+    },
+    "SOIL_COLOR": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Soil color; categorical index affecting soil albedo parameterization.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["soil_properties", "topounits"],
+    },
+    "SOIL_ORDER": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Soil order; categorical soil classification for pedogenic properties.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["soil_properties", "topounits"],
+    },
+    "SLP_P10": {
+        "dims": "nlevslp,topounit,lsmlat,lsmlon",
+        "doc": "Slope at quantiles (minimum and 10 to 100 percentile); "
+        "topographic distribution parameter.",
+        "required_level": "optional",
+        "units": "km km^-1",
+        "contexts": ["grid_topography", "topounits"],
+    },
+    "aveDTB": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Average depth to bedrock of the subgrid; critical for groundwater dynamics.",
+        "required_level": "optional",
+        "units": "m",
+        "contexts": ["soil_properties", "grid_topography", "topounits"],
+    },
+    "EF1_BTR": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for broadleaf tree (BTR); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "EF1_CRP": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for crop (CRP); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "EF1_FDT": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for deciduous forest (FDT); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "EF1_FET": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for evergreen forest (FET); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "EF1_GRS": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for grass (GRS); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "EF1_SHR": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "EF1 isoprene emission factor for shrub (SHR); "
+        "vegetation-dependent emission rate.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["vegetation_structure", "biogeochemistry", "topounits"],
+    },
+    "Ws": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "VIC Ws parameter for the ARNO Curve; maximum soil moisture storage.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["hydrology", "topounits"],
+    },
+    "abm": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Agricultural fire peak month; seasonal indicator for fire occurrence.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["land_cover", "disturbance", "topounits"],
+    },
+    "gdp": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "GDP (parameter); economic/anthropogenic activity indicator.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["anthropogenic", "topounits"],
+    },
+    "peatf": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Peatland fraction; fraction of grid cell area classified as peat soils.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["soil_properties", "land_cover", "topounits"],
+    },
+    "parEro_c1": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Scalar parameter for rainfall-driven hillslope erosion; "
+        "controls erosion from precipitation.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["grid_topography", "disturbance", "topounits"],
+    },
+    "parEro_c2": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Scalar parameter for runoff-driven hillslope erosion; "
+        "controls erosion from surface runoff.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["grid_topography", "hydrology", "disturbance", "topounits"],
+    },
+    "parEro_c3": {
+        "dims": "topounit,lsmlat,lsmlon",
+        "doc": "Scalar parameter for transport capacity of hillslope overland flow; "
+        "controls sediment transport capacity.",
+        "required_level": "optional",
+        "units": "unitless",
+        "contexts": ["grid_topography", "hydrology", "disturbance", "topounits"],
     },
 }
 

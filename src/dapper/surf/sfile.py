@@ -12,6 +12,7 @@ from dapper.surf import schema as SC
 from dapper.surf import sample as SP  # for from_halfdegree_point 
 from dapper.geo import sampling  # shared gridded sampler
 from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
+from dapper.surf.fraction_closure import normalize_fraction_closure, closure_critical_variables
 
 ArrayLike = Union[np.ndarray, "xr.DataArray", float, int]
 
@@ -187,7 +188,7 @@ def write_surface_nc(
     import datetime as _dt
 
     # ---- global attrs ----
-    ds2 = ds.copy(deep=False)
+    ds2 = normalize_fraction_closure(ds)
     merged = dict(ds2.attrs)
 
     if dapper_attrs:
@@ -202,11 +203,16 @@ def write_surface_nc(
 
     ds2.attrs = merged
 
+    closure_critical = closure_critical_variables(ds2.data_vars)
     enc: Dict[str, dict] = {}
     for v in ds2.data_vars:
-        # Fill values must match dtype. Here we do float32 to match ELM surface expectations.
+        # Fill values must match dtype. Most float vars are written as float32,
+        # while closure-critical fractions stay float64 to preserve exact sums.
         if ds2[v].dtype.kind == "f":
-            enc[v] = {"dtype": "float32", "_FillValue": np.float32(-9.96921e36)}
+            if v in closure_critical:
+                enc[v] = {"dtype": "float64", "_FillValue": np.float64(-9.96921e36)}
+            else:
+                enc[v] = {"dtype": "float32", "_FillValue": np.float32(-9.96921e36)}
 
     ds2.to_netcdf(out_path, encoding=enc)
     return out_path
@@ -886,7 +892,7 @@ class SurfaceFile:
                 agg_policy=agg_policy,
             )
 
-            # Attach topounit parameters (and PCT_TOPUNIT) exactly once
+            # Attach topounit parameters (and TopounitFracArea) exactly once
             if attach_topounits and getattr(run_dom, "topounits", None) is not None and run_dom.topounits is not None:
                 sf.add_topounits_from_domain(run_dom)
 
@@ -1021,10 +1027,18 @@ class SurfaceFile:
         id_col: str = "topounit_id",
         pct_col: str = "TopounitPctOfCell",
         dim_name: str = "topounit",
-        pct_var_name: str = "PCT_TOPUNIT",
+        pct_var_name: str = "TopounitFracArea",
     ) -> None:
         """
         Attach topounits + per-cell weights to the surface dataset.
+
+        This method:
+        - Adds a topounit dimension and coordinate to the dataset
+        - Creates a topounit fraction variable (default: TopounitFracArea) with values
+          normalized to decimal fractions (0.0-1.0, summing to 1.0 per cell)
+        - Expands topounit-indexed variables in SURFACE_VAR_SPECS (e.g., PCT_NAT_PFT)
+          to include the topounit dimension via uniform broadcast, where all topounits
+          in a cell inherit the parent cell's distribution
 
         Expects domain.topounits to exist and contain:
         - gid_col (links topounit -> cell gid)
@@ -1091,8 +1105,8 @@ class SurfaceFile:
             s = float(np.nansum(vals))
             if not np.isfinite(s) or s <= 0:
                 raise ValueError(f"Topounit pct weights for gid={gid} are invalid (sum={s}).")
-            # normalize to 100 just in case
-            vals = 100.0 * (vals / s)
+            # normalize to 1.0 (decimal fraction) just in case
+            vals = 1.0 * (vals / s)
 
             for tid, v in zip(grp[id_col].astype(str).tolist(), vals):
                 k = id_to_k[tid]
@@ -1108,7 +1122,31 @@ class SurfaceFile:
                 raise ValueError(f"Existing {dim_name} coord does not match topounit ids from domain.")
 
         ds[pct_var_name] = xr.DataArray(pct, dims=(dim_name, lat_dim, lon_dim))
-        ds[pct_var_name].attrs.update({"long_name": "percent of gridcell in each topounit", "units": "percent"})
+        ds[pct_var_name].attrs.update({"long_name": "fraction of gridcell area in each topounit", "units": "unitless"})
+
+        # Expand topounit-indexed variables that exist in ds but currently lack the
+        # topounit dimension.  All topounits in a grid cell inherit the parent cell's
+        # distribution uniformly (per-topounit differentiation is a future extension).
+        top_coord = ds.coords[dim_name]
+        n_top = len(top_ids)
+        for _var_name, _spec in SURFACE_VAR_SPECS.items():
+            if _var_name not in ds:
+                continue
+            _spec_dims = [d.strip() for d in _spec.get("dims", "").split(",")]
+            if dim_name not in _spec_dims:
+                continue
+            _da = ds[_var_name]
+            if dim_name in _da.dims:
+                continue  # already has the topounit dim
+            # Repeat identical values across all topounits
+            _expanded = xr.concat([_da] * n_top,
+                                   dim=xr.DataArray(top_coord.values, dims=[dim_name], name=dim_name))
+            _expanded[dim_name] = top_coord
+            # Reorder dims to match spec order (topounit first, spatial last)
+            _existing = set(_expanded.dims)
+            _ordered = [d for d in _spec_dims if d in _existing]
+            _extra = [d for d in _expanded.dims if d not in _ordered]
+            ds[_var_name] = _expanded.transpose(*_ordered, *_extra)
 
         self.ds = ds
 

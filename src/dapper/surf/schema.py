@@ -108,6 +108,7 @@ def pdef(
     units: str = "",
     doc: str = "",
     required_level: str = "",
+    contexts: Tuple[str, ...] = (),
     **attrs,
 ) -> ParDef:
     """
@@ -128,6 +129,7 @@ def pdef(
         doc=doc,
         required_level=required_level,
         attrs=attrs or {},
+        contexts=tuple(contexts or ()),
     )
 
 

@@ -320,13 +320,42 @@ class SurfaceValidator:
 
     def _check_soft_consistency(self, ds: xr.Dataset) -> List[CheckResult]:
         r: List[CheckResult] = []
-        # sum(PCT_NAT_PFT) ≈ PCT_NATVEG (reduce across all non-PFT dims)
-        if "PCT_NATVEG" in ds and "PCT_NAT_PFT" in ds and "natpft" in ds["PCT_NAT_PFT"].dims:
+        # sum(PCT_NAT_PFT) ≈ 100 (natural-patch weights)
+        if "PCT_NAT_PFT" in ds and "natpft" in ds["PCT_NAT_PFT"].dims:
             pftsum = ds["PCT_NAT_PFT"].sum(dim="natpft", skipna=True)
-            # compare aggregated means (robust across extra dims)
-            diff = np.nanmean(np.abs(pftsum.values - np.asarray(ds["PCT_NATVEG"].values)))
-            r.append(CheckResult("V-105.consistency.pftsum", "WARN", diff <= 1e-3,
-                                 f"mean(|sum(PCT_NAT_PFT)-PCT_NATVEG|)={diff:.3e}"))
+            resid = np.abs(pftsum.values - 100.0)
+            mean_diff = float(np.nanmean(resid))
+            max_diff = float(np.nanmax(resid))
+            r.append(CheckResult("V-105.consistency.pftsum", "WARN", max_diff <= 1e-6,
+                                 f"mean(|sum(PCT_NAT_PFT)-100|)={mean_diff:.3e}; max={max_diff:.3e}"))
+
+        # landunit closure ≈ 100 across available classes (incl urban aggregate)
+        landunit_terms: List[xr.DataArray] = []
+        for name in ("PCT_NATVEG", "PCT_CROP", "PCT_WETLAND", "PCT_LAKE", "PCT_GLACIER"):
+            if name in ds:
+                landunit_terms.append(ds[name].astype("float64"))
+        if "PCT_URBAN" in ds:
+            urb = ds["PCT_URBAN"].astype("float64")
+            if "numurbl" in urb.dims:
+                landunit_terms.append(urb.sum(dim="numurbl", skipna=True))
+            else:
+                landunit_terms.append(urb)
+        if len(landunit_terms) >= 2:
+            lsum = sum(landunit_terms)
+            lresid = np.abs(np.asarray(lsum.values, dtype="float64") - 100.0)
+            mean_diff = float(np.nanmean(lresid))
+            max_diff = float(np.nanmax(lresid))
+            r.append(CheckResult("V-108.consistency.landunitsum", "WARN", max_diff <= 1e-6,
+                                 f"mean(|landunit_sum-100|)={mean_diff:.3e}; max={max_diff:.3e}"))
+
+        # TopounitFracArea is a decimal fraction; sum over topounit should close to 1.
+        if "TopounitFracArea" in ds and "topounit" in ds["TopounitFracArea"].dims:
+            tsum = ds["TopounitFracArea"].sum(dim="topounit", skipna=True)
+            tresid = np.abs(np.asarray(tsum.values, dtype="float64") - 1.0)
+            mean_diff = float(np.nanmean(tresid))
+            max_diff = float(np.nanmax(tresid))
+            r.append(CheckResult("V-109.consistency.topounitfracsum", "WARN", max_diff <= 1e-6,
+                                 f"TopounitFracArea: mean(|sum-1|)={mean_diff:.3e}; max={max_diff:.3e}"))
 
         # If any cell has PCT_URBAN>0 → URBAN_REGION_ID present
         if "PCT_URBAN" in ds:

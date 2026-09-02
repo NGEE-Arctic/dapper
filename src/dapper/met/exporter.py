@@ -239,8 +239,10 @@ class Exporter:
             ``global`` for cellset outputs.
 
         filename
-            Optional filename prefix for output NetCDF files. If provided, each variable
-            is written to ``{filename}_{var}.nc``.
+            Optional filename template for output NetCDF files. Supports two formats:
+            - Template with {var} placeholder: 'ERA5_{var}_1950-2025_z01' generates 'ERA5_TBOT_1950-2025_z01.nc'
+            - Simple prefix (legacy): 'prefix' generates 'prefix_TBOT.nc'
+            The '.nc' extension is added automatically.
 
         overwrite
             If True, clears existing MET outputs before writing.
@@ -343,8 +345,17 @@ class Exporter:
         return self._met_dir_for_gid(gid) / filename
 
     def _nc_filename(self, var: str) -> str:
-        """Return the output NetCDF filename for a given variable."""
+        """Return the output NetCDF filename for a given variable.
+
+        Supports two formats:
+        - Template with {var} placeholder: 'ERA5_{var}_1950-2025_z01' -> 'ERA5_TBOT_1950-2025_z01.nc'
+        - Simple prefix (legacy): 'prefix' -> 'prefix_TBOT.nc'
+        """
         if getattr(self, "filename_prefix", None):
+            # Check if template contains {var} placeholder
+            if "{var}" in self.filename_prefix:
+                return f"{self.filename_prefix.format(var=var)}.nc"
+            # Legacy prefix mode
             return f"{self.filename_prefix}_{var}.nc"
         return f"{var}.nc"
 
