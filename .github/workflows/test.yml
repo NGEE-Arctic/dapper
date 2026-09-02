@@ -10,6 +10,15 @@ on:
       - "pyproject.toml"
       - "environment.yml"
       - ".github/workflows/test.yml"
+  pull_request:
+    branches:
+      - "main"
+    paths:
+      - "src/dapper/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "environment.yml"
+      - ".github/workflows/test.yml"
 jobs:
   build:
     name: build (${{ matrix.os }}, Miniforge)
