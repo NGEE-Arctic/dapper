@@ -211,6 +211,7 @@ class Exporter:
         self.dtime_vals = None
         self.dtime_units_out = None
         self.nt = None
+        self._sample_temporal_options = {}
 
         # Normalized location table (as DataFrame) – filled in run()
         self.df_loc_norm = None
@@ -287,6 +288,7 @@ class Exporter:
 
         # 2) vars + canonical DTIME axis (cellset only)
         sample_df = pd.read_parquet(parquet_files[0])
+        self._sample_temporal_options = self._temporal_options(sample_df)
         self.var_cols = [c for c in sample_df.columns if c not in self.meta_cols]
         if not self.var_cols:
             print("No data variables found; exiting.")
@@ -296,9 +298,7 @@ class Exporter:
         # For cellset (lat/lon) outputs we need a single canonical DTIME axis.
         # For sites outputs, allow each gid to have its own coverage/cadence.
         if dom_mode == "cellset":
-            self.dtime_vals, self.dtime_units_out, aligned0 = dt.create_dtime(
-                sample_df, self.calendar, self.dtime_units, self.dtime_resolution_hrs
-            )
+            self.dtime_vals, self.dtime_units_out, aligned0 = self._create_dtime(sample_df)
             # Canonical datetime axis for all points in this cellset export.
             self._time_axis = pd.to_datetime(aligned0["time"]).to_numpy()
             self.nt = len(self.dtime_vals)
@@ -401,6 +401,9 @@ class Exporter:
         long_name = self._elm_desc.get(var)
         if long_name:
             attrs["long_name"] = long_name
+        if var in set(getattr(self.adapter, "INTERVAL_END_VARS", ())):
+            attrs["cell_methods"] = "time: mean"
+            attrs["time_representation"] = "interval_start"
         return attrs
 
     def _attr_value(self, value):
@@ -528,9 +531,7 @@ class Exporter:
                 continue
             iy, ix = ij
 
-            dvals_site, _, site_df = dt.create_dtime(
-                df0, self.calendar, self.dtime_units, self.dtime_resolution_hrs
-            )
+            dvals_site, _, site_df = self._create_dtime(df0)
             if len(dvals_site) != self.nt:
                 raise ValueError(f"{gid}: per-site DTIME length {len(dvals_site)} != global {self.nt}")
             site_axis = pd.to_datetime(site_df["time"]).to_numpy()
@@ -566,9 +567,7 @@ class Exporter:
                 continue
 
             # sites mode: compute per-site DTIME independently (coverage/cadence may differ by gid)
-            dvals_site, dtime_units_out, site_df = dt.create_dtime(
-                df0, self.calendar, self.dtime_units, self.dtime_resolution_hrs
-            )
+            dvals_site, dtime_units_out, site_df = self._create_dtime(df0)
             nt_site = len(dvals_site)
 
             if "zone" in site_df.columns and site_df["zone"].nunique(dropna=True) > 1:
@@ -693,6 +692,26 @@ class Exporter:
             return "per-site"
         return "per-site"
 
+    def _temporal_options(self, df) -> dict:
+        method = getattr(self.adapter, "temporal_options", None)
+        if method is None:
+            return {}
+        return method(
+            df,
+            start_year=self.start_year,
+            end_year=self.end_year,
+            calendar=self.calendar,
+        ) or {}
+
+    def _create_dtime(self, df):
+        return dt.create_dtime(
+            df,
+            self.calendar,
+            self.dtime_units,
+            self.dtime_resolution_hrs,
+            **self._temporal_options(df),
+        )
+
     def _file_attrs(self, dom_mode: str, pack_scope: str) -> dict:
         """Merge user attrs with exporter provenance and return a new dict."""
         attrs = dict(self.append_attrs)  # copy user attrs if provided
@@ -727,6 +746,13 @@ class Exporter:
             f"with dtime_resolution_hrs={self.dtime_resolution_hrs}."
         )
         attrs.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
+
+        temporal_metadata = getattr(self.adapter, "temporal_metadata", None)
+        if temporal_metadata is not None:
+            for key, value in (
+                temporal_metadata(self._sample_temporal_options) or {}
+            ).items():
+                attrs.setdefault(key, value)
 
         return attrs
 

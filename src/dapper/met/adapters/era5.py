@@ -54,6 +54,9 @@ class ERA5Adapter(BaseAdapter):
     # These are just for netCDF metadata
     SOURCE_NAME = "ERA5-Land hourly reanalysis"
     DRIVER_TAG  = "ERA5"
+    INTERVAL_END_VARS = ("FSDS", "FLDS", "PRECTmms")
+    SOURCE_INTERVAL_HOURS = 1.0
+    GEE_COLLECTION_START = pd.Timestamp("1950-01-01 01:00:00")
 
     # ---------------- discovery & locations ----------------
 
@@ -107,9 +110,12 @@ class ERA5Adapter(BaseAdapter):
             raise KeyError("Expected 'date' column in the CSV shard.")
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date")
-        df = df[(df["date"].dt.year >= start_year) & (df["date"].dt.year <= end_year)]
-        if dt.is_noleap_calendar(calendar):
-            df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
+        export_start = pd.Timestamp(year=start_year, month=1, day=1)
+        lookahead_end = pd.Timestamp(year=end_year + 1, month=1, day=1)
+        df = df[df["date"].between(export_start, lookahead_end, inclusive="both")]
+
+        # Keep Feb 29 until temporal alignment. For end-labeled hourly fields,
+        # Feb 29 00:00 supplies the Feb 28 23:00 interval in a noleap export.
 
         # --- ERA5-specific unit conversions (kept local to adapter) ---
         df = self._unit_conversions(df)
@@ -150,6 +156,38 @@ class ERA5Adapter(BaseAdapter):
 
         df = df[final_cols]
         return df.sort_values(["time", "LATIXY", "LONGXY"]).reset_index(drop=True)
+
+    def temporal_options(self, df, *, start_year, end_year, calendar):
+        """Describe how GEE's ERA5-Land hourly fields are time-labeled."""
+        options = {
+            "interval_end_vars": self.INTERVAL_END_VARS,
+            "source_interval_hrs": self.SOURCE_INTERVAL_HOURS,
+        }
+
+        times = pd.to_datetime(df["time"], errors="coerce").dropna()
+        if not times.empty and times.min() == self.GEE_COLLECTION_START:
+            options["target_start"] = self.GEE_COLLECTION_START - pd.Timedelta(hours=1)
+        return options
+
+    def temporal_metadata(self, options=None):
+        """NetCDF provenance for ERA5-Land interval alignment."""
+        options = options or {}
+        attrs = {
+            "source_time_convention": (
+                "GEE ERA5-Land *_hourly accumulation bands are labeled at interval end"
+            ),
+            "forcing_time_convention": (
+                "FSDS, FLDS, PRECTmms represent [DTIME, DTIME + timestep)"
+            ),
+            "interval_start_variables": ", ".join(self.INTERVAL_END_VARS),
+            "source_interval_hours": self.SOURCE_INTERVAL_HOURS,
+        }
+        if options.get("target_start") == self.GEE_COLLECTION_START - pd.Timedelta(hours=1):
+            attrs["initial_state_fill"] = (
+                "1950-01-01 00:00 instantaneous states filled from the earliest "
+                "available values because the GEE collection starts at 01:00"
+            )
+        return attrs
 
     def required_vars(self, dformat):
         """Return the canonical ELM variables required for the requested output format."""

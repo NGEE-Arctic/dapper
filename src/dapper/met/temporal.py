@@ -85,15 +85,154 @@ def _noleap_offset(dtime_units: str, target_times, ref_date):
     raise ValueError("Unsupported dtime_units: choose 'days' or 'hours'")
 
 
+def _numeric_dtime(target_times, calendar: str, dtime_units: str):
+    """Return numeric DTIME values and their CF units attribute."""
+    ref_date = target_times[0]
+    if is_noleap_calendar(calendar):
+        values = _noleap_offset(dtime_units, target_times, ref_date)
+    elif dtime_units == "days":
+        values = (target_times - ref_date) / np.timedelta64(1, "D")
+    elif dtime_units == "hours":
+        values = (target_times - ref_date) / np.timedelta64(1, "h")
+    else:
+        raise ValueError("Unsupported dtime_units: choose 'days' or 'hours'")
+
+    units = f"{dtime_units} since {pd.Timestamp(ref_date).strftime('%Y-%m-%d %H:%M:%S')}"
+    return np.asarray(values, dtype="float64"), units
+
+
+def _create_interval_aligned_dtime(
+    df,
+    *,
+    calendar: str,
+    dtime_units: str,
+    dtime_resolution_hrs: float,
+    interval_end_vars,
+    source_interval_hrs: float,
+    target_start=None,
+):
+    """Align end-labeled interval fields and instantaneous states to one axis."""
+    source = df.copy()
+    source["time"] = pd.to_datetime(source["time"])
+    source = source.sort_values("time").drop_duplicates(subset="time", keep="last")
+    if source.empty:
+        raise ValueError("No timestamps are available for temporal alignment.")
+
+    target_minutes = max(1, int(round(float(dtime_resolution_hrs) * 60.0)))
+    source_minutes = max(1, int(round(float(source_interval_hrs) * 60.0)))
+    target_step = pd.Timedelta(minutes=target_minutes)
+    source_step = pd.Timedelta(minutes=source_minutes)
+
+    interval_end_vars = tuple(dict.fromkeys(interval_end_vars or ()))
+    interval_cols = [name for name in interval_end_vars if name in source.columns]
+
+    # A target value at t describes [t, t + target_step), so source coverage
+    # through boundary T supports target timestamps only through T-target_step.
+    if interval_cols:
+        valid_interval_rows = source[interval_cols].notna().all(axis=1)
+        if not valid_interval_rows.any():
+            raise ValueError("End-labeled interval variables contain no complete source rows.")
+        source_end = source.loc[valid_interval_rows, "time"].max()
+    else:
+        source_end = source["time"].max()
+
+    start = pd.Timestamp(target_start) if target_start is not None else source["time"].min()
+    end = pd.Timestamp(source_end) - target_step
+    if end < start:
+        raise ValueError(
+            "Source data do not include enough lookahead to construct one target interval."
+        )
+
+    target_times = pd.date_range(
+        start,
+        end,
+        freq=f"{target_minutes}min",
+        inclusive="both",
+    ).to_numpy()
+    if is_noleap_calendar(calendar):
+        target_times = _drop_feb29(target_times)
+    if len(target_times) == 0:
+        raise ValueError("No timestamps remain after applying calendar filtering.")
+
+    target_index = pd.DatetimeIndex(target_times, name="time")
+    state_source = source.set_index("time").sort_index()
+    if is_noleap_calendar(calendar):
+        state_source = state_source[
+            ~((state_source.index.month == 2) & (state_source.index.day == 29))
+        ]
+
+    linear_vars = [
+        "TBOT", "DTBOT", "RH", "QBOT", "PSRF", "ZBOT",
+        "UWIND", "VWIND", "WIND",
+    ]
+    df_out = pd.DataFrame(index=target_index)
+
+    state_cols = [name for name in linear_vars if name in state_source.columns]
+    if state_cols:
+        states = state_source[state_cols]
+        if target_minutes > source_minutes:
+            states = states.resample(
+                f"{target_minutes}min", origin=start, label="left", closed="left"
+            ).mean()
+        df_out[state_cols] = (
+            states.reindex(target_index)
+            .interpolate(method="time", limit_direction="both")
+            .ffill()
+            .bfill()
+        )
+
+    if interval_cols:
+        intervals = source.set_index("time")[interval_cols].sort_index()
+        intervals.index = intervals.index - source_step
+        if is_noleap_calendar(calendar):
+            intervals = intervals[
+                ~((intervals.index.month == 2) & (intervals.index.day == 29))
+            ]
+        intervals = intervals[~intervals.index.duplicated(keep="last")]
+
+        if target_minutes > source_minutes:
+            intervals = intervals.resample(
+                f"{target_minutes}min", origin=start, label="left", closed="left"
+            ).mean()
+            aligned_intervals = intervals.reindex(target_index)
+        elif target_minutes < source_minutes:
+            aligned_intervals = intervals.reindex(target_index).ffill()
+        else:
+            aligned_intervals = intervals.reindex(target_index)
+        df_out[interval_cols] = aligned_intervals
+
+    other_cols = [
+        name
+        for name in state_source.columns
+        if name not in set(linear_vars).union(interval_end_vars)
+    ]
+    if other_cols:
+        df_out[other_cols] = state_source[other_cols].reindex(target_index).ffill().bfill()
+
+    df_out = df_out.reset_index()
+    dtime_vals, dtime_attr = _numeric_dtime(
+        target_times, calendar=calendar, dtime_units=dtime_units
+    )
+    return dtime_vals, dtime_attr, df_out
+
+
 def create_dtime(
     df,
     calendar: str = "standard",
     dtime_units: str = "days",
     dtime_resolution_hrs: float = 1.0,
+    *,
+    interval_end_vars=None,
+    source_interval_hrs: float | None = None,
+    target_start=None,
 ):
     """
     Construct a numeric DTIME axis and align data onto it at an arbitrary cadence.
     Accepts fractional hours, e.g., 0.5 (30 min), 0.3 (18 min), 1.5 (90 min).
+
+    ``interval_end_vars`` identifies source fields whose timestamps label the
+    end of an averaging/accumulation interval. These fields are relabeled to
+    interval starts before calendar filtering or temporal resampling.
     """
     if "time" not in df.columns:
         raise ValueError("DataFrame must contain a 'time' column.")
@@ -102,6 +241,19 @@ def create_dtime(
 
     calendar = normalize_calendar(calendar)
     dtime_units = str(dtime_units).strip().lower()
+
+    if interval_end_vars:
+        if source_interval_hrs is None or source_interval_hrs <= 0:
+            raise ValueError("source_interval_hrs must be > 0 for end-labeled intervals.")
+        return _create_interval_aligned_dtime(
+            df,
+            calendar=calendar,
+            dtime_units=dtime_units,
+            dtime_resolution_hrs=dtime_resolution_hrs,
+            interval_end_vars=interval_end_vars,
+            source_interval_hrs=source_interval_hrs,
+            target_start=target_start,
+        )
 
     df = df.copy()
     df["time"] = pd.to_datetime(df["time"])
