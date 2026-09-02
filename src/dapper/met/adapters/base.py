@@ -81,6 +81,22 @@ class BaseAdapter(ABC):
         """
         return None
 
+    # ---------- temporal semantics (defaults provided) ----------
+    def temporal_options(
+        self,
+        df: pd.DataFrame,
+        *,
+        start_year: int,
+        end_year: int,
+        calendar: str,
+    ) -> dict:
+        """Return source-specific options for ``temporal.create_dtime``."""
+        return {}
+
+    def temporal_metadata(self, options: dict | None = None) -> dict:
+        """Return NetCDF attributes describing source-specific time handling."""
+        return {}
+
     # ---------- packing (default provided) ----------
     def pack_params(self, elm_var: str, data=None):
         """
