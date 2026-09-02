@@ -303,9 +303,9 @@ def test_add_topounits_expands_pct_nat_pft():
 
     out = sf.ds
     assert "topounit" in out["PCT_NAT_PFT"].dims, "PCT_NAT_PFT must have topounit dim after add_topounits_from_domain"
-    # Dim order: topounit before natpft, spatial last
+    # Dim order: class dimension (natpft) before topounit, spatial last (per commit 641aa7e)
     dims = list(out["PCT_NAT_PFT"].dims)
-    assert dims.index("topounit") < dims.index("natpft"), "topounit must precede natpft"
+    assert dims.index("natpft") < dims.index("topounit"), "natpft must precede topounit (class dims before topounit)"
     assert dims[-2:] == ["lsmlat", "lsmlon"], "spatial dims must be last"
     # Each topounit still has PFT fractions summing to 100
     pft_sum = out["PCT_NAT_PFT"].sum(dim="natpft")
