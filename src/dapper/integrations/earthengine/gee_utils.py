@@ -33,7 +33,7 @@ import json
 import pandas as pd
 import geopandas as gpd
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from shapely.ops import unary_union
 from shapely.geometry import Polygon, shape
 from dateutil.relativedelta import relativedelta
@@ -254,6 +254,18 @@ def determine_gee_batches(start_date, end_date, max_date, years_per_task=5, verb
     return df
 
 
+def _era5_source_end_exclusive(output_end_exclusive, latest_timestamp_ms):
+    """Return a GEE end boundary with one hourly-forcing lookahead image."""
+    latest_image_time = datetime.fromtimestamp(
+        latest_timestamp_ms / 1000,
+        tz=timezone.utc,
+    ).replace(tzinfo=None)
+    return min(
+        output_end_exclusive + timedelta(hours=1),
+        latest_image_time + timedelta(hours=1),
+    )
+
+
 def split_into_dfs(path_csv):
     """
     Splits a GEE-exported csv (from sample_e5lh_at_points) into a dictionary of dataframes
@@ -461,8 +473,8 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
     params : dict
         Configuration dictionary. Expected keys (case-sensitive):
 
-        - **start_date** (str): Start date in ``"YYYY-MM-DD"``.
-        - **end_date** (str): End date in ``"YYYY-MM-DD"``.
+        - **start_date** (str): Inclusive output start date in ``"YYYY-MM-DD"``.
+        - **end_date** (str): Exclusive output end date in ``"YYYY-MM-DD"``.
         - **geometries**: One of the following:
 
           * **str**: GEE asset ID for a FeatureCollection (e.g., ``"users/me/my_fc"``).
@@ -504,6 +516,9 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
     - Call ``ee.Initialize()`` before using this function.
     - CSV selectors include ``["gid", "date"] + params["gee_bands"]``.
     - Dates are derived from ``system:time_start`` and formatted in UTC.
+    - Sampling includes the image at ``end_date`` as a one-hour lookahead for
+      ERA5-Land interval fields. That image is not part of the requested output
+      time axis when the CSVs are converted to ELM forcing files.
 
     Raises
     ------
@@ -561,13 +576,27 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
     # Convert start and end dates
     start_date = datetime.strptime(params["start_date"], "%Y-%m-%d")
     end_date = datetime.strptime(params["end_date"], "%Y-%m-%d")
+    if end_date <= start_date:
+        raise ValueError("end_date must be later than start_date.")
 
-    # Find latest available date in the image collection
+    # Find the exclusive source boundary. End-labeled hourly accumulation bands
+    # require the image at output_end to supply the final [t, t+1) interval.
     max_timestamp = ic.aggregate_max("system:time_start").getInfo()
-    max_date = datetime.fromtimestamp(max_timestamp / 1000)
+    source_end_exclusive = _era5_source_end_exclusive(end_date, max_timestamp)
+    output_end_effective = source_end_exclusive - timedelta(hours=1)
+    if output_end_effective <= start_date:
+        raise ValueError("The requested range does not overlap available ERA5-Land data.")
 
-    # Determine number of batches
-    batches = determine_gee_batches(start_date, end_date, max_date, years_per_task=params["gee_years_per_task"], verbose=not skip_tasks)
+    # Batch the requested output period, then extend only the final task. This
+    # avoids creating a separate GEE task for the single lookahead image.
+    batches = determine_gee_batches(
+        start_date,
+        output_end_effective,
+        output_end_effective,
+        years_per_task=params["gee_years_per_task"],
+        verbose=not skip_tasks,
+    )
+    batches.loc[batches.index[-1], "task_end"] = source_end_exclusive
 
     # Default to 'gid' if no field provided
     if "geometry_id_field" not in params:
@@ -625,7 +654,8 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
 
             # Filter this Task by date range
             ic_filtered = ic.filterDate(
-                bdf["task_start"].strftime("%Y-%m-%d"), bdf["task_end"].strftime("%Y-%m-%d")
+                bdf["task_start"].strftime("%Y-%m-%dT%H:%M:%S"),
+                bdf["task_end"].strftime("%Y-%m-%dT%H:%M:%S"),
             )
 
             # Compute averages for each feature
