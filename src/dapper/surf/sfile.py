@@ -1142,7 +1142,7 @@ class SurfaceFile:
             _expanded = xr.concat([_da] * n_top,
                                    dim=xr.DataArray(top_coord.values, dims=[dim_name], name=dim_name))
             _expanded[dim_name] = top_coord
-            # Reorder dims to match spec order (topounit first, spatial last)
+            # Reorder dims to match spec order (class dims before topounit, spatial last)
             _existing = set(_expanded.dims)
             _ordered = [d for d in _spec_dims if d in _existing]
             _extra = [d for d in _expanded.dims if d not in _ordered]
