@@ -446,6 +446,22 @@ class Exporter:
             value = self._attr_value(row["feature_count"])
             if value is not None:
                 attrs["source_feature_count"] = value
+        for column in (
+            "sampling_backend",
+            "sampling_dataset",
+            "sampling_grid_cell_count",
+            "sampling_grid_coordinates",
+            "sampling_grid_weights",
+            "sampling_start",
+            "sampling_source_end",
+            "sampling_output_end",
+            "sampling_estimated_seconds",
+            "sampling_elapsed_seconds",
+        ):
+            if column in row.index:
+                value = self._attr_value(row[column])
+                if value is not None:
+                    attrs[column] = value
         return attrs
 
     def _clear_existing_outputs(self) -> None:

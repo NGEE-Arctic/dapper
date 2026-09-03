@@ -174,7 +174,7 @@ class ERA5Adapter(BaseAdapter):
         options = options or {}
         attrs = {
             "source_time_convention": (
-                "GEE ERA5-Land *_hourly accumulation bands are labeled at interval end"
+                "ERA5-Land hourly accumulation fields are labeled at interval end"
             ),
             "forcing_time_convention": (
                 "FSDS, FLDS, PRECTmms represent [DTIME, DTIME + timestep)"

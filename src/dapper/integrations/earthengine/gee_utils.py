@@ -266,6 +266,33 @@ def _era5_source_end_exclusive(output_end_exclusive, latest_timestamp_ms):
     )
 
 
+def _parse_era5_datetime(value, *, latest_timestamp_ms=None, allow_latest=False):
+    """Parse a date/hour boundary and optionally resolve ``latest`` from GEE."""
+    text = str(value).strip()
+    if text.lower() == "latest":
+        if not allow_latest or latest_timestamp_ms is None:
+            raise ValueError("'latest' is only supported for end_date.")
+        return datetime.fromtimestamp(
+            latest_timestamp_ms / 1000,
+            tz=timezone.utc,
+        ).replace(tzinfo=None)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid date boundary {value!r}; use an ISO date or datetime."
+        ) from exc
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _gee_boundary_label(value):
+    if value.hour == value.minute == value.second == 0:
+        return value.strftime("%Y-%m-%d")
+    return value.strftime("%Y-%m-%d_%H%M")
+
+
 def split_into_dfs(path_csv):
     """
     Splits a GEE-exported csv (from sample_e5lh_at_points) into a dictionary of dataframes
@@ -473,8 +500,8 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
     params : dict
         Configuration dictionary. Expected keys (case-sensitive):
 
-        - **start_date** (str): Inclusive output start date in ``"YYYY-MM-DD"``.
-        - **end_date** (str): Exclusive output end date in ``"YYYY-MM-DD"``.
+        - **start_date** (str): Inclusive output start date or datetime.
+        - **end_date** (str): Exclusive output end date/datetime, or ``"latest"``.
         - **geometries**: One of the following:
 
           * **str**: GEE asset ID for a FeatureCollection (e.g., ``"users/me/my_fc"``).
@@ -573,15 +600,20 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
     params["gee_ic"] = "ECMWF/ERA5_LAND/HOURLY"
     ic = ee.ImageCollection(params["gee_ic"])
 
-    # Convert start and end dates
-    start_date = datetime.strptime(params["start_date"], "%Y-%m-%d")
-    end_date = datetime.strptime(params["end_date"], "%Y-%m-%d")
+    # Resolve dates after asking GEE for its latest source timestamp. ``latest``
+    # is the latest output boundary that still has an interval field available.
+    max_timestamp = ic.aggregate_max("system:time_start").getInfo()
+    start_date = _parse_era5_datetime(params["start_date"])
+    end_date = _parse_era5_datetime(
+        params["end_date"],
+        latest_timestamp_ms=max_timestamp,
+        allow_latest=True,
+    )
     if end_date <= start_date:
         raise ValueError("end_date must be later than start_date.")
 
     # Find the exclusive source boundary. End-labeled hourly accumulation bands
     # require the image at output_end to supply the final [t, t+1) interval.
-    max_timestamp = ic.aggregate_max("system:time_start").getInfo()
     source_end_exclusive = _era5_source_end_exclusive(end_date, max_timestamp)
     output_end_effective = source_end_exclusive - timedelta(hours=1)
     if output_end_effective <= start_date:
@@ -662,7 +694,10 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
             feature_collection = ic_filtered.map(image_to_features).flatten()
 
             # Create a unique filename for each chunk
-            file_suffix = f"{bdf['task_start'].strftime('%Y-%m-%d')}_{bdf['task_end'].strftime('%Y-%m-%d')}"
+            file_suffix = (
+                f"{_gee_boundary_label(bdf['task_start'])}_"
+                f"{_gee_boundary_label(bdf['task_end'])}"
+            )
             export_filename = f"{params['job_name']}_{file_suffix}"
 
             # Export to Google Drive as CSV

@@ -5,6 +5,7 @@ dependencies:
   - geopandas
   - earthengine-api
   - geemap
+  - cdsapi>=0.7.7
   - pip
   - xarray
   - cftime

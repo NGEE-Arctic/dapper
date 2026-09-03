@@ -657,7 +657,23 @@ class Domain:
         out[lon_col] = gdf["lon"].to_numpy(dtype="float64")
         out[lat_col] = gdf["lat"].to_numpy(dtype="float64")
 
-        for col in ("method", "sampled_geometry", "source_file", "feature_count"):
+        provenance_columns = (
+            "method",
+            "sampled_geometry",
+            "source_file",
+            "feature_count",
+            "sampling_backend",
+            "sampling_dataset",
+            "sampling_grid_cell_count",
+            "sampling_grid_coordinates",
+            "sampling_grid_weights",
+            "sampling_start",
+            "sampling_source_end",
+            "sampling_output_end",
+            "sampling_estimated_seconds",
+            "sampling_elapsed_seconds",
+        )
+        for col in provenance_columns:
             if col in gdf.columns:
                 out[col] = gdf[col].to_numpy()
 
