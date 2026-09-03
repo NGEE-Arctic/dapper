@@ -11,7 +11,12 @@ python workspace/era5_arco_toolik/sample_toolik.py `
 ```
 
 The ARCO product starts on 1950-01-02. The script preserves that partial first
-year and the partial latest year rather than clipping either one.
+year and the partial latest year by explicitly setting
+`clip_to_full_years=False`. Production runs that require only complete calendar
+years should set it to `True`; Dapper will then drop incomplete boundary years
+and raise if the input contains no complete year at all. A request beginning on
+1950-01-01 warns and clamps to January 2 rather than automatically requiring
+GEE.
 
 ## September 2026 benchmark
 

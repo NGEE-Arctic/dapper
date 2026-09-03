@@ -371,8 +371,8 @@ def start_end_years_from_dates(
     Return the start/end years represented by a sequence of datetimes.
 
     When ``clip_to_full_years`` is True, use the earliest/latest years that
-    contain both Jan 1 and Dec 31. If no full years are present, fall back to
-    the min/max years in the data.
+    contain both Jan 1 and Dec 31. Raise when no complete calendar year is
+    present; callers must explicitly disable clipping to export partial years.
     """
     dates = pd.DataFrame(
         {"date": pd.to_datetime(pd.Series(date_values), errors="coerce")}
@@ -398,6 +398,11 @@ def start_end_years_from_dates(
 
         if len(full_years) > 0:
             return int(full_years[0]), int(full_years[-1])
+        raise ValueError(
+            "clip_to_full_years=True, but the input contains no complete "
+            "calendar year. Set clip_to_full_years=False to export the "
+            "available partial year."
+        )
 
     return int(dates["date"].dt.year.min()), int(dates["date"].dt.year.max())
 
@@ -409,9 +414,9 @@ def get_start_end_years(
 ):
     """
     Inspect CSVs (must contain a 'date' column) and return earliest/latest
-    years present. By default, clip to full years when possible. If no full
-    years are present, or ``clip_to_full_years`` is False, return the min/max
-    year in data.
+    years present. By default, clip to full years and raise if none are
+    present. When ``clip_to_full_years`` is False, return the min/max year in
+    the data even when a boundary year is partial.
     """
     dates = [pd.read_csv(file, usecols=["date"]) for file in csv_filepaths]
     dates = pd.concat(dates, ignore_index=True)

@@ -998,7 +998,8 @@ class Domain:
             If False, raises if MET output(s) already exist.
         clip_to_full_years : bool or None
             Controls whether the export year range is clipped to complete
-            calendar years. None preserves the adapter default.
+            calendar years. Raises if clipping is enabled but no complete year
+            exists. None preserves the adapter default (True for ERA5).
 
         Returns
         -------

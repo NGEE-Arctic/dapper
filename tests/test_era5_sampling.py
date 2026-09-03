@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import zipfile
 
@@ -57,22 +58,30 @@ def test_auto_plan_prefers_arco_for_a_small_long_record_polygon():
     assert plan.estimated_seconds < 300
 
 
-def test_auto_plan_uses_gee_for_large_polygon_or_missing_arco_first_day():
+def test_auto_plan_uses_gee_for_large_polygon():
     large = _domain(box(-150, 68, -148, 69))
-    first_day = _domain(Point(-149.6, 68.6))
 
     assert plan_era5_land_sampling(large, "2000-01-01", "2001-01-01").backend == "gee"
+
+
+def test_auto_plan_does_not_require_gee_for_missing_arco_first_day():
+    first_day = _domain(Point(-149.6, 68.6))
+
     plan = plan_era5_land_sampling(first_day, "1950-01-01", "1951-01-01")
-    assert plan.backend == "gee"
+    assert plan.backend == "arco"
     assert "1950-01-02" in plan.reason
 
-    with pytest.raises(ValueError, match="ARCO begins"):
-        plan_era5_land_sampling(
-            first_day,
-            "1950-01-01",
-            "1951-01-01",
-            backend="arco",
-        )
+    explicit = plan_era5_land_sampling(
+        first_day,
+        "1950-01-01",
+        "1951-01-01",
+        backend="arco",
+    )
+    assert explicit.backend == "arco"
+    assert "will be omitted" in explicit.reason
+
+    with pytest.raises(ValueError, match="begins in 1950"):
+        plan_era5_land_sampling(first_day, "1949-01-01", "1951-01-01")
 
 
 def test_auto_plan_accounts_for_per_location_request_time():
@@ -124,7 +133,8 @@ class _FakeCDSClient:
 
     def retrieve(self, dataset, request, target):
         self.requests.append((dataset, request))
-        times = pd.date_range("2020-01-01", periods=3, freq="h")
+        request_start = request["date"][0].split("/", 1)[0]
+        times = pd.date_range(request_start, periods=3, freq="h")
         coords = {
             "valid_time": times,
             "latitude": [0.0],
@@ -233,6 +243,57 @@ def test_arco_sampling_writes_adapter_ready_csv_and_provenance(tmp_path, monkeyp
         assert output.attrs["sampling_grid_cell_count"] == 2
         assert output.attrs["sampling_output_end"] == "2020-01-01 01:00:00"
         assert "area-weighted mean" in output.attrs["sampling_method"]
+
+
+def test_arco_sampling_warns_and_clamps_missing_first_day(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        era5_sampling,
+        "_arco_available_range",
+        lambda variables: (
+            pd.Timestamp("1950-01-02 00:00:00"),
+            pd.Timestamp("2026-01-01 23:00:00"),
+        ),
+    )
+    client = _FakeCDSClient()
+    csv_dir = tmp_path / "arco"
+
+    with pytest.warns(UserWarning, match="does not provide data for 1950-01-01"):
+        sampled = sample_era5_land(
+            _domain(Point(0, 0), gids=["first_day"]),
+            "1950-01-01",
+            "1950-01-02 02:00:00",
+            backend="arco",
+            output_dir=csv_dir,
+            cds_client=client,
+        )
+
+    assert client.requests[0][1]["date"] == ["1950-01-02/1950-01-02"]
+    frame = pd.read_csv(csv_dir / "era5_land_arco_first_day.csv")
+    assert frame["date"].iloc[0].startswith("1950-01-02")
+    assert len(frame) == 3
+    assert sampled.cells.iloc[0]["sampling_requested_start"].startswith("1950-01-01")
+    assert sampled.cells.iloc[0]["sampling_start"].startswith("1950-01-02")
+
+    manifest = json.loads(
+        (csv_dir / "era5_land_sampling_manifest.json").read_text()
+    )
+    feature = manifest["features"][0]
+    assert feature["sampling_requested_start"].startswith("1950-01-01")
+    assert feature["sampling_start"].startswith("1950-01-02")
+
+
+def test_arco_dry_run_warns_and_records_clamped_start():
+    with pytest.warns(UserWarning, match="clip_to_full_years=True"):
+        sampled = sample_era5_land(
+            _domain(Point(0, 0), gids=["first_day"]),
+            "1950-01-01",
+            "1951-01-01",
+            backend="arco",
+            skip_tasks=True,
+        )
+
+    assert sampled.cells.iloc[0]["sampling_requested_start"].startswith("1950-01-01")
+    assert sampled.cells.iloc[0]["sampling_start"].startswith("1950-01-02")
 
 
 @pytest.mark.skipif(

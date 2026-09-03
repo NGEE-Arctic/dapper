@@ -98,10 +98,17 @@ def test_get_start_end_years_can_keep_partial_boundary_years(tmp_path):
     ) == (2024, 2025)
 
 
-def test_get_start_end_years_falls_back_when_no_full_year_exists(tmp_path):
+def test_get_start_end_years_raises_when_no_full_year_exists(tmp_path):
     csv_path = _write_dates_csv(tmp_path / "era5.csv", "2025-01-19", "2025-06-13")
 
-    assert get_start_end_years([csv_path], calendar="noleap") == (2025, 2025)
+    with pytest.raises(ValueError, match="no complete calendar year"):
+        get_start_end_years([csv_path], calendar="noleap")
+
+    assert get_start_end_years(
+        [csv_path],
+        calendar="noleap",
+        clip_to_full_years=False,
+    ) == (2025, 2025)
 
 
 def test_era5_adapter_discover_files_respects_clip_to_full_years(tmp_path):

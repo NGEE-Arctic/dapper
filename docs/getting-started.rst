@@ -143,18 +143,18 @@ measured per-request transfer estimate:
 
 .. code-block:: python
 
-   from dapper import plan_era5_land_sampling, sample_era5_land
+   from dapper import ERA5Adapter, plan_era5_land_sampling, sample_era5_land
 
    plan = plan_era5_land_sampling(
        domain,
-       start_date="1950-01-02",
+       start_date="1950-01-01",
        end_date="latest",
    )
    print(plan)
 
    sampled_domain = sample_era5_land(
        domain,
-       start_date="1950-01-02",
+       start_date="1950-01-01",
        end_date="latest",
        backend="auto",
        output_dir="era5_csvs",
@@ -166,5 +166,31 @@ exclusive output end. ARCO radiation and precipitation use the same hourly,
 interval-end accumulation convention as the GEE fields; ``ERA5Adapter`` shifts
 them to ELM's interval-start timestamps and performs the existing unit
 conversions. ECMWF's ARCO series begins on 1950-01-02 because the incomplete
-1950-01-01 source day was omitted; automatic mode therefore chooses GEE when
-that first day is required.
+1950-01-01 source day was omitted during construction of the ARCO archive. This
+is an intentional property of the source product, not a Dapper download error.
+See the `ECMWF product guide
+<https://confluence.ecmwf.int/pages/viewpage.action?pageId=685246455>`_ for the
+ARCO processing details.
+
+When ARCO is selected for a request beginning on 1950-01-01, Dapper emits a
+warning and clamps the sampled range to 1950-01-02. It does not switch the
+entire request to GEE merely to recover one day. The manifest and ELM metadata
+record both ``sampling_requested_start`` and the actual ``sampling_start``.
+Select ``backend="gee"`` explicitly if 1950-01-01 is required.
+
+ERA5 met exports clip to complete calendar years by default. For a long ARCO
+record, the default drops partial 1950 and any partial latest year:
+
+.. code-block:: python
+
+   sampled_domain.export_met(
+       src_path="era5_csvs",
+       adapter=ERA5Adapter(),
+       clip_to_full_years=True,
+       # other export options...
+   )
+
+Set ``clip_to_full_years=False`` to retain partial boundary years. When clipping
+is enabled but the input contains no complete calendar year, Dapper raises an
+error rather than quietly exporting a partial year; explicitly disable clipping
+when that partial-year output is intended.

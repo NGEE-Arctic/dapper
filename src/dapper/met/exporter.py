@@ -112,7 +112,8 @@ class Exporter:
 
     clip_to_full_years : bool or None, optional
         Controls whether the discovered export year range is clipped to full
-        calendar years. ``None`` preserves the adapter default.
+        calendar years. Clipping raises if no complete year exists. ``None``
+        preserves the adapter default (True for ERA5).
 
     Side Effects
     ------------

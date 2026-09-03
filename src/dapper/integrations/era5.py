@@ -33,6 +33,8 @@ ARCO_CATALOGUE_URL = (
     f"{ARCO_DATASET}"
 )
 ARCO_GRID_DEGREES = 0.1
+# ECMWF omits dates with fewer than 24 source samples when building the
+# time-series ARCO archive. The first ERA5-Land day is therefore unavailable.
 ARCO_EARLIEST_TIMESTAMP = pd.Timestamp("1950-01-02 00:00:00")
 
 # The live CDS form currently limits area requests to 1 degree in each direction.
@@ -372,6 +374,8 @@ def _build_plan(
 
     start = _as_timestamp(start_date, name="start_date")
     end = _planning_end(end_date)
+    if start < ARCO_EARLIEST_TIMESTAMP.normalize() - pd.Timedelta(days=1):
+        raise ValueError(f"ERA5-Land begins in 1950; requested start is {start}.")
     if end <= start:
         raise ValueError("end_date must be later than start_date.")
     specs = _build_feature_specs(domain, sampling_method)
@@ -389,11 +393,6 @@ def _build_plan(
         for spec in specs
         if spec.arco_ineligible_reason
     ]
-    if start < ARCO_EARLIEST_TIMESTAMP:
-        hard_reasons.append(
-            "ARCO begins at 1950-01-02; use GEE when 1950-01-01 is required"
-        )
-
     if requested_backend == "arco":
         if hard_reasons:
             raise ValueError("ARCO cannot serve this request: " + "; ".join(hard_reasons))
@@ -422,6 +421,12 @@ def _build_plan(
         reason = (
             f"ARCO selected: {total_cells} grid cells in {len(specs)} request(s), "
             f"estimated at {estimated_seconds:.0f} s."
+        )
+
+    if selected == "arco" and start < ARCO_EARLIEST_TIMESTAMP:
+        reason += (
+            f" Dates before {ARCO_EARLIEST_TIMESTAMP:%Y-%m-%d} are unavailable "
+            "from ARCO and will be omitted."
         )
 
     plan = ERA5SamplingPlan(
@@ -490,14 +495,42 @@ def _arco_available_range(cds_variables: tuple[str, ...]) -> tuple[pd.Timestamp,
     return max(starts), min(ends)
 
 
-def _resolve_arco_window(start_date, end_date, cds_variables):
-    start = _as_timestamp(start_date, name="start_date")
-    available_start, available_end = _arco_available_range(tuple(cds_variables))
-    if start < available_start:
+def _clamp_arco_start(
+    requested_start: pd.Timestamp,
+    available_start: pd.Timestamp,
+    *,
+    warning_stacklevel: int,
+) -> pd.Timestamp:
+    if requested_start >= available_start:
+        return requested_start
+
+    first_era5_land_day = available_start.normalize() - pd.Timedelta(days=1)
+    if requested_start < first_era5_land_day:
         raise ValueError(
-            f"ARCO data begin at {available_start}; requested start is {start}. "
-            "Use backend='gee' for the partial first day of 1950."
+            f"ERA5-Land begins in 1950; requested start is {requested_start}."
         )
+
+    warnings.warn(
+        "ECMWF ERA5-Land ARCO does not provide data for 1950-01-01; "
+        f"the requested start {requested_start} will be clamped to "
+        f"{available_start}. Use export_met(..., clip_to_full_years=True) to "
+        "omit incomplete boundary years (the ERA5 adapter default), "
+        "clip_to_full_years=False to retain partial 1950, or backend='gee' "
+        "if 1950-01-01 is required.",
+        UserWarning,
+        stacklevel=warning_stacklevel,
+    )
+    return available_start
+
+
+def _resolve_arco_window(start_date, end_date, cds_variables):
+    requested_start = _as_timestamp(start_date, name="start_date")
+    available_start, available_end = _arco_available_range(tuple(cds_variables))
+    start = _clamp_arco_start(
+        requested_start,
+        available_start,
+        warning_stacklevel=5,
+    )
 
     requested_end = (
         available_end
@@ -684,6 +717,7 @@ def _metadata_record(
     *,
     backend: str,
     output_csv: Path | None,
+    requested_start,
     start,
     source_end,
     estimated_seconds: float,
@@ -705,6 +739,7 @@ def _metadata_record(
         "sampling_grid_cell_count": int(len(cells)),
         "sampling_grid_coordinates": _format_grid_values(cells, "coordinates"),
         "sampling_grid_weights": _format_grid_values(cells, "weight"),
+        "sampling_requested_start": str(requested_start),
         "sampling_start": str(start),
         "sampling_source_end": str(source_end),
         "sampling_output_end": str(source_end - pd.Timedelta(hours=1)),
@@ -748,6 +783,7 @@ def _sample_arco(
 ) -> Domain:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    requested_start = _as_timestamp(start_date, name="start_date")
     start, source_end, available_start, available_end = _resolve_arco_window(
         start_date, end_date, cds_variables
     )
@@ -796,6 +832,7 @@ def _sample_arco(
                 actual_cells,
                 backend="arco",
                 output_csv=output_csv,
+                requested_start=requested_start,
                 start=start,
                 source_end=source_end,
                 estimated_seconds=per_request_estimate,
@@ -893,6 +930,13 @@ def sample_era5_land(
     only when every feature fits its service limits and the estimated request is
     below the configured cell/time thresholds.
 
+    ECMWF omits the incomplete 1950-01-01 source day from its ERA5-Land ARCO
+    archive. When ARCO is selected for a request beginning on that date, Dapper
+    warns and begins sampling on 1950-01-02 instead of silently switching the
+    entire request to GEE. Sampling metadata records both dates. Use
+    ``export_met(..., clip_to_full_years=True)`` to omit partial boundary years,
+    or select ``backend='gee'`` explicitly when 1950-01-01 is required.
+
     For polygon supports, ``sampling_method='auto'`` uses a local area-weighted
     mean of intersecting ERA5-Land cells with ARCO and GEE's spatial mean with
     GEE. Points use nearest-cell sampling. Use ``sampling_method='nearest'`` to
@@ -911,7 +955,12 @@ def sample_era5_land(
     )
     print(plan.reason)
     if skip_tasks and plan.backend == "arco":
-        start = _as_timestamp(start_date, name="start_date")
+        requested_start = _as_timestamp(start_date, name="start_date")
+        start = _clamp_arco_start(
+            requested_start,
+            ARCO_EARLIEST_TIMESTAMP,
+            warning_stacklevel=3,
+        )
         source_end = _planning_end(end_date)
         records = [
             _metadata_record(
@@ -919,6 +968,7 @@ def sample_era5_land(
                 spec.cells,
                 backend="arco",
                 output_csv=None,
+                requested_start=requested_start,
                 start=start,
                 source_end=source_end,
                 estimated_seconds=plan.estimated_seconds / max(1, plan.feature_count),
