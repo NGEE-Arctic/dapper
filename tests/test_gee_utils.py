@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from dapper.integrations.earthengine.gee_utils import (
     _era5_source_end_exclusive,
+    _parse_era5_datetime,
     determine_gee_batches,
 )
 
@@ -41,3 +42,16 @@ def test_gee_batches_preserve_hourly_final_boundary():
     assert len(batches) == 2
     assert batches.iloc[0]["task_start"] == datetime(2020, 1, 1)
     assert batches.iloc[-1]["task_end"] == datetime(2022, 1, 1, 1)
+
+
+def test_gee_date_parser_accepts_iso_hours_and_resolves_latest():
+    latest = datetime(2026, 8, 28, 23)
+
+    assert _parse_era5_datetime("2025-01-01T12:00:00") == datetime(
+        2025, 1, 1, 12
+    )
+    assert _parse_era5_datetime(
+        "latest",
+        latest_timestamp_ms=_timestamp_ms(latest),
+        allow_latest=True,
+    ) == latest

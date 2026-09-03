@@ -3,15 +3,19 @@ Getting Started
 
 Before You Install
 ------------------
-``dapper`` is designed to work with Google Earth Engine (GEE). To use the full workflow (including the tutorial notebooks), you will need:
+``dapper`` can sample ERA5-Land through either the ECMWF Climate Data Store
+(CDS) ARCO service or Google Earth Engine (GEE). To use every workflow, you
+will need:
 
 * A free GEE account and a GEE project
 * The ability to run ``ee.Authenticate()`` and ``ee.Initialize(...)`` from Python
+* A free CDS account and personal access token
 
 If you do not already have a GEE account, you can register here:
 `Google Earth Engine registration <https://code.earthengine.google.com/register>`_
 
-Some parts of ``dapper`` can be used without GEE, but most end-to-end tutorials assume that GEE authentication is working.
+Point and small-polygon ERA5-Land requests can use CDS without a GEE account.
+Large polygon requests continue to use GEE.
 
 
 Installation
@@ -111,3 +115,56 @@ If you haven't used the GEE API before, you'll need to authenticate. The first t
 
 You should not need to run ``ee.Authenticate()`` again (credentials are cached locally).
 You will, however, need to run ``ee.Initialize(project="...")`` in each fresh Python session.
+
+
+ECMWF CDS authentication
+^^^^^^^^^^^^^^^^^^^^^^^^
+Register or sign in at the `Climate Data Store <https://cds.climate.copernicus.eu/>`_,
+accept the ERA5-Land dataset terms, and place the token shown on your profile in
+``~/.cdsapirc``:
+
+.. code-block:: text
+
+   url: https://cds.climate.copernicus.eu/api
+   key: <PERSONAL-ACCESS-TOKEN>
+
+The official setup instructions are at `CDSAPI setup
+<https://cds.climate.copernicus.eu/en/how-to-api>`_. Dapper uses the
+``reanalysis-era5-land-timeseries`` ARCO product for synchronous point and
+small-area downloads.
+
+
+Choosing an ERA5-Land backend
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Use ``backend="arco"`` or ``backend="gee"`` to force a source, or leave the
+default ``backend="auto"``. The automatic planner considers the ARCO area
+limit, intersecting 0.1-degree grid-cell count, requested time span, and a
+measured per-request transfer estimate:
+
+.. code-block:: python
+
+   from dapper import plan_era5_land_sampling, sample_era5_land
+
+   plan = plan_era5_land_sampling(
+       domain,
+       start_date="1950-01-02",
+       end_date="latest",
+   )
+   print(plan)
+
+   sampled_domain = sample_era5_land(
+       domain,
+       start_date="1950-01-02",
+       end_date="latest",
+       backend="auto",
+       output_dir="era5_csvs",
+   )
+
+ARCO writes GEE-compatible CSV files plus a JSON manifest containing the exact
+sampled grid cells and local area weights. Dates have an inclusive start and an
+exclusive output end. ARCO radiation and precipitation use the same hourly,
+interval-end accumulation convention as the GEE fields; ``ERA5Adapter`` shifts
+them to ELM's interval-start timestamps and performs the existing unit
+conversions. ECMWF's ARCO series begins on 1950-01-02 because the incomplete
+1950-01-01 source day was omitted; automatic mode therefore chooses GEE when
+that first day is required.
