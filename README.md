@@ -44,6 +44,11 @@ Refer to the documentation [here](https://ngee-arctic.github.io/dapper/getting-s
 ## Usage
 We have created some [jupyter notebooks](https://github.com/NGEE-Arctic/dapper/tree/main/docs/notebooks) to demonstrate ways to use `dapper` tools.
 
+## Workspace directory
+The `workspace/` directory is a holding area for specialized or in-progress tools outside of the core functionality of the `dapper` python package. Some of these tools may eventually be implemented within dapper formally, but this provides a space for exploratory tools without the burden of full dapper integration.  See README.md in `workspace/` for guidance on how to add new tools.
+
+The workspace is **outside the core Python package** and not part of the installed distribution. Files here are local to the repository and should not import from or depend on being imported by the main `dapper` package structure. **The workspace folder must never be bundled in Python package releases.**
+
 ## Contributing & Contact
 Feel free to fork or branch the repo and make improvements. Open a pull request
 and we'll check it out. For suggestions and other general queations regarding
