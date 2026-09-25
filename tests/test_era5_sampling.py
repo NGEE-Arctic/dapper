@@ -202,7 +202,9 @@ def test_gee_sampling_preserves_model_coordinates_and_exports_reference(
     mapping_lon, mapping_lat, _, _ = mapping.strip().split("\t")
     assert float(mapping_lon) == pytest.approx(model_cell["lon"] % 360)
     assert float(mapping_lat) == pytest.approx(model_cell["lat"])
-    with xr.open_dataset(output_dir / "site_0" / "MET" / "TBOT.nc") as output:
+    with xr.open_dataset(
+        output_dir / "site_0" / "MET" / "ERA5_TBOT_2025-2025_z01.nc"
+    ) as output:
         assert float(output["LONGXY"].values[0]) == pytest.approx(
             model_cell["lon"] % 360
         )
