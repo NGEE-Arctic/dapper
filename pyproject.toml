@@ -47,3 +47,17 @@ include = ["dapper", "dapper.*"]
 dev = [
     "ipykernel>=7.2.0",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+# dev/ holds unshipped scratch scripts; tests/ are read-only during the refactor.
+extend-exclude = ["src/dapper/dev", "tests", "docs", "workspace"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+
+[tool.mypy]
+# No python_version pin: numpy>=2.5 stubs need 3.12 syntax.
+ignore_missing_imports = true
+exclude = ["src/dapper/dev/"]
