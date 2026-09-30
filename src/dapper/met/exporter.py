@@ -1,6 +1,5 @@
 """Meteorological data export pipelines."""
 
-import datetime as _dt
 import inspect
 import warnings
 from pathlib import Path
@@ -13,6 +12,7 @@ from dapper.domains.domain import Domain
 from dapper.elm.utils import elm_data_dicts
 from dapper.geo.constants import LATLON_DECIMALS
 from dapper.io import fs as utils
+from dapper.io.attrs import utc_timestamp
 from dapper.met.writers import append_met_netcdf, initialize_met_netcdf
 from dapper.schemas.elm import ELM_UNITS
 
@@ -770,7 +770,7 @@ class Exporter:
             f"Created by dapper.met.exporter using {self.adapter.__class__.__name__} "
             f"with dtime_resolution_hrs={self.dtime_resolution_hrs}.",
         )
-        attrs.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
+        attrs.setdefault("dapper_created_utc", utc_timestamp())
 
         temporal_metadata = getattr(self.adapter, "temporal_metadata", None)
         if temporal_metadata is not None:
