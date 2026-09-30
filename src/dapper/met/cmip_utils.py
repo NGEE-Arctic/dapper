@@ -17,7 +17,6 @@ Typical workflow:
 
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
@@ -52,8 +51,8 @@ def open_cmip6_catalog(url: str = DEFAULT_CATALOG_URL):
       - intake-esm registers its plugin into `intake`, so you open via
         `intake.open_esm_datastore(...)`.
     """
-    import intake_esm  # noqa: F401  (plugin registration)
     import intake
+    import intake_esm  # noqa: F401  (plugin registration)
 
     return intake.open_esm_datastore(url)
 

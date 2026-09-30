@@ -4,15 +4,13 @@
 from __future__ import annotations
 
 import warnings
-
 from dataclasses import dataclass
 from typing import Literal, Sequence
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import xarray as xr
-import geopandas as gpd
-
 from shapely.geometry import box
 from shapely.ops import transform
 from shapely.strtree import STRtree

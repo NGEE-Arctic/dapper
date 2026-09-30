@@ -1,5 +1,10 @@
 """Topographic unit generation utilities."""
 
+import math
+
+from dapper.domains.domain import Domain
+from dapper.integrations.earthengine import gee_utils as gu
+
 try:
     import ee  # type: ignore
 except Exception:  # pragma: no cover
@@ -27,11 +32,6 @@ if ee is None:  # pragma: no cover
             return getattr(_require_ee_global(), name)
 
     ee = _EEProxy()  # type: ignore
-
-import math
-
-from dapper.domains.domain import Domain
-from dapper.integrations.earthengine import gee_utils as gu
 
 
 # ----------------------------
@@ -1020,8 +1020,8 @@ def make_topounits_for_domain(
     Domain
         domain with domain.topounits populated (expects Domain.with_topounits exists).
     """
-    import pandas as pd
     import geopandas as gpd
+    import pandas as pd
     from pyproj import Geod
 
     # Choose which geometry view to use for topounits (support is the right one)

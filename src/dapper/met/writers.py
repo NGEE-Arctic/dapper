@@ -2,8 +2,10 @@
 """dapper module: met.writers."""
 
 from __future__ import annotations
-import numpy as np
+
 from pathlib import Path
+
+import numpy as np
 from netCDF4 import Dataset
 
 from dapper.met.temporal import normalize_calendar

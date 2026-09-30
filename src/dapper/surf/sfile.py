@@ -1,21 +1,20 @@
 """Surface file construction, customization, and validation helpers."""
 
-from typing import Dict, Any, Optional, Tuple, Union, List, Literal
 import tempfile
 from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
-import xarray as xr
 import pandas as pd
+import xarray as xr
 
-from dapper.surf import schema as SC
-from dapper.surf import sample as SP  # for from_halfdegree_point
 from dapper.geo import sampling  # shared gridded sampler
-from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
+from dapper.surf import schema as SC
 from dapper.surf.fraction_closure import (
-    normalize_fraction_closure,
     closure_critical_variables,
+    normalize_fraction_closure,
 )
+from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
 
 ArrayLike = Union[np.ndarray, "xr.DataArray", float, int]
 
@@ -495,7 +494,6 @@ def customize_surface(
     ------
     CustomizeError on shape/dtype/units/dim mismatches.
     """
-    import pandas as pd  # only used in return type
 
     src_path = str(src_path)
     ds = xr.open_dataset(src_path)
@@ -1099,7 +1097,6 @@ class SurfaceFile:
         drop_cols : list[str], optional
             Columns to ignore as parameters (e.g. "geometry").
         """
-        import pandas as pd  # local to avoid a hard dependency at import time
 
         if id_col not in df.columns:
             raise KeyError(f"id_col '{id_col}' not found in DataFrame.")
@@ -1202,9 +1199,6 @@ class SurfaceFile:
         - id_col  (unique id per topounit across the whole run)
         - pct_col (percent of the parent cell; sums to ~100 per gid)
         """
-        import pandas as pd
-        import numpy as np
-        import xarray as xr
 
         if getattr(domain, "topounits", None) is None or domain.topounits is None:
             raise ValueError("Domain has no topounits attached.")

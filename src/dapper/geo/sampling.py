@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal, Sequence
+from typing import Literal, Sequence
 
 import numpy as np
 import pandas as pd
 import xarray as xr
-import datetime as _dt
+
 from dapper.geo.lonwrap import LonWrap, infer_lon_wrap, normalize_lon
 
 SampleMethod = Literal["nearest"]

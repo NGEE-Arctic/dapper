@@ -2,19 +2,18 @@
 """dapper module: met.validation."""
 
 from __future__ import annotations
-from pathlib import Path
-from typing import Iterable, Optional, Dict, List
 
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional
+
+# matplotlib (headless)
+import matplotlib
 import numpy as np
 import pandas as pd
 from netCDF4 import Dataset, num2date
 
-# matplotlib (headless)
-import matplotlib
-
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 
 # ----------------------- plotting defaults & units -----------------------
 
@@ -424,7 +423,7 @@ def _quicklooks_elm_sites(
     vars: List[str],
     gids: Optional[List[str]],
 ) -> None:
-    from netCDF4 import Dataset as _DS, num2date as _n2d
+    from netCDF4 import Dataset as _DS
 
     subdirs = [d for d in wd.iterdir() if d.is_dir()]
     if gids:

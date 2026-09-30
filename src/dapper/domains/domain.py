@@ -6,11 +6,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Optional, Union
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
-import geopandas as gpd
 import xarray as xr
-
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 
@@ -732,7 +731,6 @@ class Domain:
         - Ensures a stable id column name (self.topounits_id_col == 'topounit_id')
         - Ensures gid linkage column exists (self.topounits_gid_col)
         """
-        import geopandas as gpd
 
         if not isinstance(topounits, gpd.GeoDataFrame):
             raise TypeError("topounits must be a geopandas.GeoDataFrame")

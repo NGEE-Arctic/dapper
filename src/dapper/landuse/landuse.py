@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, Sequence
 
-import pandas as pd
-import numpy as np
-import xarray as xr
 import geopandas as gpd
+import numpy as np
+import pandas as pd
+import xarray as xr
 
-from dapper.geo import sampling
 from dapper.domains.domain import Domain
+from dapper.geo import sampling
 from dapper.surf.fraction_closure import normalize_fraction_closure
 
 LonWrap = Literal["auto", "0_360", "-180_180"]
@@ -53,11 +53,6 @@ def sample_landuse_timeseries(
       - nearest: df_summary is df_loc aligned to sampled cells (includes i_lat/i_lon if available)
       - zonal  : df_summary includes sample_ncells and sample_area_total_m2 per gid
     """
-    from pathlib import Path
-    import numpy as np
-    import pandas as pd
-    import xarray as xr
-
     src_path = Path(src_path)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,7 +134,6 @@ def sample_landuse_timeseries(
     if sampling_method != "zonal":
         raise ValueError(f"Unknown sampling_method={sampling_method!r}")
 
-    import geopandas as gpd
     from dapper.geo import zonal
 
     if targets is None:

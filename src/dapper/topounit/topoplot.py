@@ -4,6 +4,7 @@
 """Plotting utilities for topounits and domains."""
 
 from __future__ import annotations
+
 import geopandas as gpd
 
 # ---------- label helpers ----------
@@ -141,8 +142,8 @@ def plot_static(
     If `ax` is provided, draw into that axes (and do not create a new figure).
     """
     try:
-        import matplotlib.pyplot as plt
         import contextily as ctx
+        import matplotlib.pyplot as plt
     except ImportError as e:
         raise ImportError(
             "plot_static requires `matplotlib`, `contextily`, and `xyzservices` installed."
