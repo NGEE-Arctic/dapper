@@ -1,6 +1,7 @@
 """Surface file construction, customization, and validation helpers."""
 
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Any, Literal, Optional, Union
 
@@ -250,7 +251,7 @@ def customize_surface(
     run_validation: bool = False,
     validator_kwargs: dict[str, Any] | None = None,
     units_policy: str = "enforce",
-    engine: str = "netcdf4",
+    engine: str | None = None,
 ) -> tuple[str, Optional["pd.DataFrame"]]:
     """
     Update or add parameters in an existing ELM surface NetCDF (path-only API).
@@ -290,8 +291,8 @@ def customize_surface(
         ``"enforce"`` raises when an existing variable's units differ from the
         registry (registry units ``''``/``'varies'`` are skipped). Any other value
         skips the check.
-    engine : str
-        Unused.
+    engine : str, optional
+        Deprecated and ignored; passing it emits a ``DeprecationWarning``.
 
     Returns
     -------
@@ -302,6 +303,12 @@ def customize_surface(
     CustomizeError on shape/dtype/units/dim mismatches.
     """
 
+    if engine is not None:
+        warnings.warn(
+            "customize_surface(engine=...) is ignored and will be removed.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     src_path = str(src_path)
     ds = xr.open_dataset(src_path)
     ds_edit = ds.copy()
