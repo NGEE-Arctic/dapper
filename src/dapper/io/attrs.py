@@ -1,4 +1,4 @@
-"""dapper module: io.attrs."""
+"""NetCDF global-attribute helpers."""
 
 from __future__ import annotations
 

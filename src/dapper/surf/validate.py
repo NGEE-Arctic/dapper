@@ -1,5 +1,4 @@
-# dapper/surf/validate.py
-"""dapper module: surf.validate."""
+"""Validation of ELM surface NetCDF files."""
 
 from __future__ import annotations
 
@@ -9,7 +8,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-# Your hard-coded schema/registry module
 from dapper.surf import schema as SC  # expects REGISTRY (ParDef map), SCHEMA (tiers)
 
 
@@ -50,9 +48,11 @@ class SurfaceValidator:
     V-102  ranges.unit: LANDFRAC_PFT, SKY_VIEW ∈ [0,1] (ERROR)
     V-103  ranges.nonneg: SLOPE, (ST)DEV_ELEV, AREA, TOPO ≥ 0 (ERROR)
     V-104  time.length: any var with 'time' dim → len(time)==12 (ERROR)
-    V-105  consistency.pftsum: sum(PCT_NAT_PFT) ≈ PCT_NATVEG (WARN)
+    V-105  consistency.pftsum: sum(PCT_NAT_PFT) ≈ 100 (WARN)
     V-106  conditional.urban: if max(PCT_URBAN)>0 → URBAN_REGION_ID present (WARN)
     V-107  conditional.glacier: if max(PCT_GLACIER)>0 → GLC_MEC & PCT_GLC_MEC present (WARN)
+    V-108  consistency.landunitsum: landunit PCT_* (incl. urban) sum ≈ 100 (WARN)
+    V-109  consistency.topounitfracsum: sum(TopounitFracArea) over topounit ≈ 1 (WARN)
 
     Usage
     -----
@@ -115,7 +115,7 @@ class SurfaceValidator:
 
         if not self.skip_soft_checks:
             results += self._check_ranges(ds)  # V-101..V-104
-            results += self._check_soft_consistency(ds)  # V-105..V-107
+            results += self._check_soft_consistency(ds)  # V-105..V-109
 
         df = pd.DataFrame([r.__dict__ for r in results])
         order = {"ERROR": 0, "WARN": 1, "INFO": 2}

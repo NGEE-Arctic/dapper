@@ -1,4 +1,4 @@
-# dapper/domains/domain.py
+"""The Domain: canonical spatial container passed through the dapper pipeline."""
 
 from __future__ import annotations
 
@@ -199,7 +199,7 @@ class Domain:
             run_group=str(run_group) if run_group is not None else None,
         )
 
-    # Back-compat-ish alias (you said you don’t care, but it’s convenient while refactoring)
+    # Back-compat alias kept for older notebooks.
     @classmethod
     def from_gdf(cls, gdf: gpd.GeoDataFrame | pd.DataFrame, **kwargs) -> Domain:
         """Alias for :meth:`Domain.from_provided`."""
@@ -823,7 +823,7 @@ class Domain:
     ) -> tuple[np.ndarray, np.ndarray, dict[str, tuple[int, int]]]:
         """
         Compute lat/lon axes and a gid -> (iy, ix) index map for ELM-style lat/lon layouts.
-        Useful mainly when your cells actually lie on a lat/lon lattice (dense or sparse).
+        Useful mainly when the cells lie on a lat/lon lattice (dense or sparse).
         """
         dom = self.ensure_cells_lon_lat()
         gdf = dom.cells.copy()

@@ -1,4 +1,3 @@
-# dapper/met/exporter.py
 """Meteorological data export pipelines."""
 
 import datetime as _dt
@@ -48,89 +47,58 @@ class Exporter:
     """
     Source-agnostic meteorological exporter.
 
-    This class orchestrates a two-pass pipeline that ingests time-sharded CSVs
-    for many sites/cells, preprocesses them via a pluggable *adapter*, and
-    writes ELM-ready NetCDF outputs in two layouts:
+    Ingests time-sharded CSVs for all sites/cells, preprocesses each shard with a
+    pluggable *adapter*, stages per-gid parquet files, and writes packed (int16)
+    ELM MET NetCDFs. The layout follows ``domain.mode``:
 
-      1) ``"cellset"`` – one NetCDF per variable with dims
-         ``('DTIME','lat','lon')`` (global packing; sparse lat/lon axes are OK).
-      2) ``"sites"`` – one directory per site; each directory contains
-         one NetCDF per variable with dims ``('n','DTIME')`` where ``n=1``
-         (per-site packing).
+    - ``"cellset"``: ``<out_dir>/MET/<file>.nc`` per variable with dims
+      ``('DTIME', 'lat', 'lon')``, one global packing, and a single DTIME axis
+      shared by every point (sparse lat/lon axes are allowed).
+    - ``"sites"``: ``<out_dir>/<gid>/MET/<file>.nc`` per variable with dims
+      ``('n', 'DTIME')`` (``n=1``), per-site packing, and a per-site DTIME axis.
 
-    Exporter is *source-agnostic*: all dataset-specific logic (file discovery,
-    unit conversions, renaming to ELM short names, etc.) lives in an adapter
-    that implements the `BaseAdapter` interface (e.g., an ``ERA5Adapter``).
-    The exporter handles staging (CSV → per-site parquet), global DTIME axis
-    creation, packing scans, chunking, and NetCDF I/O.
+    Each MET directory also gets a ``zone_mappings.txt``.
+
+    All dataset-specific logic (file discovery, unit conversions, renaming to ELM
+    short names) lives in the adapter (see
+    :class:`dapper.met.adapters.base.BaseAdapter`).
 
     Parameters
     ----------
     adapter : BaseAdapter
-        Implements: ``discover_files``, ``normalize_locations``, ``preprocess_shard``,
-        ``required_vars``, and ``pack_params``.
-
-    csv_directory : str or pathlib.Path
-        Directory containing time-sharded CSV files for all sites/cells.
-
-    out_dir : str or pathlib.Path
-        Destination directory for NetCDF outputs and temporary parquet shards.
-
-    df_loc : pandas.DataFrame
-        Locations table with at least columns ``["gid","lat","lon"]``; optional ``"zone"``.
-        The adapter’s ``normalize_locations``:
-        - validates columns,
-        - adds ``"lon_0-360"``,
-        - fills/validates ``"zone"``,
-        - sorts for stable site order.
-
-    id_col : str, optional
-        Kept for backward compatibility (unused when ``"gid"`` is assumed).
-
-    calendar : {"noleap","standard"}, default "noleap"
-        Calendar for numeric DTIME coordinate; Feb 29 filtered for "noleap".
-
-    dtime_resolution_hrs : int, default 1
-        Target time resolution in hours for the DTIME axis.
-
-    dtime_units : {"days","hours"}, default "days"
-        Units of the numeric DTIME coordinate (e.g., ``"days since YYYY-MM-DD HH:MM:SS"``).
-
-
-    dformat : {"BYPASS","DATM_MODE"}, default "BYPASS"
-        Target ELM format selector passed through to the adapter.
-
+        Source adapter (e.g. :class:`~dapper.met.adapters.era5.ERA5Adapter`).
+    src_path : str or pathlib.Path
+        Input location passed to ``adapter.discover_files``.
+    domain : Domain
+        Sites/cells to export; ``gid`` links CSV rows to cells.
+    out_dir : str or pathlib.Path, optional
+        Output root. Defaults to ``domain.run_dir`` (requires ``domain.path_out``).
+    calendar : str, default "noleap"
+        DTIME calendar; Feb 29 is dropped for no-leap aliases.
+    dtime_resolution_hrs : float, default 1
+        Target DTIME step in hours (fractions allowed).
+    dtime_units : {"days", "hours"}, default "days"
+        Units of the numeric DTIME coordinate.
+    dformat : {"BYPASS", "DATM_MODE"}, default "BYPASS"
+        ELM forcing format passed to the adapter.
     append_attrs : dict, optional
-        Extra global NetCDF attributes to include in every file. The exporter also adds:
-        ``export_mode`` (``"cellset"`` or ``"sites"``) and
-        ``pack_scope`` (``"global"`` or ``"per-site"``).
-
-    chunks : tuple[int,...], optional
-        Explicit NetCDF chunk sizes.
-
-    include_vars / exclude_vars : Iterable[str], optional
-        Allow-/block-lists of ELM short names applied after preprocess. Meta
-        columns ``{"gid","time","LATIXY","LONGXY","zone"}`` are always kept.
-
+        Extra global attributes for every file. Exporter provenance
+        (``domain_mode``, ``pack_scope``, ``export_start_year``, ...) is added
+        without overriding user keys, except ``domain_mode``, ``pack_scope``,
+        ``clip_to_full_years`` and the export years, which always win.
+    chunks : tuple[int, ...], optional
+        Explicit NetCDF chunk sizes; auto-chunked when omitted.
+    include_vars, exclude_vars : Iterable[str], optional
+        Allow/block lists of ELM short names applied after preprocessing. Meta
+        columns ``gid``, ``time``, ``LATIXY``, ``LONGXY`` and ``zone`` are kept.
     clip_to_full_years : bool or None, optional
-        Controls whether the discovered export year range is clipped to full
-        calendar years. Clipping raises if no complete year exists. ``None``
-        preserves the adapter default (True for ERA5).
-
-    Side Effects
-    ------------
-    - Creates a temporary directory of per-site parquet shards under ``out_dir``.
-    - Writes NetCDF files to ``out_dir`` in the chosen layout.
-    - Writes a ``zone_mappings.txt`` file either at the root (``cellset``)
-      or inside each site directory (``sites``).
+        Clip the discovered year range to complete calendar years (raises if
+        none). ``None`` keeps the adapter default (True for ERA5).
 
     Notes
     -----
-    - **Packing**: global packing for ``cellset``; per-site packing for ``sites``.
-    - **Required columns**: CSV shards and ``df_loc`` both use ``"gid"``; CSVs include the
-      adapter’s date/time column (renamed to ``"time"`` during preprocess).
-    - **Combined (lat/lon) layout**: does **not** enforce regular grids; axes are the unique
-      sorted lat/lon from ``df_loc`` (sparse OK).
+    Temporary parquet shards are written under ``<out_dir>/.dapper_tmp`` and
+    removed at the end of :meth:`run`.
     """
 
     def __init__(
@@ -150,27 +118,7 @@ class Exporter:
         exclude_vars=None,
         clip_to_full_years: bool | None = None,
     ):
-        """Create a MET exporter for a given Domain.
-
-        Parameters
-        ----------
-        adapter
-            A met adapter implementing the BaseAdapter interface.
-
-        src_path
-            Input directory containing time-sharded CSV files.
-
-        domain
-            A :class:`~dapper.domains.domain.Domain` instance (Domain contract only).
-
-        out_dir
-            Optional override for the *run_dir* root. If not provided, defaults to
-            ``domain.run_dir``. The exporter will write into ``<run_dir>/MET``
-            (cellset mode) or ``<run_dir>/<gid>/MET`` (sites mode).
-
-        append_attrs
-            Extra global NetCDF attributes to append to every output file.
-        """
+        """Create a MET exporter for ``domain``; see the class docstring."""
         if not isinstance(domain, Domain):
             raise TypeError("domain must be a dapper.domains.domain.Domain instance")
 

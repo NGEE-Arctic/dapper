@@ -1052,7 +1052,7 @@ def make_topounits_for_domain(
             a, _p = geod.geometry_area_perimeter(geom)
             return float(abs(a))
         except Exception:
-            # fallback: 0 rather than crashing; user will see pct=nan
+            # Fall back to NaN rather than crashing; percentages become NaN.
             return float("nan")
 
     parts = []

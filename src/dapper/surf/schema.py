@@ -1,5 +1,23 @@
-# elm_surface_registry.py
-"""dapper module: surf.schema."""
+"""ELM surface-file schema: variable registry and presence rules.
+
+This module does not read NetCDF. It encodes what a surface file should look
+like so other modules can build, write, and validate files consistently.
+
+- ``ParDef``: schema record for one variable (dims, dtype, units, doc, attrs).
+- ``REGISTRY``: ``dict[str, ParDef]`` built from
+  :data:`dapper.surf.surface_var_specs.SURFACE_VAR_SPECS`.
+- ``SCHEMA``: tiered presence rules. Per-variable requirement lives in
+  ``ParDef.required_level``; ``choose_one_of`` groups need at least one member;
+  ``conditional`` rules require dependents when a driver variable is present.
+
+Conventions: spatial dims use ELM naming and come last (``..., lsmlat,
+lsmlon``). Units of ``''`` or ``'varies'`` are not enforced by the validator.
+Specs carry no dtype, so every ``ParDef.dtype`` is the ``"float32"`` default.
+
+Used by :mod:`dapper.surf.sfile` (customization and topounit parameters) and
+:mod:`dapper.surf.validate`. To add a variable, add it to
+``SURFACE_VAR_SPECS``.
+"""
 
 from __future__ import annotations
 
@@ -8,69 +26,6 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
-
-"""
-dapper.surf.schema
-==================
-
-Purpose
--------
-Single source of truth for ELM/CLM *surface-file* structure used by Dapper.
-This module **does not read any NetCDF**. Instead, it hard-codes what a
-surface file *should* look like so other modules can build, write, and
-validate files consistently.
-
-What this module defines
-------------------------
-- ParDef: schema record for one variable (dims, dtype, units, doc, attrs).
-- REGISTRY: dict[str, ParDef]
-    Canonical list of surface variables with their expected dimension
-    signatures and basic metadata. Think of this as the variable “spec.”
-- SCHEMA: dict[str, Any]
-    Tiered rules for presence/formatting:
-      * per-variable requirement lives in ParDef.required_level
-      * "choose_one_of": at least one of the group must exist
-      * "conditional": if driver var is present (or nonzero in practice),
-        then dependent vars must also be present
-
-Conventions
------------
-- Spatial dims use ELM naming and appear **last** in variables: (..., lsmlat, lsmlon).
-- Common non-spatial dims (typical defaults):
-    time=12, nlevsoi=10, natpft=17, nlevslp=11, numurbl=3, numrad=2, nlevurb=5.
-  (These are expectations for formatting/validation; datasets may omit some dims.)
-- Units are simple strings ('' or 'varies' means “not enforced by validator”).
-- Dtypes: use integer types for IDs/indices (e.g., URBAN_REGION_ID, GLC_MEC),
-  floats for fractions/percents/continuous fields.
-
-How other modules use this
---------------------------
-- dapper.surf.sample: point/polygon sampling uses REGISTRY dims to shape outputs.
-- dapper.surf.write: formats sampled arrays into an ELM-style NetCDF using REGISTRY.
-- dapper.surf.validate: checks a produced NetCDF against REGISTRY/SCHEMA (presence,
-  dim order/lengths, dtype/units, and conditional relationships).
-
-Extending / editing
--------------------
-- To add a new variable, add a ParDef in REGISTRY with its **full dim tuple**
-  (including spatial dims if it is spatial), its dtype, units, and doc.
-- Per-variable requirement level should be set in ParDef.required_level
-  (e.g., "required", "optional", "recommended"). The validator uses this.
-- Add presence rules in SCHEMA only for cross-variable relationships
-  (choose-one groups, conditionals, logical tiers).
-- A separate script can parse report.rst and populate REGISTRY (doc and
-  required_level) without changing this module.
-
-Scope
------
-This module captures **formatting/structure** (dims, units, dtype, presence rules).
-Numeric ranges, aggregation choices, and scientific provenance live in sampling
-and validation layers, not here.
-
-"""
-
-
-# --------- Compact helpers so we don't write one-var-per-line ----------
 
 
 @dataclass(frozen=True)
@@ -146,11 +101,9 @@ DIMS_TIME2D = "time,lsmlat,lsmlon"
 DIMS_SOIL = "nlevsoi,lsmlat,lsmlon"
 DIMS_PFT = "natpft,lsmlat,lsmlon"
 DIMS_SLOPE = "nlevslp,lsmlat,lsmlon"
-# Future: add topounit, urban, column, etc., as they appear in report.rst.
 
-# ---------- Variable Registry (compact, grouped) ------------------------
-# This is the single source of truth. A small subset is populated now;
-# additional entries from report.rst can be merged here later.
+# ---------- Variable Registry ------------------------------------------
+# Built from SURFACE_VAR_SPECS, the single source of truth for surface variables.
 
 REGISTRY: dict[str, ParDef] = {}
 
@@ -167,10 +120,9 @@ for name, spec in SURFACE_VAR_SPECS.items():
     )
 
 
-# ------------- Minimal Schema (rules, not per-var lines) ----------------
-# SCHEMA now just organizes variables into logical tiers and handles
-# cross-variable rules. Per-variable "requiredness" is stored in
-# ParDef.required_level inside REGISTRY.
+# ------------- Presence rules ------------------------------------------
+# Logical tiers plus cross-variable rules. Per-variable requirement lives in
+# ParDef.required_level.
 
 SCHEMA: dict[str, dict] = {
     "TIER0_CORE_COORD_MASK": {

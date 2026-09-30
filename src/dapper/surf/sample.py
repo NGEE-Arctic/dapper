@@ -1,5 +1,4 @@
-# dapper/surf/sample.py
-"""dapper module: surf.sample."""
+"""Legacy dict-based point sampler for ELM surface files."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""dapper module: io.provenance."""
+"""Provenance helpers."""
 
 from __future__ import annotations
 

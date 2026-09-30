@@ -1,4 +1,3 @@
-# Generic functions JPS
 """Google Earth Engine helpers and sampling utilities."""
 
 import json
@@ -138,7 +137,6 @@ def parse_geometry_objects(geom, geometry_id_field=None):
     Returns an ee.FeatureCollection (even if a single feature is present).
 
     Notes:
-      - This function intentionally does NOT depend on AOI.
       - This function does NOT attempt to “fix” individual shapely geometries
         (e.g., MultiPolygon). GeoDataFrame -> GeoJSON -> EE handles that.
     """
@@ -515,8 +513,7 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
           * **str**: GEE asset ID for a FeatureCollection (e.g., ``"users/me/my_fc"``).
           * **ee.FeatureCollection**: a pre-constructed collection.
           * **GeoDataFrame**: must contain geometry and an ID column (see ``geometry_id_field``).
-          * **AOI**: ``dapper.domains.aoi.AOI`` instance; uses its internal GeoDataFrame.
-          * **Domain**: ``dapper.domains.domain.Domain`` instance; uses ``Domain.to_geometries()``.
+          * **Domain**: ``dapper.domains.domain.Domain`` instance; uses ``Domain.support``.
 
         - **geometry_id_field** (str, optional): ID column in provided geometries.
           Defaults to ``"gid"``. Values are copied into the ``"gid"`` property on each feature.
@@ -644,7 +641,7 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
     if "geometry_id_field" not in params:
         params["geometry_id_field"] = "gid"
 
-    # Convert various geometry containers (asset id, AOI, Domain, GeoDataFrame, FeatureCollection)
+    # Convert geometry containers (asset id, Domain, GeoDataFrame, FeatureCollection)
     geometries_fc = parse_geometry_objects(
         params["geometries"],
         geometry_id_field=params["geometry_id_field"],

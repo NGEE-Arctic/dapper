@@ -1,4 +1,4 @@
-"""dapper module: domains.__init__."""
+"""Spatial Domain container."""
 
 from .domain import Domain
 

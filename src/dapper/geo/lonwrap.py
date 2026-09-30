@@ -1,4 +1,4 @@
-"""dapper module: geo.lonwrap."""
+"""Longitude wrapping conventions ([0, 360) vs [-180, 180))."""
 
 from __future__ import annotations
 

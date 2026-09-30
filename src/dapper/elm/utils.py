@@ -1,4 +1,4 @@
-"""dapper module: elm.utils."""
+"""ELM MET helpers: humidity conversions, packing parameters, legacy tables."""
 
 import warnings
 from pathlib import Path
@@ -124,7 +124,7 @@ def compute_humidities(temp, dewpoint_temp, surf_pressure):
 
     # Define some constants
     esat_not = 611  # Constant (Pa)
-    rw = 461.52  # Gas constant for moist air (J/kg)
+    rw = 461.52  # Gas constant for water vapor (J/kg/K)
     rd = 287.053  # Gas constant for dry air (J/kg)
     lv = 2453000  # Latent heat of vaporization (J/kg)
     ls = 2838000  # Latent heat of sublimation (J/kg)
@@ -414,7 +414,7 @@ def gen_zone_mappings(domain_or_df, site: bool = False):
 def elm_var_packing_params(elm_var, data=[], dtype=np.int16):
     """
     Compute robust offset and scale factor for BYPASS packing.
-    Uses preset range if `data` is empty, else uses robust data quantiles.
+    Uses the preset range if `data` is empty, else the data min/max.
     `dtype` can be np.int16, np.int32, np.uint16, etc.
     """
 
@@ -434,7 +434,6 @@ def elm_var_packing_params(elm_var, data=[], dtype=np.int16):
     imin, imax = int(info.min * 0.9), int(info.max * 0.9)
 
     if len(data) > 0:
-        # Robust range with margin to avoid tight clipping
         xmin = data.min()
         xmax = data.max()
     else:

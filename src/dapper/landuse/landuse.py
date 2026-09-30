@@ -1,4 +1,4 @@
-"""dapper module: landuse.landuse."""
+"""Sample land-use time-series NetCDFs onto Domain cells (nearest or zonal)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""dapper module: io.fs."""
+"""Filesystem helpers."""
 
 from __future__ import annotations
 

@@ -1,5 +1,4 @@
-# dapper/met/writers.py
-"""dapper module: met.writers."""
+"""Low-level netCDF4 writers for packed ELM MET files."""
 
 from __future__ import annotations
 
@@ -60,12 +59,12 @@ def _compute_auto_chunks(
     days_per_chunk: float = 28.0,
 ) -> tuple[int, ...]:
     """
-    Heuristic default chunking suited to your write pattern.
+    Heuristic default chunking for the given write pattern.
 
     Rules of thumb:
       - by_site : keep site axis at 1; grow time until target_mb (e.g., (1, t_chunk))
       - by_cell : keep lat/lon at 1; grow time until target_mb (e.g., (t_chunk,1,1))
-      - by_time : keep time at 1; grow the rest (rare for your flow)
+      - by_time : keep time at 1; grow the rest (rare in dapper)
 
     Always respects dimension extents. Uses DTIME cadence + `days_per_chunk` to seed t_chunk.
     """

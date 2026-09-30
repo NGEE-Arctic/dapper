@@ -1,1 +1,1 @@
-"""dapper module: landuse.__init__."""
+"""Land-use time-series sampling."""

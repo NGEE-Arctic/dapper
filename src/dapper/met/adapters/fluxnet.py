@@ -1,4 +1,4 @@
-"""dapper module: met.adapters.fluxnet."""
+"""FLUXNET (AmeriFlux ONEFlux) to ELM adapter."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class FluxnetAdapter(BaseAdapter):
       merged in from df_loc.
     """
 
-    # These are just for netCDF metadata
+    # NetCDF provenance metadata
     SOURCE_NAME = "FLUXNET (AmeriFlux ONEFlux) tower data"
     DRIVER_TAG = "FLUXNET"
 

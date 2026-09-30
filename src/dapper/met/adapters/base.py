@@ -1,5 +1,4 @@
-# dapper/met/adapters/base.py
-"""dapper module: met.adapters.base."""
+"""Adapter interface between met sources and the Exporter."""
 
 from __future__ import annotations
 

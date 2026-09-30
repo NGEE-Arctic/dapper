@@ -89,7 +89,7 @@ def infer_latlon_spec(
     """
     Build a LatLonSpec for fast nearest-neighbor lookup.
 
-    Assumptions (fine for your landuse/surf ELM-style files):
+    Assumes ELM-style landuse/surface files:
       - LATIXY/LONGXY exist as 2D (lat_dim, lon_dim), OR
       - lat/lon exist as 1D vectors.
     """
@@ -255,7 +255,7 @@ def sample_gridded_dataset_points(
     Output convention:
       - lat_dim has length N (number of points)
       - lon_dim has length 1
-      - no coordinate variables are created for lat_dim/lon_dim (matches your Toolik file)
+      - no coordinate variables are created for lat_dim/lon_dim (matches ELM point surface files)
     """
     if method != "nearest":
         raise NotImplementedError("Only method='nearest' is implemented right now.")

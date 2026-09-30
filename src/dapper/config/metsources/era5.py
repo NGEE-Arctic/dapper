@@ -1,4 +1,3 @@
-# dapper/config/sources/era5.py
 """
 ERA5(-Land hourly) → ELM canonical mapping & minimal source config.
 
@@ -98,7 +97,7 @@ REQUIRED_RAW_BANDS = [
 ]
 
 # Mapping from ERA5(-Land) *post-conversion* column names → canonical ELM names.
-# Include derived fields your adapter may create (e.g., wind_speed, relative_humidity, specific_humidity).
+# Includes derived fields the adapter creates (e.g., wind_speed, relative_humidity, specific_humidity).
 RAW_TO_ELM = {
     "u_component_of_wind_10m": "UWIND",
     "v_component_of_wind_10m": "VWIND",

@@ -1,4 +1,3 @@
-# src/dapper/geo/zonal.py
 """Zonal (area-weighted) sampling utilities."""
 
 from __future__ import annotations
@@ -289,7 +288,7 @@ def intersect_weights_rectilinear(
     return ZonalWeights(by_gid=by_gid, lon_wrap=grid.lon_wrap, equal_area_crs=ea)
 
 
-# ----------------------------- reducers -----------------------------
+# ----------------------------- zonal sampling -----------------------------
 
 
 def sample_gridded_dataset_polygons(
@@ -306,7 +305,7 @@ def sample_gridded_dataset_polygons(
     agg_policy: dict[str, str] | None = None,
     default_float: str = "wmean",
     default_int: str = "wmode",
-    weights: ZonalWeights | None = None,  # NEW
+    weights: ZonalWeights | None = None,
 ) -> xr.Dataset:
     """
     Zonal-sample spatial vars (those with BOTH lat_dim and lon_dim) onto target polygons.
@@ -439,6 +438,9 @@ def sample_gridded_dataset_polygons(
     out.attrs["dapper_sampling_lon_wrap_native"] = zw.lon_wrap
     out.attrs["dapper_sampling_equal_area_crs"] = zw.equal_area_crs
     return out
+
+
+# ----------------------------- reducers -----------------------------
 
 
 def _weighted_mode_1d(
