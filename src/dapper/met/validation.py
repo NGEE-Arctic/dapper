@@ -1,4 +1,4 @@
-# dapper/met/validation.py 
+# dapper/met/validation.py
 """dapper module: met.validation."""
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from netCDF4 import Dataset, num2date
 
 # matplotlib (headless)
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
@@ -19,9 +20,17 @@ import matplotlib.pyplot as plt
 
 DEFAULT_ELM_VARS = ["TBOT", "RH", "QBOT", "WIND", "FSDS", "FLDS", "PSRF", "PRECTmms"]
 UNITS_ELM: Dict[str, str] = {
-    "TBOT": "K", "DTBOT": "K", "RH": "%", "QBOT": "kg/kg", "PSRF": "Pa",
-    "WIND": "m s⁻¹", "UWIND": "m s⁻¹", "VWIND": "m s⁻¹",
-    "FSDS": "W m⁻²", "FLDS": "W m⁻²", "PRECTmms": "mm s⁻¹",
+    "TBOT": "K",
+    "DTBOT": "K",
+    "RH": "%",
+    "QBOT": "kg/kg",
+    "PSRF": "Pa",
+    "WIND": "m s⁻¹",
+    "UWIND": "m s⁻¹",
+    "VWIND": "m s⁻¹",
+    "FSDS": "W m⁻²",
+    "FLDS": "W m⁻²",
+    "PRECTmms": "mm s⁻¹",
 }
 
 DEFAULT_RAW_VARS = [
@@ -45,6 +54,7 @@ UNITS_RAW: Dict[str, str] = {
     "total_precipitation_hourly": "m (water eq.)",
 }
 
+
 def _t_from_dtime_var(vtime):
     """
     Convert numeric DTIME (+ units) to python datetimes for plotting.
@@ -58,12 +68,15 @@ def _t_from_dtime_var(vtime):
     vals = np.asarray(vtime[:], dtype=float)
     units = getattr(vtime, "units", None)
     from dapper.met.temporal import normalize_calendar
+
     cal = normalize_calendar(getattr(vtime, "calendar", "standard"))
 
     # Prefer CF-aware conversion (handles 'noleap' correctly).
     if units:
         try:
-            dts = num2date(vals, units=units, calendar=cal, only_use_cftime_datetimes=False)
+            dts = num2date(
+                vals, units=units, calendar=cal, only_use_cftime_datetimes=False
+            )
             dts = np.atleast_1d(dts)
             out = []
             for d in dts:
@@ -79,9 +92,13 @@ def _t_from_dtime_var(vtime):
                         usec = int(round((sec_raw - sec) * 1.0e6))
                     out.append(
                         datetime(
-                            int(d.year), int(d.month), int(d.day),
-                            int(getattr(d, "hour", 0)), int(getattr(d, "minute", 0)),
-                            sec, usec,
+                            int(d.year),
+                            int(d.month),
+                            int(d.day),
+                            int(getattr(d, "hour", 0)),
+                            int(getattr(d, "minute", 0)),
+                            sec,
+                            usec,
                         )
                     )
             return out
@@ -100,7 +117,9 @@ def _t_from_dtime_var(vtime):
         t = base + pd.to_timedelta(vals, unit="h")
     return t.to_pydatetime()
 
+
 # ----------------------- public entrypoint -----------------------
+
 
 def make_quicklooks(
     exporter=None,
@@ -177,7 +196,8 @@ def make_quicklooks(
 
     if mode_eff in {"raw-site-parquet", "raw-site-csv"}:
         _quicklooks_raw(
-            data_dir=wd / ("sites_parquet" if mode_eff == "raw-site-parquet" else "sites_csv"),
+            data_dir=wd
+            / ("sites_parquet" if mode_eff == "raw-site-parquet" else "sites_csv"),
             is_parquet=(mode_eff == "raw-site-parquet"),
             out_dir=out_dir,
             vars=list(vars) if vars else None,
@@ -210,9 +230,14 @@ def make_quicklooks(
         # (This includes lon_0-360, zones, etc.)
         if getattr(exporter, "df_loc_norm", None) is not None:
             df_loc_norm = exporter.df_loc_norm
-        elif getattr(exporter, "domain", None) is not None and getattr(exporter, "adapter", None) is not None:
+        elif (
+            getattr(exporter, "domain", None) is not None
+            and getattr(exporter, "adapter", None) is not None
+        ):
             # Best-effort fallback: reconstruct what Exporter.run(...) would have created.
-            df_loc_norm = exporter.adapter.normalize_locations(exporter.domain.to_df_loc(), id_col=None)
+            df_loc_norm = exporter.adapter.normalize_locations(
+                exporter.domain.to_df_loc(), id_col=None
+            )
         else:
             raise ValueError(
                 "Exporter has no usable location table (expected 'df_loc_norm'). "
@@ -233,8 +258,9 @@ def make_quicklooks(
 
 # ----------------------- mode detection -----------------------
 
+
 def _detect_mode(wd: Path, *, explicit: Optional[str] = None) -> str:
-    if explicit in {"cellset","sites","raw-site-parquet","raw-site-csv"}:
+    if explicit in {"cellset", "sites", "raw-site-parquet", "raw-site-csv"}:
         return explicit
 
     sp = wd / "sites_parquet"
@@ -249,20 +275,21 @@ def _detect_mode(wd: Path, *, explicit: Optional[str] = None) -> str:
         raise RuntimeError("No outputs found to plot under write_directory.")
     try:
         from netCDF4 import Dataset as _DS
+
         for p in nc_files:
             try:
                 with _DS(p, "r") as ds:
                     m = getattr(ds, "export_mode", None)
-                    if m in {"cellset","sites"}:
+                    if m in {"cellset", "sites"}:
                         return m
                     # infer from dims of a data var
                     vname = _first_data_var_name(ds)
                     if not vname:
                         continue
                     dims = ds.variables[vname].dimensions
-                    if dims == ("n","DTIME") or dims == ("DTIME","n"):
+                    if dims == ("n", "DTIME") or dims == ("DTIME", "n"):
                         return "sites"
-                    if dims == ("DTIME","lat","lon"):
+                    if dims == ("DTIME", "lat", "lon"):
                         return "cellset"
             except Exception:
                 continue
@@ -272,13 +299,17 @@ def _detect_mode(wd: Path, *, explicit: Optional[str] = None) -> str:
 
 
 def _first_data_var_name(ds) -> Optional[str]:
-    cand = [n for n, v in ds.variables.items()
-            if n not in ("DTIME","LATIXY","LONGXY","lat","lon")]
+    cand = [
+        n
+        for n, v in ds.variables.items()
+        if n not in ("DTIME", "LATIXY", "LONGXY", "lat", "lon")
+    ]
     cand = [n for n in cand if "DTIME" in ds.variables[n].dimensions] or cand
     return cand[0] if cand else None
 
 
 # ----------------------- raw modes -----------------------
+
 
 def _quicklooks_raw(
     *,
@@ -314,18 +345,32 @@ def _quicklooks_raw(
         df = df.sort_values("date")
 
         # choose vars
-        meta = {"gid","date","lat","lon","zone","lon_0-360","LONGXY","LATIXY","time"}
+        meta = {
+            "gid",
+            "date",
+            "lat",
+            "lon",
+            "zone",
+            "lon_0-360",
+            "LONGXY",
+            "LATIXY",
+            "time",
+        }
 
         if vars:
             present = [c for c in vars if c in df.columns and c not in meta]
         else:
             preferred = [c for c in DEFAULT_RAW_VARS if c in df.columns]
+
             def _is_plottable(col: str) -> bool:
                 if col in meta:
                     return False
                 s = pd.to_numeric(df[col], errors="coerce")
                 return np.isfinite(s).sum() > 0
-            extras = sorted([c for c in df.columns if c not in preferred and _is_plottable(c)])
+
+            extras = sorted(
+                [c for c in df.columns if c not in preferred and _is_plottable(c)]
+            )
             present = preferred + extras
 
         if not present:
@@ -334,8 +379,12 @@ def _quicklooks_raw(
 
         if max_vars is not None:
             present = present[:max_vars]
-        n = len(present); ncols = 3; nrows = int(np.ceil(n / ncols))
-        fig, axes = plt.subplots(nrows, ncols, figsize=(ncols*5.0, nrows*2.6), sharex=True)
+        n = len(present)
+        ncols = 3
+        nrows = int(np.ceil(n / ncols))
+        fig, axes = plt.subplots(
+            nrows, ncols, figsize=(ncols * 5.0, nrows * 2.6), sharex=True
+        )
         axes = np.atleast_1d(axes).ravel()
 
         t = df["date"].to_numpy()
@@ -355,7 +404,7 @@ def _quicklooks_raw(
 
         fig.suptitle(f"{gid}", fontsize=12)
         fig.autofmt_xdate()
-        fig.tight_layout(rect=[0,0,1,0.97])
+        fig.tight_layout(rect=[0, 0, 1, 0.97])
         fig.savefig(out_dir / f"{gid}.png", dpi=150)
         plt.close(fig)
 
@@ -366,6 +415,7 @@ def _quicklooks_raw(
 
 
 # ----------------------- NetCDF: sites -----------------------
+
 
 def _quicklooks_elm_sites(
     *,
@@ -404,8 +454,12 @@ def _quicklooks_elm_sites(
             vt = ds0.variables["DTIME"]
             t = _t_from_dtime_var(vt)
 
-        n = len(present); ncols = 3; nrows = int(np.ceil(n / ncols))
-        fig, axes = plt.subplots(nrows, ncols, figsize=(ncols*5.0, nrows*2.6), sharex=True)
+        n = len(present)
+        ncols = 3
+        nrows = int(np.ceil(n / ncols))
+        fig, axes = plt.subplots(
+            nrows, ncols, figsize=(ncols * 5.0, nrows * 2.6), sharex=True
+        )
         axes = np.atleast_1d(axes).ravel()
 
         any_all_nan = False
@@ -427,7 +481,7 @@ def _quicklooks_elm_sites(
 
         fig.suptitle(f"{gid}", fontsize=12)
         fig.autofmt_xdate()
-        fig.tight_layout(rect=[0,0,1,0.97])
+        fig.tight_layout(rect=[0, 0, 1, 0.97])
         fig.savefig(out_dir / f"{gid}.png", dpi=150)
         plt.close(fig)
 
@@ -437,6 +491,7 @@ def _quicklooks_elm_sites(
 
 
 # ----------------------- NetCDF: cellset (lat/lon) -----------------------
+
 
 def _quicklooks_elm_combined(
     *,
@@ -528,8 +583,12 @@ def _quicklooks_elm_combined(
                 f"Δ=({dlat:.3g},{dlon:.3g})"
             )
 
-        n = len(present); ncols = 3; nrows = int(np.ceil(n / ncols))
-        fig, axes = plt.subplots(nrows, ncols, figsize=(ncols*5.0, nrows*2.6), sharex=True)
+        n = len(present)
+        ncols = 3
+        nrows = int(np.ceil(n / ncols))
+        fig, axes = plt.subplots(
+            nrows, ncols, figsize=(ncols * 5.0, nrows * 2.6), sharex=True
+        )
         axes = np.atleast_1d(axes).ravel()
 
         any_all_nan = False
@@ -552,7 +611,7 @@ def _quicklooks_elm_combined(
 
         fig.suptitle(f"{gid}  ({lat_used:.5f}, {lon_used:.5f})", fontsize=12)
         fig.autofmt_xdate()
-        fig.tight_layout(rect=[0,0,1,0.97])
+        fig.tight_layout(rect=[0, 0, 1, 0.97])
         fig.savefig(out_dir / f"{gid}.png", dpi=150)
         plt.close(fig)
 

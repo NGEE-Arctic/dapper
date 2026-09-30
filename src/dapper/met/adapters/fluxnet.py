@@ -27,9 +27,10 @@ class FluxnetAdapter(BaseAdapter):
     - Exporter supplies df_merged with ['gid','lat','lon','zone', ...] already
       merged in from df_loc.
     """
+
     # These are just for netCDF metadata
     SOURCE_NAME = "FLUXNET (AmeriFlux ONEFlux) tower data"
-    DRIVER_TAG  = "FLUXNET"
+    DRIVER_TAG = "FLUXNET"
 
     def __init__(self) -> None:
         # Native FLUXNET resolution (hours, e.g. 0.5, 1, 24, 168, …)
@@ -153,7 +154,9 @@ class FluxnetAdapter(BaseAdapter):
 
         df["date"] = date
         if df["date"].isna().all():
-            raise ValueError("All parsed timestamps are NaT; check TIMESTAMP_* formatting.")
+            raise ValueError(
+                "All parsed timestamps are NaT; check TIMESTAMP_* formatting."
+            )
 
         df = df.sort_values("date")
 
@@ -219,7 +222,9 @@ class FluxnetAdapter(BaseAdapter):
 
         # Basic NaN diagnostics for required vars
         coord_meta = {"LONGXY", "LATIXY", "time", "gid", "zone"}
-        required_data_vars = [v for v in elm_required_vars(dformat) if v not in coord_meta]
+        required_data_vars = [
+            v for v in elm_required_vars(dformat) if v not in coord_meta
+        ]
         nan_counts = {
             v: int(df[v].isna().sum())
             for v in required_data_vars
@@ -230,8 +235,7 @@ class FluxnetAdapter(BaseAdapter):
             print(f"FluxnetAdapter: variables with NaNs after conversion: {msg}")
 
         all_nan = [
-            v for v in required_data_vars
-            if v in df.columns and df[v].isna().all()
+            v for v in required_data_vars if v in df.columns and df[v].isna().all()
         ]
         if all_nan:
             raise ValueError(
@@ -347,7 +351,9 @@ class FluxnetAdapter(BaseAdapter):
                 if i == 0:
                     contrib_mask = col_vals.notna()
                 else:
-                    contrib_mask = col_vals.notna() & stacked[cols[:i]].isna().all(axis=1)
+                    contrib_mask = col_vals.notna() & stacked[cols[:i]].isna().all(
+                        axis=1
+                    )
                 if contrib_mask.any():
                     used_counts[c] = int(contrib_mask.sum())
 
@@ -439,8 +445,7 @@ class FluxnetAdapter(BaseAdapter):
                 lines.append(f"{out_name}: " + ", ".join(parts))
             msg = (
                 "FluxnetAdapter coalesced the following variables "
-                "(source_column=number_of_values_used):\n  " +
-                "\n  ".join(lines)
+                "(source_column=number_of_values_used):\n  " + "\n  ".join(lines)
             )
             warnings.warn(msg, UserWarning)
             # If you prefer stdout instead:
@@ -469,8 +474,10 @@ def infer_fluxnet_dt_hours(df: pd.DataFrame) -> float:
     """
     # Case 1: (half-)hourly or weekly: START/END pair
     if "TIMESTAMP_START" in df.columns and "TIMESTAMP_END" in df.columns:
-        ts_start = pd.to_datetime(df["TIMESTAMP_START"].astype(str), format="%Y%m%d%H%M")
-        ts_end   = pd.to_datetime(df["TIMESTAMP_END"].astype(str),   format="%Y%m%d%H%M")
+        ts_start = pd.to_datetime(
+            df["TIMESTAMP_START"].astype(str), format="%Y%m%d%H%M"
+        )
+        ts_end = pd.to_datetime(df["TIMESTAMP_END"].astype(str), format="%Y%m%d%H%M")
 
         # Each record represents the interval [start, end); use average duration
         dt_seconds = (ts_end - ts_start).dt.total_seconds()
@@ -482,7 +489,9 @@ def infer_fluxnet_dt_hours(df: pd.DataFrame) -> float:
 
     # Case 2: daily / monthly / yearly: single TIMESTAMP
     if "TIMESTAMP" in df.columns:
-        ts = pd.to_datetime(df["TIMESTAMP"].astype(str), format="%Y%m%d", errors="coerce")
+        ts = pd.to_datetime(
+            df["TIMESTAMP"].astype(str), format="%Y%m%d", errors="coerce"
+        )
         if ts.isna().all():
             # fall back to more generic parse if needed
             ts = pd.to_datetime(df["TIMESTAMP"].astype(str), errors="coerce")

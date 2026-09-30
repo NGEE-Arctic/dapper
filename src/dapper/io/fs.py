@@ -15,7 +15,9 @@ def make_directory(path: str | Path, delete_all_contents: bool = False) -> Path:
     return p
 
 
-def remove_directory_contents(path: str | Path, *, remove_directory: bool = False) -> None:
+def remove_directory_contents(
+    path: str | Path, *, remove_directory: bool = False
+) -> None:
     """Remove all files/subdirs under `path`. Optionally remove the directory itself."""
     p = Path(path)
     if not p.exists():
@@ -31,7 +33,11 @@ def remove_directory_contents(path: str | Path, *, remove_directory: bool = Fals
                     except FileNotFoundError:
                         pass
             # remove empty dirs bottom-up
-            for sub in sorted([d for d in child.rglob("*") if d.is_dir()], key=lambda d: len(d.parts), reverse=True):
+            for sub in sorted(
+                [d for d in child.rglob("*") if d.is_dir()],
+                key=lambda d: len(d.parts),
+                reverse=True,
+            ):
                 try:
                     sub.rmdir()
                 except OSError:

@@ -26,14 +26,17 @@ MAX_ZONAL_CELLS = 2_000_000
 
 # ----------------------------- geometry helpers -----------------------------
 
+
 def normalize_geometry_lon(geom, wrap: Literal["0_360", "-180_180"]):
     """
     Apply the same lon wrap convention as sampling.normalize_lon to *all* coords.
     This is the simplest way to make target polygons comparable to source grid.
     """
+
     def _f(x, y, z=None):
         x2 = sampling.normalize_lon(x, wrap)
         return (x2, y) if z is None else (x2, y, z)
+
     return transform(_f, geom)
 
 
@@ -60,7 +63,7 @@ def _bounds_1d(vec: np.ndarray) -> np.ndarray:
 @dataclass(frozen=True)
 class RectilinearGrid:
     """Lightweight description of a rectilinear lat/lon grid in a consistent lon wrap."""
-    
+
     lat_dim: str
     lon_dim: str
     lon_wrap: Literal["0_360", "-180_180"]
@@ -70,13 +73,13 @@ class RectilinearGrid:
     @property
     def nlat(self) -> int:
         """Number of latitude cells."""
-        
+
         return len(self.lat_bnds) - 1
 
     @property
     def nlon(self) -> int:
         """Number of longitude cells."""
-        
+
         return len(self.lon_bnds) - 1
 
 
@@ -99,19 +102,31 @@ def infer_rectilinear_grid(
 
     # Prefer 1D coords on the dims for rectilinear grids.
     # This avoids accidentally using derived 2D vars (LATIXY/LONGXY) that might be overridden.
-    if lat_var is None and lon_var is None and (lat_dim in ds.coords) and (lon_dim in ds.coords):
+    if (
+        lat_var is None
+        and lon_var is None
+        and (lat_dim in ds.coords)
+        and (lon_dim in ds.coords)
+    ):
         lat_da = ds.coords[lat_dim]
         lon_da = ds.coords[lon_dim]
         if lat_da.ndim == 1 and lon_da.ndim == 1:
             lat_1d = np.asarray(lat_da.values, dtype=float)
             lon_1d_raw = np.asarray(lon_da.values, dtype=float)
 
-            wrap = sampling.infer_lon_wrap(lon_1d_raw) if lon_wrap == "auto" else lon_wrap  # type: ignore[assignment]
+            wrap = (
+                sampling.infer_lon_wrap(lon_1d_raw) if lon_wrap == "auto" else lon_wrap
+            )  # type: ignore[assignment]
             if wrap not in ("0_360", "-180_180"):
-                raise ValueError(f"lon_wrap must resolve to '0_360' or '-180_180', got {wrap}")
+                raise ValueError(
+                    f"lon_wrap must resolve to '0_360' or '-180_180', got {wrap}"
+                )
 
             # sampling.normalize_lon is scalar; vectorize here.
-            lon_1d = np.asarray([sampling.normalize_lon(float(v), wrap) for v in lon_1d_raw], dtype=float)
+            lon_1d = np.asarray(
+                [sampling.normalize_lon(float(v), wrap) for v in lon_1d_raw],
+                dtype=float,
+            )
 
             return RectilinearGrid(
                 lat_dim=lat_dim,
@@ -141,7 +156,9 @@ def infer_rectilinear_grid(
     )
 
 
-def _candidate_ij_for_bounds(grid: RectilinearGrid, bounds_lonlat) -> tuple[np.ndarray, np.ndarray]:
+def _candidate_ij_for_bounds(
+    grid: RectilinearGrid, bounds_lonlat
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute i/j ranges for a bbox in *the same lon wrap as the grid*.
     This avoids building polygons for the full globe.
@@ -166,6 +183,7 @@ class ZonalWeights:
       ``i_lat``, ``i_lon``, ``intersect_area_m2``, ``weight``.
     - ``weight`` is normalized to sum to 1 for that ``gid``.
     """
+
     by_gid: dict[str, pd.DataFrame]
     lon_wrap: Literal["0_360", "-180_180"]
     equal_area_crs: str
@@ -173,7 +191,7 @@ class ZonalWeights:
 
 def intersect_weights_rectilinear(
     ds: xr.Dataset,
-    targets: gpd.GeoDataFrame,   # EPSG:4326, must have gid + geometry
+    targets: gpd.GeoDataFrame,  # EPSG:4326, must have gid + geometry
     *,
     lat_dim: str = "lsmlat",
     lon_dim: str = "lsmlon",
@@ -183,10 +201,14 @@ def intersect_weights_rectilinear(
     min_frac: float = 0.0,
 ) -> ZonalWeights:
     """Compute area-weighted intersections between target polygons and a rectilinear grid."""
-    
+
     grid = infer_rectilinear_grid(
-        ds, lat_dim=lat_dim, lon_dim=lon_dim,
-        lat_var=lat_var, lon_var=lon_var, lon_wrap=lon_wrap
+        ds,
+        lat_dim=lat_dim,
+        lon_dim=lon_dim,
+        lat_var=lat_var,
+        lon_var=lon_var,
+        lon_wrap=lon_wrap,
     )
 
     # Normalize targets to grid lon wrap
@@ -215,7 +237,12 @@ def intersect_weights_rectilinear(
     ij = []
     for i in ii:
         for j in jj:
-            p = box(grid.lon_bnds[j], grid.lat_bnds[i], grid.lon_bnds[j + 1], grid.lat_bnds[i + 1])
+            p = box(
+                grid.lon_bnds[j],
+                grid.lat_bnds[i],
+                grid.lon_bnds[j + 1],
+                grid.lat_bnds[i + 1],
+            )
             polys.append(p)
             ij.append((i, j))
 
@@ -265,7 +292,9 @@ def intersect_weights_rectilinear(
         if min_frac > 0:
             # min_frac is relative to total intersect area for that gid (not cell area)
             df = df[df["weight"] >= float(min_frac)].copy()
-            df["weight"] = df["intersect_area_m2"] / float(df["intersect_area_m2"].sum())
+            df["weight"] = df["intersect_area_m2"] / float(
+                df["intersect_area_m2"].sum()
+            )
 
         by_gid[gid] = df.reset_index(drop=True)
 
@@ -273,6 +302,7 @@ def intersect_weights_rectilinear(
 
 
 # ----------------------------- reducers -----------------------------
+
 
 def _reduce_da(da_sel: xr.DataArray, w: xr.DataArray, agg: str) -> xr.DataArray:
     if agg == "wmean":
@@ -290,7 +320,9 @@ def _reduce_da(da_sel: xr.DataArray, w: xr.DataArray, agg: str) -> xr.DataArray:
         ww = w.values
         # da_sel is vectorized selection => shape (..., cell). We assume only 'cell' varies.
         # Convert to 1D over cell for the mode; for multi-dim (time, pft, etc.) caller should loop.
-        raise NotImplementedError("wmode reducer needs a per-slice implementation (see notes).")
+        raise NotImplementedError(
+            "wmode reducer needs a per-slice implementation (see notes)."
+        )
     raise ValueError(f"Unknown agg={agg!r}")
 
 
@@ -308,7 +340,7 @@ def sample_gridded_dataset_polygons(
     agg_policy: dict[str, str] | None = None,
     default_float: str = "wmean",
     default_int: str = "wmode",
-    weights: "ZonalWeights | None" = None,   # NEW
+    weights: "ZonalWeights | None" = None,  # NEW
 ) -> xr.Dataset:
     """
     Zonal-sample spatial vars (those with BOTH lat_dim and lon_dim) onto target polygons.
@@ -320,11 +352,18 @@ def sample_gridded_dataset_polygons(
     """
     agg_policy = dict(agg_policy or {})
 
-    zw = weights if weights is not None else intersect_weights_rectilinear(
-        ds, targets,
-        lat_dim=lat_dim, lon_dim=lon_dim,
-        lat_var=lat_var, lon_var=lon_var,
-        lon_wrap=lon_wrap,
+    zw = (
+        weights
+        if weights is not None
+        else intersect_weights_rectilinear(
+            ds,
+            targets,
+            lat_dim=lat_dim,
+            lon_dim=lon_dim,
+            lat_var=lat_var,
+            lon_var=lon_var,
+            lon_wrap=lon_wrap,
+        )
     )
 
     data_vars = list(ds.data_vars)
@@ -352,7 +391,9 @@ def sample_gridded_dataset_polygons(
         lat_dim = spec.lat_dim
         lon_dim = spec.lon_dim
 
-    spatial_vars = [v for v in data_vars if (lat_dim in ds[v].dims and lon_dim in ds[v].dims)]
+    spatial_vars = [
+        v for v in data_vars if (lat_dim in ds[v].dims and lon_dim in ds[v].dims)
+    ]
     non_spatial_vars = [v for v in data_vars if v not in spatial_vars]
 
     sampled_slices: list[xr.Dataset] = []
@@ -374,7 +415,9 @@ def sample_gridded_dataset_polygons(
         # Normalized weights for wmean / wmode
         w_norm = xr.DataArray(wdf["weight"].to_numpy(dtype=float), dims="cell")
         # Raw areas for area_sum
-        w_area = xr.DataArray(wdf["intersect_area_m2"].to_numpy(dtype=float), dims="cell")
+        w_area = xr.DataArray(
+            wdf["intersect_area_m2"].to_numpy(dtype=float), dims="cell"
+        )
 
         out_vars = {}
         for v in spatial_vars:
@@ -387,7 +430,9 @@ def sample_gridded_dataset_polygons(
             if v == "AREA" and agg is None:
                 agg = "area_sum"
 
-            da_sel = da.isel({lat_dim: i_idx, lon_dim: j_idx})  # -> dims replace lat/lon with "cell"
+            da_sel = da.isel(
+                {lat_dim: i_idx, lon_dim: j_idx}
+            )  # -> dims replace lat/lon with "cell"
 
             # Reduce
             if agg == "area_sum":
@@ -399,7 +444,9 @@ def sample_gridded_dataset_polygons(
             elif agg == "min":
                 da_red = da_sel.min("cell")
             elif agg == "wmode":
-                da_red = reduce_wmode(da_sel, w_norm, cell_dim="cell", tie_break="smallest")
+                da_red = reduce_wmode(
+                    da_sel, w_norm, cell_dim="cell", tie_break="smallest"
+                )
             elif agg == "wmean_threshold":
                 m = (da_sel * w_norm).sum("cell") / w_norm.sum("cell")
                 da_red = (m >= 0.5).astype(np.int32)
@@ -413,7 +460,9 @@ def sample_gridded_dataset_polygons(
         sel_ds = xr.Dataset(out_vars)
         # Match per-variable dim ordering like point sampler does
         for v in spatial_vars:
-            sel_ds[v] = sampling._reorder_like_source(sel_ds[v], ds[v].dims, lat_dim, lon_dim)
+            sel_ds[v] = sampling._reorder_like_source(
+                sel_ds[v], ds[v].dims, lat_dim, lon_dim
+            )
 
         sampled_slices.append(sel_ds)
 
@@ -425,7 +474,10 @@ def sample_gridded_dataset_polygons(
     out.attrs["dapper_sampling_equal_area_crs"] = zw.equal_area_crs
     return out
 
-def _weighted_mode_1d(values: np.ndarray, weights: np.ndarray, *, tie_break: TieBreak) -> object:
+
+def _weighted_mode_1d(
+    values: np.ndarray, weights: np.ndarray, *, tie_break: TieBreak
+) -> object:
     """
     Weighted mode of a 1D array, ignoring NaNs (if float).
     Returns a scalar of the same "kind" as values.
@@ -496,12 +548,16 @@ def reduce_wmode(
     ww = np.asarray(w.values, dtype=float)
 
     if arr.shape[-1] != ww.shape[0]:
-        raise ValueError(f"reduce_wmode: cell axis mismatch {arr.shape[-1]} vs {ww.shape[0]}")
+        raise ValueError(
+            f"reduce_wmode: cell axis mismatch {arr.shape[-1]} vs {ww.shape[0]}"
+        )
 
     ncell = arr.shape[-1]
     flat = arr.reshape(-1, ncell)
 
-    out = np.empty(flat.shape[0], dtype=arr.dtype if arr.dtype.kind in {"i", "u", "b"} else float)
+    out = np.empty(
+        flat.shape[0], dtype=arr.dtype if arr.dtype.kind in {"i", "u", "b"} else float
+    )
 
     for r in range(flat.shape[0]):
         out[r] = _weighted_mode_1d(flat[r], ww, tie_break=tie_break)
