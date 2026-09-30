@@ -5,14 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-# matplotlib (headless)
-import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from netCDF4 import num2date
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 # ----------------------- plotting defaults & units -----------------------
 
