@@ -162,7 +162,7 @@ class FluxnetAdapter(BaseAdapter):
         # Year filtering / calendar
         df = df[(df["date"].dt.year >= start_year) & (df["date"].dt.year <= end_year)]
         if dt.is_noleap_calendar(calendar):
-            df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
+            df = df[~dt.is_feb29(df["date"])]
 
         # Ensure we have enough raw variables to build ELM vars
         self._check_required_raw_vars(df, dformat)
