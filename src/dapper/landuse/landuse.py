@@ -13,9 +13,8 @@ import xarray as xr
 
 from dapper.domains.domain import Domain
 from dapper.geo import sampling
+from dapper.geo.lonwrap import normalize_lons
 from dapper.surf.fraction_closure import normalize_fraction_closure
-
-LonWrap = Literal["auto", "0_360", "-180_180"]
 
 
 def sample_landuse_timeseries(
@@ -114,10 +113,7 @@ def sample_landuse_timeseries(
 
         if output_lon_wrap is not None and "LONGXY" in ds_out:
             lon_vals = ds_out["LONGXY"].values.reshape(-1)
-            lon_vals2 = np.array(
-                [sampling.normalize_lon(float(v), output_lon_wrap) for v in lon_vals],
-                dtype=float,
-            )
+            lon_vals2 = normalize_lons(lon_vals, output_lon_wrap)
             spec = sampling.infer_latlon_spec(ds_out, lon_wrap=lon_wrap)
             ds_out["LONGXY"] = xr.DataArray(
                 lon_vals2.reshape(
@@ -254,10 +250,7 @@ def sample_landuse_timeseries(
     if "LONGXY" in out:
         lon_vals = df0[lon_col].to_numpy(dtype=np.float64)
         if output_lon_wrap is not None:
-            lon_vals = np.array(
-                [sampling.normalize_lon(float(v), output_lon_wrap) for v in lon_vals],
-                dtype=np.float64,
-            )
+            lon_vals = normalize_lons(lon_vals, output_lon_wrap)
             out.attrs["output_lon_wrap"] = str(output_lon_wrap)
 
         out["LONGXY"] = xr.DataArray(

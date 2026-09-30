@@ -16,8 +16,8 @@ from shapely.ops import transform
 from shapely.strtree import STRtree
 
 from dapper.geo import sampling
+from dapper.geo.lonwrap import LonWrap, infer_lon_wrap, normalize_lon, normalize_lons
 
-LonWrap = Literal["auto", "0_360", "-180_180"]
 TieBreak = Literal["smallest", "largest", "first"]
 
 MAX_ZONAL_CELLS = 2_000_000
@@ -27,12 +27,12 @@ MAX_ZONAL_CELLS = 2_000_000
 
 def normalize_geometry_lon(geom, wrap: Literal["0_360", "-180_180"]):
     """
-    Apply the same lon wrap convention as sampling.normalize_lon to *all* coords.
+    Apply the lon wrap convention of lonwrap.normalize_lon to *all* coords.
     This is the simplest way to make target polygons comparable to source grid.
     """
 
     def _f(x, y, z=None):
-        x2 = sampling.normalize_lon(x, wrap)
+        x2 = normalize_lon(x, wrap)
         return (x2, y) if z is None else (x2, y, z)
 
     return transform(_f, geom)
@@ -112,19 +112,13 @@ def infer_rectilinear_grid(
             lat_1d = np.asarray(lat_da.values, dtype=float)
             lon_1d_raw = np.asarray(lon_da.values, dtype=float)
 
-            wrap = (
-                sampling.infer_lon_wrap(lon_1d_raw) if lon_wrap == "auto" else lon_wrap
-            )  # type: ignore[assignment]
+            wrap = infer_lon_wrap(lon_1d_raw) if lon_wrap == "auto" else lon_wrap  # type: ignore[assignment]
             if wrap not in ("0_360", "-180_180"):
                 raise ValueError(
                     f"lon_wrap must resolve to '0_360' or '-180_180', got {wrap}"
                 )
 
-            # sampling.normalize_lon is scalar; vectorize here.
-            lon_1d = np.asarray(
-                [sampling.normalize_lon(float(v), wrap) for v in lon_1d_raw],
-                dtype=float,
-            )
+            lon_1d = normalize_lons(lon_1d_raw, wrap)
 
             return RectilinearGrid(
                 lat_dim=lat_dim,

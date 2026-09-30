@@ -157,39 +157,22 @@ def infer_grid_metadata(
         lon_wrap=lon_wrap,
     )
 
-    def _median_step(arr: np.ndarray) -> float | None:
+    def _median_step(arr: np.ndarray, *, drop_wrap_jump: bool = False) -> float | None:
         arr = np.asarray(arr).astype(float)
         arr = arr[np.isfinite(arr)]
-        if arr.size < 3:
-            return None
         u = np.unique(arr)
         if u.size < 3:
             return None
-        d = np.diff(np.sort(u))
+        d = np.diff(u)
         d = d[np.isfinite(d)]
-        if d.size == 0:
-            return None
-        return float(np.median(np.abs(d)))
-
-    def _median_step_lon(arr: np.ndarray) -> float | None:
-        # same as _median_step, but drop the dateline jump
-        arr = np.asarray(arr).astype(float)
-        arr = arr[np.isfinite(arr)]
-        if arr.size < 3:
-            return None
-        u = np.unique(arr)
-        if u.size < 3:
-            return None
-        d = np.diff(np.sort(u))
-        d = d[np.isfinite(d)]
-        # filter out huge jump across wrap
-        d = d[np.abs(d) < 180.0]
+        if drop_wrap_jump:
+            d = d[np.abs(d) < 180.0]
         if d.size == 0:
             return None
         return float(np.median(np.abs(d)))
 
     dlat = _median_step(spec.lat_1d)
-    dlon = _median_step_lon(spec.lon_1d)
+    dlon = _median_step(spec.lon_1d, drop_wrap_jump=True)
 
     meta: dict = {
         "dapper_source_grid_lat_dim": spec.lat_dim,
