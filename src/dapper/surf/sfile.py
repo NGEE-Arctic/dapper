@@ -137,7 +137,7 @@ def build_surface_dataset_cellset(
 ) -> xr.Dataset:
     """
     Build an ELM surface xarray.Dataset for a cellset laid out as (nj=N, ni=1).
-    This mirrors your domain writer default of N×1, and keeps spatial dims last.
+    This mirrors the domain writer's default N×1 layout and keeps spatial dims last.
 
     Each entry of sampled_list is the dict returned by SurfacePointSampler.sample().
     """
@@ -437,8 +437,8 @@ def customize_surface(
     allow_add: bool = True,
     run_validation: bool = False,
     validator_kwargs: dict[str, Any] | None = None,
-    units_policy: str = "enforce",  # <— default enforce
-    engine: str = "netcdf4",  # future-proof, we sanitize netcdf4 above
+    units_policy: str = "enforce",
+    engine: str = "netcdf4",
 ) -> tuple[str, Optional["pd.DataFrame"]]:
     """
     Update or add parameters in an existing ELM surface NetCDF (path-only API).
@@ -468,14 +468,18 @@ def customize_surface(
         Output path; default is '<stem>_custom.nc' next to input.
     strict_registry : bool
         Require variables to exist in schema.REGISTRY. True recommended.
-    validate_units : bool
-        Ensure file units match registry units (registry ''/'varies' are skipped).
     allow_add : bool
         Permit adding new variables; otherwise only overwrite existing ones.
     run_validation : bool
         If True, run dapper.surf.validate.SurfaceValidator on the written file and return the report.
     validator_kwargs : dict
         Passed to SurfaceValidator(...).
+    units_policy : str
+        ``"enforce"`` raises when an existing variable's units differ from the
+        registry (registry units ``''``/``'varies'`` are skipped). Any other value
+        skips the check.
+    engine : str
+        Unused.
 
     Returns
     -------

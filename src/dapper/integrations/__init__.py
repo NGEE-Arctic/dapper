@@ -1,1 +1,1 @@
-"""dapper module: integrations.__init__."""
+"""Integrations with external data services."""

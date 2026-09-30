@@ -1,1 +1,1 @@
-"""dapper module: elm.__init__."""
+"""ELM-specific numerics and legacy helpers."""

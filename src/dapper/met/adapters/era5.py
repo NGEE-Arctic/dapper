@@ -1,4 +1,3 @@
-# dapper/met/adapters/era5.py
 """ERA5-Land adapter implementation."""
 
 from __future__ import annotations
@@ -16,45 +15,33 @@ from dapper.schemas.elm import elm_required_vars, is_nonnegative
 
 
 class ERA5Adapter(BaseAdapter):
-    """ERA5-Land → ELM adapter.
+    """ERA5-Land hourly → ELM adapter.
 
-    This adapter implements the ``BaseAdapter`` interface for ERA5-Land hourly data.
-    It handles source-specific details—file discovery, unit conversions, humidity
-    diagnostics, renaming to ELM short names, and nonnegativity enforcement, so the
-    upstream ``Exporter`` can remain source-agnostic.
+    Handles ERA5-specific file discovery, unit conversions, humidity
+    diagnostics, renaming to ELM short names, and nonnegativity so the
+    :class:`~dapper.met.exporter.Exporter` stays source-agnostic.
 
-    Responsibilities
-    ----------------
-    - **discover_files**: Find CSV shards in a directory and infer the overall
-      (start_year, end_year) using their date coverage.
-    - **normalize_locations**: Validate and normalize the locations table
-      (adds ``lon_0-360``, ensures/creates ``zone``, stable sorting).
-    - **id_column_for_csv**: Declare the identifier column name in the input
-      CSVs. For ERA5 we require ``gid``.
-    - **preprocess_shard**: Convert one merged shard (CSV rows joined to
-      locations) into canonical ELM columns. Steps include:
+    ``preprocess_shard`` steps:
 
-      1. time filtering and optional “noleap” removal of Feb 29
-      2. ERA5→ELM unit conversions (e.g., J/hr/m² → W/m², m/hr → mm/s)
-      3. optional humidity computation (RH/Q) if temperature, dewpoint, and
-         surface pressure are available
-      4. renaming raw ERA5 fields to ELM short names via a mapping
-      5. clipping canonical nonnegative variables
-      6. returning only required columns in a deterministic order
+    1. keep rows from Jan 1 of ``start_year`` through Jan 1 00:00 of
+       ``end_year + 1`` (a one-hour lookahead for end-labeled fluxes); Feb 29 is
+       kept here and dropped later during temporal alignment
+    2. unit conversions: J/m² per hour → W/m² (÷3600), m/hr → mm/s (÷3.6),
+       wind speed from u/v
+    3. RH and specific humidity when temperature, dewpoint, and surface
+       pressure are all present
+    4. rename to ELM short names via
+       :data:`dapper.config.metsources.era5.RAW_TO_ELM`
+    5. clip canonical nonnegative variables at 0
+    6. return the format's required variables plus
+       ``LONGXY, LATIXY, time, gid, zone``, sorted by time and location
 
-    - **required_vars**: Report the canonical ELM variable names required for the
-      requested output format.
-    - **pack_params**: Provide robust ``(add_offset, scale_factor)`` for a canonical
-      ELM variable, given optional data to tune ranges.
-
-    Notes
-    -----
-    - Humidity computation is performed only when ``temperature_2m``,
-      ``dewpoint_temperature_2m``, and ``surface_pressure`` are present.
-    - Precipitation conversion uses ``m/hr → mm/s`` via division by ``3.6``.
+    Accumulated fields (FSDS, FLDS, PRECTmms) are labeled at interval end;
+    :meth:`temporal_options` tells the exporter to relabel them to interval
+    start.
     """
 
-    # These are just for netCDF metadata
+    # NetCDF provenance metadata
     SOURCE_NAME = "ERA5-Land hourly reanalysis"
     DRIVER_TAG = "ERA5"
     INTERVAL_END_VARS = ("FSDS", "FLDS", "PRECTmms")
@@ -97,15 +84,7 @@ class ERA5Adapter(BaseAdapter):
     # ---------------- preprocessing & requirements ----------------
 
     def preprocess_shard(self, df_merged, start_year, end_year, calendar, dformat):
-        """
-        1) Filter time & handle no-leap
-        2) Apply ERA5 → ELM unit conversions
-        3) Compute humidities (if columns available)
-        4) Rename columns to canonical ELM names using RAW_TO_ELM
-        5) Clip canonical nonnegative variables
-        6) Return only the canonical vars required by elm_required_vars(dformat),
-           plus LONGXY/LATIXY/time/gid/zone (coords/meta).
-        """
+        """Convert one merged CSV shard to canonical ELM columns (see class docstring)."""
         df = df_merged.copy()
 
         # --- time handling ---
@@ -206,7 +185,6 @@ class ERA5Adapter(BaseAdapter):
     # ---------------- packing ----------------
 
     def pack_params(self, elm_var, data=None):
-        # Delegate to your existing robust packer (range→offset/scale)
         """Return (add_offset, scale_factor) used to pack a variable for NetCDF output."""
 
         ao, sf = eu.elm_var_packing_params(

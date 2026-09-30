@@ -1,5 +1,4 @@
-# dapper/met/validation.py
-"""dapper module: met.validation."""
+"""PNG quicklooks of exported MET files."""
 
 from __future__ import annotations
 

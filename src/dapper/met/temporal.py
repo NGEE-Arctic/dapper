@@ -1,4 +1,3 @@
-# dapper/met/temporal.py
 """
 Temporal helpers used by Exporter and adapters.
 NetCDF I/O is handled in dapper.met.writers. This module is intentionally small.
@@ -352,7 +351,7 @@ def create_dtime(
         f"{dtime_units} since {pd.Timestamp(ref_date).strftime('%Y-%m-%d %H:%M:%S')}"
     )
 
-    # Align to target axis with your existing rules
+    # Align to the target axis
     df = df.set_index("time").sort_index()
     target_index = pd.DatetimeIndex(target_times, name="time")
     df_out = pd.DataFrame(index=target_index)

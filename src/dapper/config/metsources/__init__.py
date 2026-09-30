@@ -1,1 +1,1 @@
-"""dapper module: config.metsources.__init__."""
+"""Per-source meteorological band configuration."""

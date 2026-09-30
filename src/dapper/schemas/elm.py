@@ -1,4 +1,3 @@
-# dapper/schemas/elm.py
 """
 Canonical ELM target schema & helpers.
 
@@ -43,7 +42,7 @@ ELM_RANGES = {
 
 # ---- Required canonical variables by output format ----
 ELM_REQUIRED = {
-    # Coupler bypass (most common for your workflow)
+    # Coupler bypass (the usual dapper output)
     "BYPASS": [
         "LONGXY",
         "LATIXY",

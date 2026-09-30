@@ -1,7 +1,4 @@
-# topounits/plotting.py
-# Helpers for pretty legends + plotting topounits (GeoDataFrames) on basemaps.
-
-"""Plotting utilities for topounits and domains."""
+"""Legend labels and basemap plots for topounit GeoDataFrames."""
 
 from __future__ import annotations
 
@@ -134,7 +131,7 @@ def plot_static(
     linewidth: float = 0.7,
     legend: bool = True,
     cmap=None,
-    ax=None,  # <-- NEW: allow injecting an axes
+    ax=None,
 ):
     """
     Static plot with contextily basemap.
