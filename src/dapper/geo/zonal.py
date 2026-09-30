@@ -259,11 +259,6 @@ def intersect_weights_rectilinear(
         geom = getattr(row, "geometry")
 
         cand_idx = tree.query(geom)  # indices into src_polys
-        if len(cand_idx) > MAX_ZONAL_CELLS:
-            raise ValueError(
-                f"Zonal guardrail: gid={gid!r} has {len(cand_idx):,} candidate cells (> {MAX_ZONAL_CELLS:,}). "
-                "Reduce target extent or use a coarser grid."
-            )
         rows = []
         for k in cand_idx:
             inter = geom.intersection(src_polys[k])
@@ -277,12 +272,6 @@ def intersect_weights_rectilinear(
 
         if not rows:
             raise ValueError(f"Target gid={gid!r} intersects 0 source cells.")
-
-        if len(rows) > MAX_ZONAL_CELLS:
-            raise ValueError(
-                f"Zonal guardrail: gid={gid!r} intersects {len(rows):,} cells (> {MAX_ZONAL_CELLS:,}). "
-                "Reduce target extent or use a coarser grid."
-            )
 
         df = pd.DataFrame(rows, columns=["i_lat", "i_lon", "intersect_area_m2"])
         total = float(df["intersect_area_m2"].sum())
@@ -301,28 +290,6 @@ def intersect_weights_rectilinear(
 
 
 # ----------------------------- reducers -----------------------------
-
-
-def _reduce_da(da_sel: xr.DataArray, w: xr.DataArray, agg: str) -> xr.DataArray:
-    if agg == "wmean":
-        return (da_sel * w).sum("cell") / w.sum("cell")
-    if agg == "area_sum":
-        # w here should be raw area, not normalized weights
-        return (da_sel * w).sum("cell")
-    if agg == "max":
-        return da_sel.max("cell")
-    if agg == "min":
-        return da_sel.min("cell")
-    if agg == "wmode":
-        # Simple weighted mode (works for small category counts).
-        vals = da_sel.values
-        ww = w.values
-        # da_sel is vectorized selection => shape (..., cell). We assume only 'cell' varies.
-        # Convert to 1D over cell for the mode; for multi-dim (time, pft, etc.) caller should loop.
-        raise NotImplementedError(
-            "wmode reducer needs a per-slice implementation (see notes)."
-        )
-    raise ValueError(f"Unknown agg={agg!r}")
 
 
 def sample_gridded_dataset_polygons(

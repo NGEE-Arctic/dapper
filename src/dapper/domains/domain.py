@@ -754,9 +754,6 @@ class Domain:
             gdf = gdf.rename(columns={id_col: "topounit_id"})
         gdf["topounit_id"] = gdf["topounit_id"].astype(str)
 
-        # (optional) ensure CRS exists; leave as-is if you already enforce this elsewhere
-        # if gdf.crs is None: gdf = gdf.set_crs(epsg=4326)
-
         return self.copy(
             topounits=gdf,
             topounits_dim_name=dim_name,

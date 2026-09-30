@@ -291,7 +291,6 @@ def create_dtime(
         "WIND",
     ]
     ffill_vars = ["FSDS", "FLDS", "PRECTmms"]
-    accum_vars = []  # put true accumulations here if needed
 
     # --- derive target step in minutes (rounded to nearest minute) ---
     step_minutes = int(round(float(dtime_resolution_hrs) * 60.0))
@@ -374,15 +373,8 @@ def create_dtime(
     if cols:
         df_out[cols] = df[cols].reindex(target_index).ffill().bfill()
 
-    # (3) True accumulations (none by default)
-    for v in accum_vars:
-        if v in df.columns:
-            df_out[v] = df[v].reindex(target_index).ffill().bfill()
-
-    # (4) Carry through other columns (meta), fill both ways
-    other_cols = [
-        c for c in df.columns if c not in (linear_vars + ffill_vars + accum_vars)
-    ]
+    # (3) Carry through other columns (meta), fill both ways
+    other_cols = [c for c in df.columns if c not in (linear_vars + ffill_vars)]
     if other_cols:
         df_out[other_cols] = df[other_cols].reindex(target_index).ffill().bfill()
 

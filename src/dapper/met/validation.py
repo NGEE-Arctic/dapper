@@ -10,7 +10,7 @@ from pathlib import Path
 import matplotlib
 import numpy as np
 import pandas as pd
-from netCDF4 import Dataset, num2date
+from netCDF4 import num2date
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -204,10 +204,6 @@ def make_quicklooks(
             max_vars=max_vars,
         )
         return
-
-    # from here: NetCDF modes
-    if Dataset is None or num2date is None:
-        raise RuntimeError("netCDF4 is required to plot NetCDF quicklooks.")
 
     if mode_eff == "sites":
         _quicklooks_elm_sites(

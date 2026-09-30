@@ -324,8 +324,6 @@ class Exporter:
         site_order = self.df_loc_norm["gid"].tolist()
         self.gid_to_isite = {g: i for i, g in enumerate(site_order)}
 
-        years_span = f"{self.start_year}-{self.end_year}"
-
         # file-level attrs with provenance
         nc_attrs = self._file_attrs(dom_mode, effective_pack)
 
@@ -333,9 +331,9 @@ class Exporter:
         if dom_mode == "cellset":
             if effective_pack != "global":
                 raise ValueError("Domain(mode='cellset') requires pack_scope='global'.")
-            self._write_elm_combined(parquet_files, years_span, nc_attrs)
+            self._write_elm_combined(parquet_files, nc_attrs)
         else:
-            self._write_elm_sites(parquet_files, years_span, nc_attrs)
+            self._write_elm_sites(parquet_files, nc_attrs)
 
         # 4) cleanup
         utils.remove_directory_contents(self.temp_dir, remove_directory=True)
@@ -353,11 +351,6 @@ class Exporter:
                 raise ValueError("gid is required when domain.mode == 'sites'.")
             return self._run_dir_for_gid(gid) / "MET"
         return self._run_dir_for_gid("unused") / "MET"
-
-    def _zone_mappings_path(
-        self, gid: str | None = None, filename: str = "zone_mappings.txt"
-    ) -> Path:
-        return self._met_dir_for_gid(gid) / filename
 
     def _nc_filename(self, var: str) -> str:
         """Return the output NetCDF filename for a given variable.
@@ -500,9 +493,7 @@ class Exporter:
             if met_dir.exists():
                 utils.remove_directory_contents(met_dir, remove_directory=False)
 
-    def _write_elm_combined(
-        self, parquet_files, years_span, nc_attrs, filename_template=None
-    ):
+    def _write_elm_combined(self, parquet_files, nc_attrs):
         # global packing scan
         packing = self._compute_global_packing(parquet_files)
 
@@ -511,11 +502,6 @@ class Exporter:
             decimals=LATLON_DECIMALS,
             use_lon_0360=True,
         )
-
-        if getattr(self.domain, "mode", None) == "sites":
-            raise ValueError(
-                "Cellset MET output is only supported for Domain(mode='cellset')."
-            )
 
         met_dir = self._met_dir_for_gid()
         met_dir.mkdir(parents=True, exist_ok=True)
@@ -630,9 +616,7 @@ class Exporter:
 
         print("cellset export complete.")
 
-    def _write_elm_sites(
-        self, parquet_files, years_span, nc_attrs, filename_template=None
-    ):
+    def _write_elm_sites(self, parquet_files, nc_attrs):
         # per-site packing + per-site files
         for pf in parquet_files:
             gid = pf.stem
@@ -656,7 +640,6 @@ class Exporter:
                 continue
             site_row = row.iloc[0]
             lat = float(site_row["lat"])
-            lon = float(site_row["lon"])
             lon0360 = float(site_row["lon_0-360"])
             zone_str = "01"
             site_attrs = self._site_attrs(site_row)
@@ -774,17 +757,11 @@ class Exporter:
         if pack_scope is None:
             return "per-site" if dom_mode == "sites" else "global"
 
-        ps = str(pack_scope).strip().lower().replace("_", "-")
         if dom_mode == "cellset":
-            if ps != "global":
+            if str(pack_scope).strip().lower().replace("_", "-") != "global":
                 raise ValueError("Domain(mode='cellset') requires pack_scope='global'.")
             return "global"
-
-        # sites: keep it simple/strict for now
-        if ps in {"per-site", "site", "local"}:
-            return "per-site"
-        if ps in {"per", "per-site"}:
-            return "per-site"
+        # Sites mode always packs per site; any override value is accepted.
         return "per-site"
 
     def _temporal_options(self, df) -> dict:
@@ -921,76 +898,6 @@ class Exporter:
             for gid, gdf in ppdf.groupby("gid", sort=False):
                 if not np.isfinite(gdf[data_cols].to_numpy()).any():
                     continue
-                out = self.temp_dir / f"{gid}.parquet"
-                if out.exists():
-                    _parquet_write(out, gdf, append=True)
-                else:
-                    _parquet_write(out, gdf)
-
-    def _pass1_to_parquet_raw(self):
-        """
-        Read all source CSV shards, merge canonical site metadata from df_loc_norm,
-        and write raw per-site Parquet files to temp_parquet/<gid>.parquet.
-        """
-        raw_cols = None  # capture schema from first shard to keep order consistent
-
-        for i, f in enumerate(self.csv_files):
-            print(f"Processing file {i + 1} of {len(self.csv_files)}: {f}")
-            df = pd.read_csv(f, dtype={"gid": "string"})
-
-            # must have 'gid' and 'date' in the source CSVs
-            if "gid" not in df.columns:
-                unique_gids = self.df_loc_norm["gid"].unique()
-                if len(unique_gids) == 1:
-                    single_gid = str(unique_gids[0])
-                    df["gid"] = single_gid
-                    warnings.warn(
-                        "Source CSV has no 'gid' column; treating it as single-site and "
-                        f"assigning gid='{single_gid}' to all rows (raw export).",
-                        UserWarning,
-                    )
-                else:
-                    raise KeyError(
-                        "Expected a 'gid' column in CSV input, and df_loc_norm has "
-                        f"{len(unique_gids)} distinct gids; cannot infer site key."
-                    )
-
-            if "date" not in df.columns:
-                raise KeyError("Expected a 'date' column in CSV input.")
-
-            # Prefer canonical site metadata from df_loc_norm (avoid conflicts)
-            df = df.drop(
-                columns=[
-                    c for c in ("lat", "lon", "zone", "lon_0-360") if c in df.columns
-                ]
-            )
-
-            merged = df.merge(
-                self.df_loc_norm[["gid", "lat", "lon", "zone"]],
-                on="gid",
-                how="inner",
-            )
-            if merged.empty:
-                print("SKIP FILE: merge produced 0 rows.")
-                continue
-
-            # enforce consistent column order across shards
-            if raw_cols is None:
-                front = [
-                    c
-                    for c in ["gid", "date", "lat", "lon", "zone"]
-                    if c in merged.columns
-                ]
-                rest = [c for c in merged.columns if c not in front]
-                raw_cols = front + rest
-
-            merged = merged.reindex(columns=raw_cols)
-
-            # append rows grouped by gid
-            for gid, gdf in merged.groupby("gid", sort=False):
-                gdf = gdf.sort_values("date").drop_duplicates(
-                    subset="date", keep="last"
-                )
                 out = self.temp_dir / f"{gid}.parquet"
                 if out.exists():
                     _parquet_write(out, gdf, append=True)

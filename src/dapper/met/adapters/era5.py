@@ -231,12 +231,6 @@ class ERA5Adapter(BaseAdapter):
             v = out["v_component_of_wind_10m"].values
             out["wind_speed"] = np.sqrt(u**2 + v**2)
 
-            # Optional diagnostic (not used by ELM)
-            wd = np.degrees(np.arctan2(u, v))
-            wd[wd >= 180] -= 180
-            wd[wd < 180] += 180
-            out["wind_direction"] = wd
-
         # Precip: meters/hour → mm/s
         if "total_precipitation_hourly" in out.columns:
             out["total_precipitation_hourly"] = (

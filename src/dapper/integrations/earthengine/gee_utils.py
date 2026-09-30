@@ -3,7 +3,6 @@
 
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
@@ -19,7 +18,6 @@ from shapely.geometry import (
 )
 from shapely.ops import unary_union
 
-import dapper
 from dapper.config.metsources import era5
 from dapper.domains.domain import Domain
 
@@ -52,10 +50,6 @@ if ee is None:  # pragma: no cover
             return getattr(_require_ee_global(), name)
 
     ee = _EEProxy()  # type: ignore
-
-
-_ROOT_DIR = Path(next(iter(dapper.__path__))).parent
-_DATA_DIR = _ROOT_DIR / "data"
 
 
 def parse_geometry_object(geom, name=None):
