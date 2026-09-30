@@ -15,9 +15,13 @@ Other submodules may be importable, but are not considered part of the stable
 from __future__ import annotations
 
 from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("dapper-elm")
+except PackageNotFoundError:  # running from a source tree without installation
+    __version__ = "0+unknown"
 
 __all__ = [
     "Domain",
