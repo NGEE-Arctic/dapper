@@ -33,16 +33,7 @@ def _dtype_nbytes(dtype) -> int:
         try:
             return np.dtype(dtype).itemsize
         except Exception:
-            # map some common aliases
-            if dtype in ("i2", "int16", "short"):
-                return 2
-            if dtype in ("i4", "int32", "int"):
-                return 4
-            if dtype in ("f4", "float32"):
-                return 4
-            if dtype in ("f8", "float64"):
-                return 8
-            return 2
+            return 2  # unrecognized spelling: assume int16
     return np.dtype(dtype).itemsize
 
 
@@ -85,24 +76,9 @@ def _compute_auto_chunks(
     # Seed t_chunk from cadence * days_per_chunk
     t_seed = int(max(1, min(nt, round(days_per_chunk * steps_per_day))))
 
-    # Lock certain axes to 1 depending on pattern
+    # Non-time axes stay at 1 for every pattern; only the time chunk grows
+    # (and "by_time" pins it to 1 below).
     pattern = (write_pattern or "").lower()
-    if pattern == "by_site":
-        # Keep site axis at 1 if present
-        if "n" in dims:
-            chunks[dims.index("n")] = 1
-    elif pattern == "by_cell":
-        # Keep lat/lon at 1 if present
-        if "lat" in dims:
-            chunks[dims.index("lat")] = 1
-        if "lon" in dims:
-            chunks[dims.index("lon")] = 1
-    elif pattern == "by_time":
-        # Keep time at 1; others can grow later (we still compute a t_chunk but won’t use it)
-        pass
-    else:
-        # Unknown pattern: default to keeping non-time dims at 1
-        pass
 
     # Bytes budget
     elem_bytes = _dtype_nbytes(dtype)
