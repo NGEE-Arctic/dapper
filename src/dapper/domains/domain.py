@@ -790,6 +790,9 @@ class Domain:
         - If this Domain has one row, it still goes through the same path (safe + consistent).
 
         Users should not need to deal with ee.Geometry vs ee.Feature vs FeatureCollection here.
+
+        Raises ``RuntimeError`` if a topounit build cannot be downloaded (for example,
+        when Earth Engine falls back to a Drive export).
         """
         # Local import avoids circular imports (Domain is foundational; topounit is optional/heavy).
         from dapper.topounit.topomake import make_topounits_for_domain
@@ -798,25 +801,21 @@ class Domain:
             # preserve insertion order of dict keys
             sources = list(binning.keys())
 
-        try:
-            return make_topounits_for_domain(
-                self,
-                sources=sources,
-                binning=binning,
-                combine=combine,
-                combine_order=combine_order,
-                max_topounits=max_topounits,
-                dem_source=dem_source,
-                export_scale=export_scale,
-                min_patch_pixels=min_patch_pixels,
-                target_pixels_per_topounit=target_pixels_per_topounit,
-                target_scale=target_scale,
-                verbose=verbose,
-                allow_slow_ncells=allow_slow_ncells,
-            )
-        except RuntimeError as e:
-            print(e)
-            return None
+        return make_topounits_for_domain(
+            self,
+            sources=sources,
+            binning=binning,
+            combine=combine,
+            combine_order=combine_order,
+            max_topounits=max_topounits,
+            dem_source=dem_source,
+            export_scale=export_scale,
+            min_patch_pixels=min_patch_pixels,
+            target_pixels_per_topounit=target_pixels_per_topounit,
+            target_scale=target_scale,
+            verbose=verbose,
+            allow_slow_ncells=allow_slow_ncells,
+        )
 
     # ----------------------------- optional layout helper -----------------------------
 
