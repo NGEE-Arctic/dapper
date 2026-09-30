@@ -75,21 +75,20 @@ def test_compute_humidities_reference_values():
         np.array([285.0, 255.0, 270.0]),
         np.array([1e5, 9e4, 1e5]),
     )
-    # PINS BUG B2: vapor-pressure phase branches are inverted.
+    # Regression for B2 (values agree with Magnus-formula estimates).
     np.testing.assert_allclose(
-        rh, [82.31990210202056, 78.16320950686074, 47.77448854886398]
+        rh, [72.50320784138705, 62.89245134117623, 49.50738160870202]
     )
     np.testing.assert_allclose(
-        q, [0.00974753701782133, 0.0010576985363737, 0.0029276559349793]
+        q, [0.00857907675039152, 0.00085094893728446, 0.00303404472661542]
     )
 
 
-def test_compute_humidities_saturated_above_100_percent():
-    # PINS BUG B2: Td == T should give RH == 100, but gives > 100.
-    rh, _ = compute_humidities(
-        np.array([290.0, 260.0]), np.array([290.0, 260.0]), np.array([1e5, 1e5])
-    )
-    np.testing.assert_allclose(rh, [119.41658607, 116.70298262])
+def test_compute_humidities_saturated_is_100_percent():
+    # Regression for B2: Td == T must give RH == 100 on both phase branches.
+    t = np.array([290.0, 260.0, 273.15])
+    rh, _ = compute_humidities(t, t, np.array([1e5, 1e5, 1e5]))
+    np.testing.assert_allclose(rh, [100.0, 100.0, 100.0])
 
 
 def test_specific_humidity_from_rh():

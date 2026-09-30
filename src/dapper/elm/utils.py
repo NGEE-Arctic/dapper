@@ -38,9 +38,10 @@ def compute_humidities(temp, dewpoint_temp, surf_pressure):
         esat_not * np.exp((ls / rw) * ((1 / tnot) - (1 / temp))),
     )
 
-    # Actual Vapor Pressure (using Dewpoint Temperature)
+    # Actual Vapor Pressure (using Dewpoint Temperature), with the same phase
+    # choice as eSAT so that RH == 100% when dewpoint equals temperature.
     e = np.where(
-        temp <= 273.15,
+        temp >= 273.15,
         esat_not * np.exp((lv / rw) * ((1 / tnot) - (1 / dewpoint_temp))),
         esat_not * np.exp((ls / rw) * ((1 / tnot) - (1 / dewpoint_temp))),
     )
