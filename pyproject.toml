@@ -11,25 +11,36 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "license.md"}
 dependencies = [
-  "geopandas",
-  "pandas>=3",
-  "earthengine-api",
-  "geemap",
   "cdsapi>=0.7.7",
-  "pip",
-  "xarray",
   "cftime",
-  "tqdm",
-  "rioxarray",
-  "jupyter",
-  "fastparquet",
-  "netcdf4",
-  "intake-esm", # for Pangeo CMIP access # for Pangeo CMIP downloading
-  "gcsfs",
-  "jupytext>=1.19.3",
-  "matplotlib>=3.10.9",
-  "xyzservices>=2026.3.0",
   "contextily>=1.7.0",
+  "earthengine-api",
+  "fastparquet",
+  "fsspec",
+  "gcsfs", # gs:// access for Pangeo CMIP zarr stores
+  "geopandas",
+  "intake",
+  "intake-esm", # Pangeo CMIP catalog
+  "matplotlib>=3.10.9",
+  "netcdf4",
+  "pandas>=3",
+  "pyproj",
+  "python-dateutil",
+  "shapely",
+  "tqdm",
+  "xarray",
+  "xyzservices>=2026.3.0",
+]
+
+[project.optional-dependencies]
+notebooks = [
+  "geemap",
+  "jupyter",
+  "jupytext>=1.19.3",
+  "rioxarray",
+]
+plot = [
+  "folium", # topoplot.plot_interactive
 ]
 
 [project.urls]
@@ -47,3 +58,24 @@ include = ["dapper", "dapper.*"]
 dev = [
     "ipykernel>=7.2.0",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+# dev/ holds unshipped scratch scripts; tests/ are read-only during the refactor.
+extend-exclude = ["src/dapper/dev", "tests", "docs", "workspace"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+# B028: adding stacklevel would change where existing warnings are attributed.
+ignore = ["B028"]
+
+[tool.ruff.lint.per-file-ignores]
+# Closures are called within the same loop iteration, so late binding is safe.
+"src/dapper/met/cmip_utils.py" = ["B023"]
+"src/dapper/met/validation.py" = ["B023"]
+
+[tool.mypy]
+# No python_version pin: numpy>=2.5 stubs need 3.12 syntax.
+ignore_missing_imports = true
+exclude = ["src/dapper/dev/"]

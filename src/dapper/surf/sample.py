@@ -1,16 +1,16 @@
-# dapper/surf/sample.py
-"""dapper module: surf.sample."""
+"""Legacy dict-based point sampler for ELM surface files."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Any
 
 import numpy as np
-from dapper.geo.lonwrap import infer_lon_wrap, normalize_lon
 import xarray as xr
 
-LatLonDimNames = Tuple[Optional[str], Optional[str]]
+from dapper.geo.lonwrap import infer_lon_wrap, normalize_lon
+
+LatLonDimNames = tuple[str | None, str | None]
 
 
 def _detect_latlon_dim_names(ds: xr.Dataset) -> LatLonDimNames:
@@ -21,19 +21,33 @@ def _detect_latlon_dim_names(ds: xr.Dataset) -> LatLonDimNames:
     return lat, lon
 
 
-def _get_latlon_vectors(ds: xr.Dataset, lat_dim: str, lon_dim: str) -> Tuple[np.ndarray, np.ndarray]:
+def _get_latlon_vectors(
+    ds: xr.Dataset, lat_dim: str, lon_dim: str
+) -> tuple[np.ndarray, np.ndarray]:
     lat_vec = lon_vec = None
     if "LATIXY" in ds and set(ds["LATIXY"].dims) == {lat_dim, lon_dim}:
-        lat_vec = np.asarray(ds["LATIXY"].isel({lon_dim: 0}).values, dtype=np.float64).ravel()
+        lat_vec = np.asarray(
+            ds["LATIXY"].isel({lon_dim: 0}).values, dtype=np.float64
+        ).ravel()
     if "LONGXY" in ds and set(ds["LONGXY"].dims) == {lat_dim, lon_dim}:
-        lon_vec = np.asarray(ds["LONGXY"].isel({lat_dim: 0}).values, dtype=np.float64).ravel()
+        lon_vec = np.asarray(
+            ds["LONGXY"].isel({lat_dim: 0}).values, dtype=np.float64
+        ).ravel()
     if lat_vec is not None and lon_vec is not None:
         return lat_vec, lon_vec
 
     # Fallback: assume regular global grid with cell centers (best-effort)
     nlat, nlon = ds.sizes[lat_dim], ds.sizes[lon_dim]
-    lat_vec = np.linspace(-90 + 0.25, 90 - 0.25, nlat, dtype=np.float64) if nlat > 1 else np.array([0.0])
-    lon_vec = np.linspace(-180 + 0.25, 180 - 0.25, nlon, dtype=np.float64) if nlon > 1 else np.array([0.0])
+    lat_vec = (
+        np.linspace(-90 + 0.25, 90 - 0.25, nlat, dtype=np.float64)
+        if nlat > 1
+        else np.array([0.0])
+    )
+    lon_vec = (
+        np.linspace(-180 + 0.25, 180 - 0.25, nlon, dtype=np.float64)
+        if nlon > 1
+        else np.array([0.0])
+    )
     return lat_vec, lon_vec
 
 
@@ -46,12 +60,17 @@ def _normalize_lon_to_array(lon: float, lon_vec: np.ndarray) -> float:
     wrap = infer_lon_wrap(finite)
     return float(normalize_lon(float(lon), wrap))
 
-def _slice_spatial(da: xr.DataArray, lat_dim: str, lon_dim: str, i: int, j: int) -> xr.DataArray:
+
+def _slice_spatial(
+    da: xr.DataArray, lat_dim: str, lon_dim: str, i: int, j: int
+) -> xr.DataArray:
     return da.isel({lat_dim: i, lon_dim: j})
 
 
-def _capture_small_dim_coords(ds: xr.Dataset, lat_dim: str, lon_dim: str) -> Dict[str, np.ndarray]:
-    coords: Dict[str, np.ndarray] = {}
+def _capture_small_dim_coords(
+    ds: xr.Dataset, lat_dim: str, lon_dim: str
+) -> dict[str, np.ndarray]:
+    coords: dict[str, np.ndarray] = {}
     for dim in ds.dims:
         if dim in (lat_dim, lon_dim):
             continue
@@ -60,10 +79,22 @@ def _capture_small_dim_coords(ds: xr.Dataset, lat_dim: str, lon_dim: str) -> Dic
                 coords[dim] = np.asarray(ds.coords[dim].values)
             except Exception:
                 pass
-        if dim in (
-            "time", "natpft", "lsmpft", "nlevsoi", "nlevslp", "numurbl",
-            "numrad", "nlevurb", "nglcec", "nglcecp1"
-        ) and dim not in coords:
+        if (
+            dim
+            in (
+                "time",
+                "natpft",
+                "lsmpft",
+                "nlevsoi",
+                "nlevslp",
+                "numurbl",
+                "numrad",
+                "nlevurb",
+                "nglcec",
+                "nglcecp1",
+            )
+            and dim not in coords
+        ):
             coords[dim] = np.arange(ds.sizes[dim])
     return coords
 
@@ -78,16 +109,20 @@ class SurfacePointSampler:
         nc_in: str | Path,
         *,
         decode_times: bool = True,
-        chunks: Optional[Dict[str, int]] = None,
-        include: Optional[set[str]] = None,
-        exclude: Optional[set[str]] = None,
+        chunks: dict[str, int] | None = None,
+        include: set[str] | None = None,
+        exclude: set[str] | None = None,
     ) -> None:
         self.ds = xr.open_dataset(nc_in, decode_times=decode_times, chunks=chunks or {})
         self.lat_dim, self.lon_dim = _detect_latlon_dim_names(self.ds)
         if not self.lat_dim or not self.lon_dim:
-            raise ValueError("Could not detect spatial dims (need lsmlat/lsmlon or lat/lon).")
+            raise ValueError(
+                "Could not detect spatial dims (need lsmlat/lsmlon or lat/lon)."
+            )
 
-        self.lat_vec, self.lon_vec = _get_latlon_vectors(self.ds, self.lat_dim, self.lon_dim)
+        self.lat_vec, self.lon_vec = _get_latlon_vectors(
+            self.ds, self.lat_dim, self.lon_dim
+        )
         self.coords_src = _capture_small_dim_coords(self.ds, self.lat_dim, self.lon_dim)
 
         names = list(self.ds.data_vars)
@@ -101,26 +136,26 @@ class SurfacePointSampler:
 
     def close(self) -> None:
         """Close any underlying datasets/resources held by the sampler."""
-        
+
         try:
             self.ds.close()
         except Exception:
             pass
 
-    def __enter__(self) -> "SurfacePointSampler":
+    def __enter__(self) -> SurfacePointSampler:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
-    def sample(self, lat: float, lon: float) -> Dict[str, Any]:
+    def sample(self, lat: float, lon: float) -> dict[str, Any]:
         """Sample surface variables at the provided locations and return a dict of arrays."""
-        
+
         lon_norm = _normalize_lon_to_array(lon, self.lon_vec)
         i = int(np.abs(self.lat_vec - lat).argmin())
         j = int(np.abs(self.lon_vec - lon_norm).argmin())
 
-        out: Dict[str, Any] = {
+        out: dict[str, Any] = {
             "__meta__": {
                 "lat_in": float(lat),
                 "lon_in": float(lon),
@@ -140,8 +175,12 @@ class SurfacePointSampler:
             orig_dims = tuple(da.dims)
 
             if (self.lat_dim in orig_dims) and (self.lon_dim in orig_dims):
-                da_pt = _slice_spatial(da, self.lat_dim, self.lon_dim, i, j).squeeze(drop=True)
-                dims_no_spatial = [d for d in orig_dims if d not in (self.lat_dim, self.lon_dim)]
+                da_pt = _slice_spatial(da, self.lat_dim, self.lon_dim, i, j).squeeze(
+                    drop=True
+                )
+                dims_no_spatial = [
+                    d for d in orig_dims if d not in (self.lat_dim, self.lon_dim)
+                ]
                 data = np.asarray(da_pt.values)
                 out[name] = {
                     "dims": dims_no_spatial,
@@ -169,10 +208,10 @@ def sample_point_values(
     lon: float,
     *,
     decode_times: bool = True,
-    chunks: Optional[Dict[str, int]] = None,
-    include: Optional[set[str]] = None,
-    exclude: Optional[set[str]] = None,
-) -> Dict[str, Any]:
+    chunks: dict[str, int] | None = None,
+    include: set[str] | None = None,
+    exclude: set[str] | None = None,
+) -> dict[str, Any]:
     """
     Backwards-friendly convenience wrapper: opens, samples one point, closes.
     """

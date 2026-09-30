@@ -1,14 +1,16 @@
-# dapper/met/writers.py
-"""dapper module: met.writers."""
+"""Low-level netCDF4 writers for packed ELM MET files."""
 
 from __future__ import annotations
-import numpy as np
+
 from pathlib import Path
+
+import numpy as np
 from netCDF4 import Dataset
 
 from dapper.met.temporal import normalize_calendar
 
 # --------------------------- chunking helper ---------------------------
+
 
 def _infer_dt_hours(dtime_vals, dtime_units: str) -> float:
     """Infer timestep (hours) from numeric DTIME and CF-like units string."""
@@ -31,16 +33,7 @@ def _dtype_nbytes(dtype) -> int:
         try:
             return np.dtype(dtype).itemsize
         except Exception:
-            # map some common aliases
-            if dtype in ("i2", "int16", "short"):
-                return 2
-            if dtype in ("i4", "int32", "int"):
-                return 4
-            if dtype in ("f4", "float32"):
-                return 4
-            if dtype in ("f8", "float64"):
-                return 8
-            return 2
+            return 2  # unrecognized spelling: assume int16
     return np.dtype(dtype).itemsize
 
 
@@ -57,12 +50,12 @@ def _compute_auto_chunks(
     days_per_chunk: float = 28.0,
 ) -> tuple[int, ...]:
     """
-    Heuristic default chunking suited to your write pattern.
+    Heuristic default chunking for the given write pattern.
 
     Rules of thumb:
       - by_site : keep site axis at 1; grow time until target_mb (e.g., (1, t_chunk))
       - by_cell : keep lat/lon at 1; grow time until target_mb (e.g., (t_chunk,1,1))
-      - by_time : keep time at 1; grow the rest (rare for your flow)
+      - by_time : keep time at 1; grow the rest (rare in dapper)
 
     Always respects dimension extents. Uses DTIME cadence + `days_per_chunk` to seed t_chunk.
     """
@@ -83,24 +76,9 @@ def _compute_auto_chunks(
     # Seed t_chunk from cadence * days_per_chunk
     t_seed = int(max(1, min(nt, round(days_per_chunk * steps_per_day))))
 
-    # Lock certain axes to 1 depending on pattern
+    # Non-time axes stay at 1 for every pattern; only the time chunk grows
+    # (and "by_time" pins it to 1 below).
     pattern = (write_pattern or "").lower()
-    if pattern == "by_site":
-        # Keep site axis at 1 if present
-        if "n" in dims:
-            chunks[dims.index("n")] = 1
-    elif pattern == "by_cell":
-        # Keep lat/lon at 1 if present
-        if "lat" in dims:
-            chunks[dims.index("lat")] = 1
-        if "lon" in dims:
-            chunks[dims.index("lon")] = 1
-    elif pattern == "by_time":
-        # Keep time at 1; others can grow later (we still compute a t_chunk but won’t use it)
-        pass
-    else:
-        # Unknown pattern: default to keeping non-time dims at 1
-        pass
 
     # Bytes budget
     elem_bytes = _dtype_nbytes(dtype)
@@ -113,7 +91,9 @@ def _compute_auto_chunks(
             p *= int(max(1, v))
         return p
 
-    other_prod = prod(chunks[:t_axis] + chunks[t_axis+1:])  # should be 1 for our patterns
+    other_prod = prod(
+        chunks[:t_axis] + chunks[t_axis + 1 :]
+    )  # should be 1 for our patterns
     other_bytes = max(elem_bytes * other_prod, elem_bytes)
 
     # Start with t_seed
@@ -143,7 +123,9 @@ def _compute_auto_chunks(
 
     return tuple(chunks)
 
+
 # --------------------------- initialize / append ---------------------------
+
 
 def initialize_met_netcdf(
     *,
@@ -223,7 +205,7 @@ def initialize_met_netcdf(
         vtime.setncattr("calendar", str(calendar))
 
         # Other coords
-        for spec in (coord_specs or []):
+        for spec in coord_specs or []:
             cname = spec["name"]
             cdtype = spec.get("dtype", "f4")
             cdims = tuple(spec["dims"])
@@ -235,15 +217,22 @@ def initialize_met_netcdf(
                 cv.setncattr(str(ak), av)
 
         # Data variable
-        create_kwargs = dict(zlib=bool(zlib), shuffle=bool(shuffle),
-                             complevel=int(complevel), fill_value=fill_value)
+        create_kwargs = dict(
+            zlib=bool(zlib),
+            shuffle=bool(shuffle),
+            complevel=int(complevel),
+            fill_value=fill_value,
+        )
         if chunks is not None:
             create_kwargs["chunksizes"] = tuple(int(x) for x in chunks)
 
         v = ds.createVariable(var_name, dtype, tuple(dims), **create_kwargs)
         v.setncattr("add_offset", float(add_offset))
         v.setncattr("scale_factor", float(scale_factor))
-        v.setncattr("missing_value", np.int16(fill_value) if _dtype_nbytes(dtype) == 2 else fill_value)
+        v.setncattr(
+            "missing_value",
+            np.int16(fill_value) if _dtype_nbytes(dtype) == 2 else fill_value,
+        )
 
         # Per-variable attributes (units, long_name, etc.)
         if var_attrs:
@@ -265,8 +254,10 @@ def append_met_netcdf(
     *,
     path_nc,
     var_name: str,
-    data,                         # 1D time series or ND slice consistent with indexers
-    indexers: dict[str, int | slice],  # e.g., {"n": isite, "DTIME": slice(0, nt)} or {"DTIME": slice(0, nt), "lat": iy, "lon": ix}
+    data,  # 1D time series or ND slice consistent with indexers
+    indexers: dict[
+        str, int | slice
+    ],  # e.g., {"n": isite, "DTIME": slice(0, nt)} or {"DTIME": slice(0, nt), "lat": iy, "lon": ix}
 ):
     """
     Append `data` to variable `var_name` using `indexers` to select the region.

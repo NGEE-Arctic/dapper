@@ -1,2 +1,1 @@
-"""dapper module: integrations.earthengine.__init__."""
-
+"""Google Earth Engine integration."""

@@ -13,7 +13,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 def to_elm_domain_dataset(
-    domain: "Domain",
+    domain: Domain,
     *,
     grid_shape: tuple[int, int] | None = None,
     cell_dx_deg: float = 0.5,
@@ -37,7 +37,9 @@ def to_elm_domain_dataset(
     else:
         nj, ni = grid_shape
         if nj * ni != ncell:
-            raise ValueError(f"grid_shape {grid_shape} has nj*ni={nj*ni}, but Domain has {ncell} cells.")
+            raise ValueError(
+                f"grid_shape {grid_shape} has nj*ni={nj * ni}, but Domain has {ncell} cells."
+            )
 
     if cell_dy_deg is None:
         cell_dy_deg = cell_dx_deg
@@ -72,8 +74,8 @@ def to_elm_domain_dataset(
             minx, maxx = lon_c - half_dx, lon_c + half_dx
             miny, maxy = lat_c - half_dy, lat_c + half_dy
 
-        # Bounding-box corners, consistent with existing behavior
-        xv[j, i, :] = [minx, maxx, minx, maxx]
+        # Counter-clockwise bounding-box corners: ll, lr, ur, ul (CIME convention)
+        xv[j, i, :] = [minx, maxx, maxx, minx]
         yv[j, i, :] = [miny, miny, maxy, maxy]
 
         xc[j, i] = lon_c
@@ -106,13 +108,47 @@ def to_elm_domain_dataset(
         },
     )
 
-    ds["area"].attrs.update({"long_name": "area of grid cell in radians squared", "coordinate": "xc yc", "units": "radians2"})
-    ds["frac"].attrs.update({"long_name": "fraction of grid cell that is active", "coordinate": "xc yc", "units": "unitless"})
-    ds["mask"].attrs.update({"long_name": "land domain mask", "coordinate": "xc yc", "comment": "0=ocean and 1=land"})
-    ds["xc"].attrs.update({"long_name": "longitude of grid cell center", "units": "degrees_east", "bounds": "xv"})
-    ds["xv"].attrs.update({"long_name": "longitude of grid cell vertices", "units": "degrees_east"})
-    ds["yc"].attrs.update({"long_name": "latitude of grid cell center", "units": "degrees_north", "bounds": "yv"})
-    ds["yv"].attrs.update({"long_name": "latitude of grid cell vertices", "units": "degrees_north"})
+    ds["area"].attrs.update(
+        {
+            "long_name": "area of grid cell in radians squared",
+            "coordinate": "xc yc",
+            "units": "radians2",
+        }
+    )
+    ds["frac"].attrs.update(
+        {
+            "long_name": "fraction of grid cell that is active",
+            "coordinate": "xc yc",
+            "units": "unitless",
+        }
+    )
+    ds["mask"].attrs.update(
+        {
+            "long_name": "land domain mask",
+            "coordinate": "xc yc",
+            "comment": "0=ocean and 1=land",
+        }
+    )
+    ds["xc"].attrs.update(
+        {
+            "long_name": "longitude of grid cell center",
+            "units": "degrees_east",
+            "bounds": "xv",
+        }
+    )
+    ds["xv"].attrs.update(
+        {"long_name": "longitude of grid cell vertices", "units": "degrees_east"}
+    )
+    ds["yc"].attrs.update(
+        {
+            "long_name": "latitude of grid cell center",
+            "units": "degrees_north",
+            "bounds": "yv",
+        }
+    )
+    ds["yv"].attrs.update(
+        {"long_name": "latitude of grid cell vertices", "units": "degrees_north"}
+    )
 
     attrs_default = {
         "Conventions": "NCAR-CSM:CF-1.0",

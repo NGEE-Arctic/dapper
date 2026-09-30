@@ -15,9 +15,13 @@ Other submodules may be importable, but are not considered part of the stable
 from __future__ import annotations
 
 from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("dapper-elm")
+except PackageNotFoundError:  # running from a source tree without installation
+    __version__ = "0+unknown"
 
 __all__ = [
     "Domain",
@@ -31,14 +35,14 @@ __all__ = [
 
 if TYPE_CHECKING:  # pragma: no cover
     from dapper.domains.domain import Domain
-    from dapper.met.adapters.era5 import ERA5Adapter
-    from dapper.met.exporter import Exporter
+    from dapper.integrations.earthengine.gee_utils import sample_e5lh
     from dapper.integrations.era5 import (
         ERA5SamplingPlan,
         plan_era5_land_sampling,
         sample_era5_land,
     )
-    from dapper.integrations.earthengine.gee_utils import sample_e5lh
+    from dapper.met.adapters.era5 import ERA5Adapter
+    from dapper.met.exporter import Exporter
 
 _LAZY = {
     "Domain": ("dapper.domains.domain", "Domain"),

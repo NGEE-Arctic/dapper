@@ -1,4 +1,4 @@
-"""dapper module: geo.lonwrap."""
+"""Longitude wrapping conventions ([0, 360) vs [-180, 180))."""
 
 from __future__ import annotations
 
@@ -28,7 +28,9 @@ def normalize_lon(lon: float, wrap: Literal["0_360", "-180_180"]) -> float:
     return (180 - 1e-6) if ln == -180 else ln
 
 
-def normalize_lons(lon_vals: np.ndarray, wrap: Literal["0_360", "-180_180"]) -> np.ndarray:
+def normalize_lons(
+    lon_vals: np.ndarray, wrap: Literal["0_360", "-180_180"]
+) -> np.ndarray:
     """Vectorized longitude normalization."""
     lon_vals = np.asarray(lon_vals, dtype=float)
     out = lon_vals.copy()

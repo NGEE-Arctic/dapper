@@ -1,4 +1,3 @@
-
 """
 CMIP6 utilities (Pangeo / intake-esm)
 
@@ -18,10 +17,9 @@ Typical workflow:
 
 from __future__ import annotations
 
-import os
+from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import fsspec
 import numpy as np
@@ -43,6 +41,7 @@ DEFAULT_CATALOG_URL = "https://storage.googleapis.com/cmip6/pangeo-cmip6.json"
 # Catalog open/search
 # -----------------------------------------------------------------------------
 
+
 @lru_cache(maxsize=1)
 def open_cmip6_catalog(url: str = DEFAULT_CATALOG_URL):
     """
@@ -52,8 +51,8 @@ def open_cmip6_catalog(url: str = DEFAULT_CATALOG_URL):
       - intake-esm registers its plugin into `intake`, so you open via
         `intake.open_esm_datastore(...)`.
     """
-    import intake_esm  # noqa: F401  (plugin registration)
     import intake
+    import intake_esm  # noqa: F401  (plugin registration)
 
     return intake.open_esm_datastore(url)
 
@@ -102,17 +101,6 @@ def search_cmip6(params: dict, col=None) -> pd.DataFrame:
     return matches.df.copy()
 
 
-def summarize_search(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convenience: quick summary of what you matched.
-    Returns a small table you can print/log.
-    """
-    cols = [c for c in ["experiment_id", "table_id", "variable_id", "member_id", "grid_label"] if c in df.columns]
-    if not cols:
-        return pd.DataFrame({"rows": [len(df)]})
-    return df.groupby(cols, dropna=False).size().rename("n").reset_index().sort_values("n", ascending=False)
-
-
 def dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
     """
     Deduplicate by keeping the latest 'version' (if present) for each dataset key.
@@ -120,12 +108,27 @@ def dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
     In the Pangeo CMIP6 catalog, duplicates often exist for the same
     (model, experiment, member, table, grid, variable) with different versions.
     """
-    key_cols = [c for c in ["source_id", "experiment_id", "member_id", "table_id", "grid_label", "variable_id"] if c in df.columns]
+    key_cols = [
+        c
+        for c in [
+            "source_id",
+            "experiment_id",
+            "member_id",
+            "table_id",
+            "grid_label",
+            "variable_id",
+        ]
+        if c in df.columns
+    ]
     if not key_cols:
         return df.copy()
 
     if "version" in df.columns:
-        out = df.sort_values("version").drop_duplicates(subset=key_cols, keep="last").copy()
+        out = (
+            df.sort_values("version")
+            .drop_duplicates(subset=key_cols, keep="last")
+            .copy()
+        )
     else:
         # Fallback: just keep the last instance
         out = df.drop_duplicates(subset=key_cols, keep="last").copy()
@@ -136,7 +139,7 @@ def dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
 def filter_complete(
     df: pd.DataFrame,
     required_vars: Sequence[str],
-    group_cols: Optional[Sequence[str]] = None,
+    group_cols: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     """
     Keep only dataset groups that contain *all* required variables.
@@ -151,7 +154,13 @@ def filter_complete(
         return df.copy()
 
     if group_cols is None:
-        group_cols = ["source_id", "experiment_id", "member_id", "table_id", "grid_label"]
+        group_cols = [
+            "source_id",
+            "experiment_id",
+            "member_id",
+            "table_id",
+            "grid_label",
+        ]
 
     group_cols = [c for c in group_cols if c in df.columns]
     if not group_cols:
@@ -162,7 +171,9 @@ def filter_complete(
         return df.copy()
 
     def _has_all(g: pd.DataFrame) -> bool:
-        vars_here = set(g["variable_id"].values) if "variable_id" in g.columns else set()
+        vars_here = (
+            set(g["variable_id"].values) if "variable_id" in g.columns else set()
+        )
         return required.issubset(vars_here)
 
     return df.groupby(group_cols, dropna=False).filter(_has_all).reset_index(drop=True)
@@ -190,7 +201,10 @@ def find_available_data(params: dict, col=None) -> pd.DataFrame:
 # AOI helpers
 # -----------------------------------------------------------------------------
 
-def bounds_from_geojson(path: Union[str, Path]) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+
+def bounds_from_geojson(
+    path: str | Path,
+) -> tuple[tuple[float, float], tuple[float, float]]:
     """
     Read a polygon GeoJSON/shapefile and return:
         lat_bounds = (lat_min, lat_max)
@@ -211,7 +225,10 @@ def bounds_from_geojson(path: Union[str, Path]) -> Tuple[Tuple[float, float], Tu
 # Sampling helpers
 # -----------------------------------------------------------------------------
 
-def _wrap_lon_like(ds: xr.Dataset, lon_min: float, lon_max: float) -> Tuple[float, float]:
+
+def _wrap_lon_like(
+    ds: xr.Dataset, lon_min: float, lon_max: float
+) -> tuple[float, float]:
     """
     Match bbox lon convention to dataset convention (rough but effective).
     If dataset uses 0..360 and bbox uses negatives, wrap bbox to 0..360.
@@ -228,7 +245,12 @@ def _wrap_lon_like(ds: xr.Dataset, lon_min: float, lon_max: float) -> Tuple[floa
     return lon_min, lon_max
 
 
-def _subset_bbox(ds: xr.Dataset, var: str, lat_bounds: Tuple[float, float], lon_bounds: Tuple[float, float]) -> xr.DataArray:
+def _subset_bbox(
+    ds: xr.Dataset,
+    var: str,
+    lat_bounds: tuple[float, float],
+    lon_bounds: tuple[float, float],
+) -> xr.DataArray:
     """
     Subset a variable to a bounding box.
 
@@ -248,7 +270,11 @@ def _subset_bbox(ds: xr.Dataset, var: str, lat_bounds: Tuple[float, float], lon_
     # 1D grid: fast slicing
     if lat.ndim == 1 and lon.ndim == 1:
         # handle decreasing latitude
-        lat_slice = slice(lat_min, lat_max) if float(lat[0]) < float(lat[-1]) else slice(lat_max, lat_min)
+        lat_slice = (
+            slice(lat_min, lat_max)
+            if float(lat[0]) < float(lat[-1])
+            else slice(lat_max, lat_min)
+        )
 
         if lon_min <= lon_max:
             return da.sel(lat=lat_slice, lon=slice(lon_min, lon_max))
@@ -271,7 +297,7 @@ def _spatial_mean(da: xr.DataArray, ds: xr.Dataset) -> xr.DataArray:
     Compute an (optionally cos(lat) weighted) mean over horizontal dims.
     """
     # Prefer horizontal dims implied by lat/lon coordinates
-    spatial_dims: List[str] = []
+    spatial_dims: list[str] = []
     if "lat" in ds.coords:
         spatial_dims.extend([d for d in ds["lat"].dims if d in da.dims])
     if "lon" in ds.coords:
@@ -292,7 +318,9 @@ def _spatial_mean(da: xr.DataArray, ds: xr.Dataset) -> xr.DataArray:
     return da.mean(dim=spatial_dims, skipna=True)
 
 
-def _maybe_time_subset(da: xr.DataArray, time_min: Optional[str], time_max: Optional[str]) -> xr.DataArray:
+def _maybe_time_subset(
+    da: xr.DataArray, time_min: str | None, time_max: str | None
+) -> xr.DataArray:
     if time_min is None and time_max is None:
         return da
     if "time" not in da.dims:
@@ -306,9 +334,11 @@ def _maybe_time_subset(da: xr.DataArray, time_min: Optional[str], time_max: Opti
 # Crash-resilient chunked output helpers
 # -----------------------------------------------------------------------------
 
+
 def _slugify(s: object, max_len: int = 120) -> str:
     """Make a filesystem-safe token."""
     import re
+
     out = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(s))
     out = out.strip("-")
     if len(out) > max_len:
@@ -330,6 +360,7 @@ def _dataset_key_from_row(row) -> str:
     z = getattr(row, "zstore", "")
     try:
         import hashlib
+
         h = hashlib.sha1(str(z).encode("utf-8")).hexdigest()[:10]
         parts.append(h)
     except Exception:
@@ -345,7 +376,7 @@ def _atomic_write(df: pd.DataFrame, out_path: Path, fmt: str = "parquet") -> Pat
     if fmt.lower() == "parquet":
         try:
             df.to_parquet(tmp, index=False)
-        except Exception as e:
+        except Exception:
             # Parquet engine may be missing; fall back to CSV in the same directory.
             csv_fallback = out_path.with_suffix(".csv")
             tmp_csv = csv_fallback.with_suffix(".csv.tmp")
@@ -363,7 +394,7 @@ def _atomic_write(df: pd.DataFrame, out_path: Path, fmt: str = "parquet") -> Pat
 
 def _read_chunks(out_dir: Path) -> pd.DataFrame:
     """Read all chunk files from out_dir (parquet and/or csv)."""
-    parts: List[pd.DataFrame] = []
+    parts: list[pd.DataFrame] = []
     for p in sorted(out_dir.glob("*.parquet")):
         parts.append(pd.read_parquet(p))
     for p in sorted(out_dir.glob("*.csv")):
@@ -371,11 +402,12 @@ def _read_chunks(out_dir: Path) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
-def _log_failure(fail_log: Optional[Path], dataset_key: str, err: Exception) -> None:
+def _log_failure(fail_log: Path | None, dataset_key: str, err: Exception) -> None:
     if fail_log is None:
         return
     fail_log.parent.mkdir(parents=True, exist_ok=True)
     import traceback
+
     msg = f"{dataset_key}\t{type(err).__name__}: {err}\n"
     tb = traceback.format_exc()
     with fail_log.open("a", encoding="utf-8") as f:
@@ -386,17 +418,17 @@ def _log_failure(fail_log: Optional[Path], dataset_key: str, err: Exception) -> 
 
 def sample_bbox_means_for_aois(
     df: pd.DataFrame,
-    aois: Dict[str, Tuple[Tuple[float, float], Tuple[float, float]]],
-    out_csv: Optional[Union[str, Path]] = None,
-    time_min: Optional[str] = None,
-    time_max: Optional[str] = None,
+    aois: dict[str, tuple[tuple[float, float], tuple[float, float]]],
+    out_csv: str | Path | None = None,
+    time_min: str | None = None,
+    time_max: str | None = None,
     show_progress: bool = True,
     *,
-    out_dir: Optional[Union[str, Path]] = None,
+    out_dir: str | Path | None = None,
     chunk_format: str = "parquet",
     resume: bool = True,
     return_df: bool = True,
-    fail_log: Optional[Union[str, Path]] = None,
+    fail_log: str | Path | None = None,
     retries: int = 3,
     retry_backoff: float = 1.0,
 ) -> pd.DataFrame:
@@ -448,16 +480,15 @@ def sample_bbox_means_for_aois(
 
     # Optional progress bar
     it = df.itertuples(index=False)
-    tqdm_obj = None
     if show_progress:
         try:
             from tqdm import tqdm  # type: ignore
-            tqdm_obj = tqdm
+
             it = tqdm(it, total=len(df), desc="Sampling CMIP6 datasets")
         except Exception:
             it = df.itertuples(index=False)
 
-    out_rows: List[pd.DataFrame] = []
+    out_rows: list[pd.DataFrame] = []
 
     for row in it:
         dataset_key = _dataset_key_from_row(row)
@@ -485,7 +516,16 @@ def sample_bbox_means_for_aois(
 
             if var not in ds:
                 # create an empty-but-valid chunk so resume works
-                cols = ["time", "value", "aoi_id", "variable", "units", "model", "experiment", "member"]
+                cols = [
+                    "time",
+                    "value",
+                    "aoi_id",
+                    "variable",
+                    "units",
+                    "model",
+                    "experiment",
+                    "member",
+                ]
                 if table is not None:
                     cols.append("table")
                 if grid is not None:
@@ -496,15 +536,24 @@ def sample_bbox_means_for_aois(
             # pr: kg m-2 s-1 is numerically equal to mm s-1 water equivalent
             units_out = (
                 "mm s-1"
-                if (var == "pr" and "kg" in units_in and "m-2" in units_in and "s-1" in units_in)
+                if (
+                    var == "pr"
+                    and "kg" in units_in
+                    and "m-2" in units_in
+                    and "s-1" in units_in
+                )
                 else units_in
             )
 
-            aoi_dfs: List[pd.DataFrame] = []
+            aoi_dfs: list[pd.DataFrame] = []
 
             for aoi_id, (lat_bounds, lon_bounds) in aois.items():
-                da_sub = _subset_bbox(ds, var, lat_bounds=lat_bounds, lon_bounds=lon_bounds)
-                da_sub = _maybe_time_subset(da_sub, time_min=time_min, time_max=time_max)
+                da_sub = _subset_bbox(
+                    ds, var, lat_bounds=lat_bounds, lon_bounds=lon_bounds
+                )
+                da_sub = _maybe_time_subset(
+                    da_sub, time_min=time_min, time_max=time_max
+                )
                 ts = _spatial_mean(da_sub, ds)
 
                 # Force compute here so each AOI contributes real values (remote IO happens here).
@@ -513,7 +562,9 @@ def sample_bbox_means_for_aois(
                 df_ts = ts.to_dataframe(name="value").reset_index()
 
                 # stringify cftime safely
-                if "time" in df_ts.columns and not np.issubdtype(df_ts["time"].dtype, np.datetime64):
+                if "time" in df_ts.columns and not np.issubdtype(
+                    df_ts["time"].dtype, np.datetime64
+                ):
                     df_ts["time"] = df_ts["time"].astype(str)
 
                 df_ts["aoi_id"] = aoi_id
@@ -534,8 +585,8 @@ def sample_bbox_means_for_aois(
             return pd.concat(aoi_dfs, ignore_index=True) if aoi_dfs else pd.DataFrame()
 
         # Retry wrapper (handles transient HTTP / chunk fetch failures)
-        last_err: Optional[Exception] = None
-        df_chunk: Optional[pd.DataFrame] = None
+        last_err: Exception | None = None
+        df_chunk: pd.DataFrame | None = None
         for attempt in range(max(1, retries)):
             try:
                 df_chunk = _compute_one()
@@ -545,7 +596,8 @@ def sample_bbox_means_for_aois(
                 last_err = e
                 # exponential backoff
                 import time as _time
-                _time.sleep(retry_backoff * (2 ** attempt))
+
+                _time.sleep(retry_backoff * (2**attempt))
 
         if last_err is not None:
             _log_failure(fail_log_path, dataset_key, last_err)
@@ -580,97 +632,20 @@ def sample_bbox_means_for_aois(
 
     return out
 
-    required_cols = ["zstore", "variable_id", "source_id", "experiment_id", "member_id"]
-    missing = [c for c in required_cols if c not in df.columns]
-    if missing:
-        raise ValueError(f"df is missing required columns: {missing}")
-
-    time_coder = xr.coding.times.CFDatetimeCoder(use_cftime=True)
-
-    # Optional progress bar
-    it = df.itertuples(index=False)
-    if show_progress:
-        try:
-            from tqdm import tqdm  # type: ignore
-            it = tqdm(it, total=len(df), desc="Sampling CMIP6 datasets")
-        except Exception:
-            it = df.itertuples(index=False)
-
-    out_rows: List[pd.DataFrame] = []
-
-    for row in it:
-        var = row.variable_id
-        model = row.source_id
-        expid = row.experiment_id
-        member = row.member_id
-        table = getattr(row, "table_id", None)
-        grid = getattr(row, "grid_label", None)
-
-        ds = xr.open_zarr(
-            fsspec.get_mapper(row.zstore, token="anon", access="read_only"),
-            consolidated=True,
-            decode_times=time_coder,
-        )
-
-        if var not in ds:
-            continue
-
-        units_in = ds[var].attrs.get("units", "")
-        # pr: kg m-2 s-1 is numerically equal to mm s-1 water equivalent
-        units_out = "mm s-1" if (var == "pr" and "kg" in units_in and "m-2" in units_in and "s-1" in units_in) else units_in
-
-        for aoi_id, (lat_bounds, lon_bounds) in aois.items():
-            da_sub = _subset_bbox(ds, var, lat_bounds=lat_bounds, lon_bounds=lon_bounds)
-            da_sub = _maybe_time_subset(da_sub, time_min=time_min, time_max=time_max)
-            ts = _spatial_mean(da_sub, ds)
-
-            # Force compute here so each AOI contributes real values.
-            # (This is where remote IO happens.)
-            ts = ts.load()
-
-            df_ts = ts.to_dataframe(name="value").reset_index()
-
-            # stringify cftime safely
-            if "time" in df_ts.columns and not np.issubdtype(df_ts["time"].dtype, np.datetime64):
-                df_ts["time"] = df_ts["time"].astype(str)
-
-            df_ts["aoi_id"] = aoi_id
-            df_ts["variable"] = var
-            df_ts["units"] = units_out
-            df_ts["model"] = model
-            df_ts["experiment"] = expid
-            df_ts["member"] = member
-            if table is not None:
-                df_ts["table"] = table
-            if grid is not None:
-                df_ts["grid"] = grid
-            df_ts["lat_min"], df_ts["lat_max"] = min(lat_bounds), max(lat_bounds)
-            df_ts["lon_min"], df_ts["lon_max"] = lon_bounds[0], lon_bounds[1]
-
-            out_rows.append(df_ts)
-
-    out = pd.concat(out_rows, ignore_index=True) if out_rows else pd.DataFrame()
-
-    if out_csv is not None:
-        out_path = Path(out_csv)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out.to_csv(out_path, index=False)
-
-    return out
-
 
 # -----------------------------------------------------------------------------
 # Legacy / local-file helpers (kept, but trimmed)
 # -----------------------------------------------------------------------------
 
+
 def download_pangeo(
     df: pd.DataFrame,
-    dir_out: Union[str, Path],
-    lat: Optional[float] = None,
-    lon: Optional[float] = None,
-    lat_bounds: Optional[Tuple[float, float]] = None,
-    lon_bounds: Optional[Tuple[float, float]] = None,
-    polygon_path: Optional[Union[str, Path]] = None,
+    dir_out: str | Path,
+    lat: float | None = None,
+    lon: float | None = None,
+    lat_bounds: tuple[float, float] | None = None,
+    lon_bounds: tuple[float, float] | None = None,
+    polygon_path: str | Path | None = None,
 ):
     """
     Download CMIP6 data from Pangeo to NetCDF, with optional spatial subsetting.
@@ -683,7 +658,9 @@ def download_pangeo(
     time_coder = xr.coding.times.CFDatetimeCoder(use_cftime=True)
 
     for _, row in df.iterrows():
-        filename = f"{row.variable_id}_{row.source_id}_{row.experiment_id}_{row.member_id}.nc"
+        filename = (
+            f"{row.variable_id}_{row.source_id}_{row.experiment_id}_{row.member_id}.nc"
+        )
         try:
             ds = xr.open_zarr(
                 fsspec.get_mapper(row.zstore, token="anon", access="read_only"),
@@ -700,17 +677,22 @@ def download_pangeo(
                         if _lon is not None and _lon < 0:
                             _lon = _lon % 360
                         if _lon_bounds is not None:
-                            _lon_bounds = tuple(l % 360 for l in _lon_bounds)
+                            _lon_bounds = tuple(b % 360 for b in _lon_bounds)
                 except Exception:
                     pass
 
             if lat is not None and _lon is not None:
                 ds = ds.sel(lat=lat, lon=_lon, method="nearest")
             elif lat_bounds is not None and _lon_bounds is not None:
-                ds = ds.sel(lat=slice(lat_bounds[0], lat_bounds[1]), lon=slice(_lon_bounds[0], _lon_bounds[1]))
+                ds = ds.sel(
+                    lat=slice(lat_bounds[0], lat_bounds[1]),
+                    lon=slice(_lon_bounds[0], _lon_bounds[1]),
+                )
             elif polygon_path is not None:
                 if gpd is None:
-                    raise ImportError("geopandas is required for polygon masking in download_pangeo()")
+                    raise ImportError(
+                        "geopandas is required for polygon masking in download_pangeo()"
+                    )
                 gdf = gpd.read_file(str(polygon_path)).to_crs("EPSG:4326")
                 poly = gdf.geometry.unary_union
 
@@ -719,88 +701,11 @@ def download_pangeo(
 
                 lon2d, lat2d = np.meshgrid(ds.lon, ds.lat)
                 points = gpd.GeoSeries(gpd.points_from_xy(lon2d.ravel(), lat2d.ravel()))
-                mask = np.array([poly.contains(pt) for pt in points]).reshape(lat2d.shape)
+                mask = np.array([poly.contains(pt) for pt in points]).reshape(
+                    lat2d.shape
+                )
                 ds = ds.where(mask)
 
             ds.to_netcdf(dir_out / filename)
         except Exception as e:
             print(f"Failed to download {filename}: {e}")
-
-
-def extract_vars_from_files(files: Iterable[Union[str, Path]], start_date: str, end_date: str, path_out: Union[str, Path]):
-    """
-    Robust CMIP6 NetCDF merger for multiple calendars — using CFDatetimeCoder.
-    This is slow but robust.
-    """
-    from tqdm import tqdm
-
-    all_dfs: List[pd.DataFrame] = []
-    time_coder = xr.coding.times.CFDatetimeCoder(use_cftime=True)
-
-    for file in tqdm(list(files), desc="Processing"):
-        try:
-            ds = xr.open_dataset(str(file), decode_times=time_coder)
-
-            varnames = [v for v in ds.data_vars if {"time", "lat", "lon"}.intersection(ds[v].dims)]
-            for var in varnames:
-                arr = ds[var]
-                time = ds["time"].values
-
-                if isinstance(time[0], np.datetime64):
-                    times = pd.to_datetime(time)
-                    mask = (times >= start_date) & (times <= end_date)
-                else:
-                    times = time
-                    mask = np.array([(t >= cftime_date(start_date, t)) and (t <= cftime_date(end_date, t)) for t in time])
-
-                values = arr.values[mask]
-                filtered_times = np.array(times)[mask]
-
-                lon = ds["lon"].values.item() if ds["lon"].size == 1 else ds["lon"].values
-                lat = ds["lat"].values.item() if ds["lat"].size == 1 else ds["lat"].values
-
-                parts = Path(file).stem.split("_")
-                model = parts[1] if len(parts) > 1 else ""
-                ssp = parts[2] if len(parts) > 2 else ""
-
-                df1 = pd.DataFrame(
-                    {
-                        "date": filtered_times,
-                        "lon": lon,
-                        "lat": lat,
-                        "value": values,
-                        "var": var,
-                        "model": model,
-                        "ssp": ssp,
-                    }
-                )
-                all_dfs.append(df1)
-
-        except Exception as e:
-            print(f"Failed: {file} — {e}")
-
-    path_out = Path(path_out)
-    path_out.parent.mkdir(parents=True, exist_ok=True)
-
-    if all_dfs:
-        out_df = pd.concat(all_dfs, ignore_index=True)
-        if not np.issubdtype(out_df["date"].dtype, np.datetime64):
-            out_df["date"] = out_df["date"].astype(str)
-        out_df.to_csv(path_out, index=False)
-        print(f"Saved to {path_out}")
-    else:
-        print("No valid data extracted.")
-
-
-def cftime_date(string_date: str, sample_cftime):
-    """
-    Convert YYYY-MM-DD to same cftime type as sample_cftime.
-    """
-    import cftime
-
-    y, m, d = map(int, string_date.split("-"))
-    if isinstance(sample_cftime, cftime.DatetimeNoLeap):
-        return cftime.DatetimeNoLeap(y, m, d)
-    if isinstance(sample_cftime, cftime.Datetime360Day):
-        return cftime.Datetime360Day(y, m, min(d, 30))
-    return cftime.DatetimeProlepticGregorian(y, m, d)

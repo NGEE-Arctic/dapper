@@ -1,9 +1,7 @@
-# topounits/plotting.py
-# Helpers for pretty legends + plotting topounits (GeoDataFrames) on basemaps.
-
-"""Plotting utilities for topounits and domains."""
+"""Legend labels and basemap plots for topounit GeoDataFrames."""
 
 from __future__ import annotations
+
 import geopandas as gpd
 
 # ---------- label helpers ----------
@@ -12,7 +10,7 @@ _PRETTY_SOURCE = {
     "elev": "Elev",
     "hand": "HAND",
     "aspect": "Aspect",
-    "cti": "CTI",    
+    "cti": "CTI",
 }
 
 _UNITS = {
@@ -21,11 +19,13 @@ _UNITS = {
     "aspect": "°",
 }
 
+
 def _fmt_num(x, nd=0):
     try:
         return f"{float(x):.{nd}f}"
     except Exception:
         return str(x)
+
 
 def _numeric_label(bounds: dict, sid: str, nd=0) -> str | None:
     if not isinstance(bounds, dict):
@@ -34,6 +34,7 @@ def _numeric_label(bounds: dict, sid: str, nd=0) -> str | None:
     if lo is None or hi is None:
         return None
     return f"{_PRETTY_SOURCE.get(sid, sid)} {_fmt_num(lo, nd)}–{_fmt_num(hi, nd)} {_UNITS.get(sid, '')}"
+
 
 def _aspect_label(labels_dict: dict | None, bounds: dict | None) -> str:
     # Prefer human label from `labels` (e.g., "ASP_N") → "Aspect N"
@@ -49,6 +50,7 @@ def _aspect_label(labels_dict: dict | None, bounds: dict | None) -> str:
             return f"{_PRETTY_SOURCE['aspect']} {_fmt_num(start)}–{_fmt_num(end)}{_UNITS['aspect']}"
     return _PRETTY_SOURCE["aspect"]
 
+
 def _compose_legend_label(row, order=None, nd=0) -> str:
     """Build a combined legend label like: 'Elev 0–100 m | HAND 0–2 m | Aspect N'."""
     sids = order or (row.get("source_ids") or [])
@@ -59,13 +61,15 @@ def _compose_legend_label(row, order=None, nd=0) -> str:
     for sid in sids:
         if sid in ("elev", "hand"):
             p = _numeric_label(bounds.get(sid), sid, nd=nd)
-            if p: parts.append(p)
+            if p:
+                parts.append(p)
         elif sid == "aspect":
             parts.append(_aspect_label(labels, bounds.get("aspect")))
         else:
             # Unknown source: try generic numeric
             p = _numeric_label(bounds.get(sid, {}), sid, nd=nd)
-            if p: parts.append(p)
+            if p:
+                parts.append(p)
     return " | ".join(parts) if parts else (row.get("band_name") or "topounit")
 
 
@@ -75,13 +79,14 @@ def _get_ctx_provider(name: str):
     Avoids deprecated Stamen tiles.
     """
     import contextily as ctx
+
     # dotted provider names we know are widely available
     prov_map = {
         "positron": "CartoDB.Positron",
-        "dark":     "CartoDB.DarkMatter",
-        "osm":      "OpenStreetMap.Mapnik",
-        "terrain":  "OpenTopoMap",           # <- Stamen retired; use OpenTopoMap
-        "satellite":"Esri.WorldImagery",
+        "dark": "CartoDB.DarkMatter",
+        "osm": "OpenStreetMap.Mapnik",
+        "terrain": "OpenTopoMap",  # <- Stamen retired; use OpenTopoMap
+        "satellite": "Esri.WorldImagery",
     }
     key = prov_map.get(name, "CartoDB.Positron")
     prov = ctx.providers
@@ -89,7 +94,9 @@ def _get_ctx_provider(name: str):
         prov = getattr(prov, part)
     return prov
 
+
 # ---------- public helpers ----------
+
 
 def prepare_for_plot(
     gdf: gpd.GeoDataFrame,
@@ -105,12 +112,15 @@ def prepare_for_plot(
     """
     df = gdf.copy()
     # legend_label (uses source_ids order unless 'order' provided)
-    df["legend_label"] = df.apply(lambda r: _compose_legend_label(r, order=order, nd=ndigits_numeric), axis=1)
+    df["legend_label"] = df.apply(
+        lambda r: _compose_legend_label(r, order=order, nd=ndigits_numeric), axis=1
+    )
 
     # area (project to meters for area calc)
     df_proj = df.to_crs(area_epsg)
     df[area_col] = df_proj.geometry.area / 1e6
     return df
+
 
 def plot_static(
     gdf: gpd.GeoDataFrame,
@@ -121,7 +131,7 @@ def plot_static(
     linewidth: float = 0.7,
     legend: bool = True,
     cmap=None,
-    ax=None,                      # <-- NEW: allow injecting an axes
+    ax=None,
 ):
     """
     Static plot with contextily basemap.
@@ -129,10 +139,12 @@ def plot_static(
     If `ax` is provided, draw into that axes (and do not create a new figure).
     """
     try:
-        import matplotlib.pyplot as plt
         import contextily as ctx
+        import matplotlib.pyplot as plt
     except ImportError as e:
-        raise ImportError("plot_static requires `matplotlib`, `contextily`, and `xyzservices` installed.") from e
+        raise ImportError(
+            "plot_static requires `matplotlib`, `contextily`, and `xyzservices` installed."
+        ) from e
 
     provider = _get_ctx_provider(basemap)
 
@@ -160,6 +172,7 @@ def plot_static(
     ax.margins(0)
 
     return (fig, ax) if created_fig else (ax.figure, ax)
+
 
 def plot_interactive(
     gdf: gpd.GeoDataFrame,

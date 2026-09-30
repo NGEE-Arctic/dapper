@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal, Sequence
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import xarray as xr
-import datetime as _dt
+
 from dapper.geo.lonwrap import LonWrap, infer_lon_wrap, normalize_lon
+from dapper.io.attrs import merge_global_attrs
 
 SampleMethod = Literal["nearest"]
 
@@ -18,6 +20,7 @@ SampleMethod = Literal["nearest"]
 @dataclass(frozen=True)
 class LatLonSpec:
     """Minimal spec for mapping (lat, lon) -> (i, j) in a gridded dataset."""
+
     lat_var: str
     lon_var: str
     lat_dim: str
@@ -64,6 +67,7 @@ def infer_lat_lon_vars(ds: xr.Dataset) -> tuple[str, str]:
 def _to_0_360(lon_da: xr.DataArray) -> xr.DataArray:
     return ((lon_da % 360.0) + 360.0) % 360.0
 
+
 def _lon_distance_deg(lon_vec: np.ndarray, lon0: float) -> np.ndarray:
     """
     Minimal angular distance on a circle (degrees), assuming lon_vec and lon0
@@ -85,7 +89,7 @@ def infer_latlon_spec(
     """
     Build a LatLonSpec for fast nearest-neighbor lookup.
 
-    Assumptions (fine for your landuse/surf ELM-style files):
+    Assumes ELM-style landuse/surface files:
       - LATIXY/LONGXY exist as 2D (lat_dim, lon_dim), OR
       - lat/lon exist as 1D vectors.
     """
@@ -128,6 +132,7 @@ def infer_latlon_spec(
         lon_1d=np.asarray(lon_1d),
     )
 
+
 def infer_grid_metadata(
     ds: xr.Dataset,
     *,
@@ -152,39 +157,22 @@ def infer_grid_metadata(
         lon_wrap=lon_wrap,
     )
 
-    def _median_step(arr: np.ndarray) -> float | None:
+    def _median_step(arr: np.ndarray, *, drop_wrap_jump: bool = False) -> float | None:
         arr = np.asarray(arr).astype(float)
         arr = arr[np.isfinite(arr)]
-        if arr.size < 3:
-            return None
         u = np.unique(arr)
         if u.size < 3:
             return None
-        d = np.diff(np.sort(u))
+        d = np.diff(u)
         d = d[np.isfinite(d)]
-        if d.size == 0:
-            return None
-        return float(np.median(np.abs(d)))
-
-    def _median_step_lon(arr: np.ndarray) -> float | None:
-        # same as _median_step, but drop the dateline jump
-        arr = np.asarray(arr).astype(float)
-        arr = arr[np.isfinite(arr)]
-        if arr.size < 3:
-            return None
-        u = np.unique(arr)
-        if u.size < 3:
-            return None
-        d = np.diff(np.sort(u))
-        d = d[np.isfinite(d)]
-        # filter out huge jump across wrap
-        d = d[np.abs(d) < 180.0]
+        if drop_wrap_jump:
+            d = d[np.abs(d) < 180.0]
         if d.size == 0:
             return None
         return float(np.median(np.abs(d)))
 
     dlat = _median_step(spec.lat_1d)
-    dlon = _median_step_lon(spec.lon_1d)
+    dlon = _median_step(spec.lon_1d, drop_wrap_jump=True)
 
     meta: dict = {
         "dapper_source_grid_lat_dim": spec.lat_dim,
@@ -202,6 +190,7 @@ def infer_grid_metadata(
 
     return meta
 
+
 def nearest_ij(spec: LatLonSpec, lat: float, lon: float) -> tuple[int, int]:
     """
     Nearest-neighbor (i, j) on a regular lat/lon grid (lat_1d, lon_1d).
@@ -212,7 +201,9 @@ def nearest_ij(spec: LatLonSpec, lat: float, lon: float) -> tuple[int, int]:
     return i, j
 
 
-def _reorder_like_source(var_da: xr.DataArray, src_dims: Sequence[str], lat_dim: str, lon_dim: str) -> xr.DataArray:
+def _reorder_like_source(
+    var_da: xr.DataArray, src_dims: Sequence[str], lat_dim: str, lon_dim: str
+) -> xr.DataArray:
     """
     After sampling/concat, force dimension order to match source
     (with spatial dims in the same relative position).
@@ -247,7 +238,7 @@ def sample_gridded_dataset_points(
     Output convention:
       - lat_dim has length N (number of points)
       - lon_dim has length 1
-      - no coordinate variables are created for lat_dim/lon_dim (matches your Toolik file)
+      - no coordinate variables are created for lat_dim/lon_dim (matches ELM point surface files)
     """
     if method != "nearest":
         raise NotImplementedError("Only method='nearest' is implemented right now.")
@@ -271,7 +262,9 @@ def sample_gridded_dataset_points(
         drop = set(vars_drop)
         data_vars = [v for v in data_vars if v not in drop]
 
-    spatial_vars = [v for v in data_vars if (lat_dim in ds[v].dims and lon_dim in ds[v].dims)]
+    spatial_vars = [
+        v for v in data_vars if (lat_dim in ds[v].dims and lon_dim in ds[v].dims)
+    ]
     non_spatial_vars = [v for v in data_vars if v not in spatial_vars]
 
     # Build spatial-only sampled datasets and concat along lat_dim.
@@ -286,7 +279,9 @@ def sample_gridded_dataset_points(
 
     # Force per-variable dimension ordering to match the source dataset.
     for v in spatial_vars:
-        out_spatial[v] = _reorder_like_source(out_spatial[v], ds[v].dims, lat_dim, lon_dim)
+        out_spatial[v] = _reorder_like_source(
+            out_spatial[v], ds[v].dims, lat_dim, lon_dim
+        )
 
     # Merge in non-spatial vars once (YEAR, time, scalar strings, etc.)
     out = xr.merge([out_spatial, ds[non_spatial_vars]])
@@ -307,7 +302,7 @@ def write_netcdf(
     add_created_utc: bool = True,
 ) -> Path:
     """Write a Dataset to NetCDF with optional encoding and attribute handling."""
-    
+
     out_path = Path(out_path)
 
     encoding = {}
@@ -320,24 +315,17 @@ def write_netcdf(
 
     # ---- global attrs ----
     ds2 = ds.copy(deep=False)
-    merged = dict(ds2.attrs)
-
-    if dapper_attrs:
-        for k, v in dict(dapper_attrs).items():
-            merged.setdefault(k, v)
-
-    if add_created_utc:
-        merged.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
-
-    if append_attrs:
-        # user attrs override everything (including source + dapper defaults)
-        merged.update(dict(append_attrs))
-
-    ds2.attrs = merged
+    ds2.attrs = merge_global_attrs(
+        ds2.attrs,
+        dapper_attrs=dapper_attrs,
+        append_attrs=append_attrs,
+        add_created_utc=add_created_utc,
+    )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ds2.to_netcdf(out_path, encoding=encoding)
     return out_path
+
 
 def points_to_nearest_cells(
     ds: xr.Dataset,
@@ -374,8 +362,12 @@ def points_to_nearest_cells(
         lon_n = normalize_lon(lon0, spec.lon_wrap)
         i, j = nearest_ij(spec, lat0, lon0)
 
-        lat_cell = float(ds[spec.lat_var].isel({spec.lat_dim: i, spec.lon_dim: j}).values)
-        lon_cell = float(ds[spec.lon_var].isel({spec.lat_dim: i, spec.lon_dim: j}).values)
+        lat_cell = float(
+            ds[spec.lat_var].isel({spec.lat_dim: i, spec.lon_dim: j}).values
+        )
+        lon_cell = float(
+            ds[spec.lon_var].isel({spec.lat_dim: i, spec.lon_dim: j}).values
+        )
 
         rows.append(
             {

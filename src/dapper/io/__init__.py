@@ -1,2 +1,1 @@
-"""dapper module: io.__init__."""
-
+"""Small I/O helpers."""
