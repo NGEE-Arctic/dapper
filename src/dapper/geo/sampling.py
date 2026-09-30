@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as _dt
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +12,7 @@ import pandas as pd
 import xarray as xr
 
 from dapper.geo.lonwrap import LonWrap, infer_lon_wrap, normalize_lon
+from dapper.io.attrs import merge_global_attrs
 
 SampleMethod = Literal["nearest"]
 
@@ -332,20 +332,12 @@ def write_netcdf(
 
     # ---- global attrs ----
     ds2 = ds.copy(deep=False)
-    merged = dict(ds2.attrs)
-
-    if dapper_attrs:
-        for k, v in dict(dapper_attrs).items():
-            merged.setdefault(k, v)
-
-    if add_created_utc:
-        merged.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
-
-    if append_attrs:
-        # user attrs override everything (including source + dapper defaults)
-        merged.update(dict(append_attrs))
-
-    ds2.attrs = merged
+    ds2.attrs = merge_global_attrs(
+        ds2.attrs,
+        dapper_attrs=dapper_attrs,
+        append_attrs=append_attrs,
+        add_created_utc=add_created_utc,
+    )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ds2.to_netcdf(out_path, encoding=encoding)

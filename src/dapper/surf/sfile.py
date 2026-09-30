@@ -8,7 +8,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from dapper.geo import sampling  # shared gridded sampler
+from dapper.geo import sampling
+from dapper.io.attrs import merge_global_attrs  # shared gridded sampler
 from dapper.surf import schema as SC
 from dapper.surf.fraction_closure import (
     closure_critical_variables,
@@ -225,24 +226,13 @@ def write_surface_nc(
     add_created_utc: bool = True,
 ) -> str:
     """Write a surface Dataset to NetCDF with ELM-friendly defaults and merged attributes."""
-
-    import datetime as _dt
-
-    # ---- global attrs ----
     ds2 = normalize_fraction_closure(ds)
-    merged = dict(ds2.attrs)
-
-    if dapper_attrs:
-        for k, v in dict(dapper_attrs).items():
-            merged.setdefault(k, v)
-
-    if add_created_utc:
-        merged.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
-
-    if append_attrs:
-        merged.update(dict(append_attrs))
-
-    ds2.attrs = merged
+    ds2.attrs = merge_global_attrs(
+        ds2.attrs,
+        dapper_attrs=dapper_attrs,
+        append_attrs=append_attrs,
+        add_created_utc=add_created_utc,
+    )
 
     closure_critical = closure_critical_variables(ds2.data_vars)
     enc: dict[str, dict] = {}
@@ -1488,23 +1478,12 @@ class SurfaceFile:
             )
 
         # If caller supplied encoding, still merge attrs in a non-destructive way.
-        import datetime as _dt
-
         ds2 = self.ds.copy(deep=False)
-        merged = dict(ds2.attrs)
-
-        if dapper_attrs:
-            for k, v in dict(dapper_attrs).items():
-                merged.setdefault(k, v)
-
-        if add_created_utc:
-            merged.setdefault(
-                "dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z"
-            )
-
-        if append_attrs:
-            merged.update(dict(append_attrs))
-
-        ds2.attrs = merged
+        ds2.attrs = merge_global_attrs(
+            ds2.attrs,
+            dapper_attrs=dapper_attrs,
+            append_attrs=append_attrs,
+            add_created_utc=add_created_utc,
+        )
         ds2.to_netcdf(path, encoding=encoding)
         return str(path)
