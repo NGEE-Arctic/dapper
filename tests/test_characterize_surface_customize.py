@@ -1,11 +1,12 @@
 """Characterization tests for surface-file customization and editing (T-8).
 
 These pin current behavior ahead of refactoring. Assertions marked
-``PINS BUG Bn`` document known-incorrect behavior (see REFACTOR_NOTES.md);
-``Regression for Bn`` cover bugs fixed after the refactor.
+``Regression for Bn`` cover bugs fixed after the refactor (see
+REFACTOR_NOTES.md).
 """
 
 import re
+import warnings
 
 import numpy as np
 import pytest
@@ -73,19 +74,36 @@ def test_units_policy(surf_nc, tmp_path):
     with pytest.raises(CustomizeError, match="units mismatch for SLOPE"):
         customize_surface(mismatched, {"SLOPE": 3.0}, tmp_path / "a.nc")
 
-    # PINS BUG B15: "warn" neither warns nor differs from "ignore".
-    out, _ = customize_surface(
-        mismatched, {"SLOPE": 3.0}, tmp_path / "b.nc", units_policy="warn"
-    )
+    # Regression for B15: "warn" warns and proceeds; "ignore" proceeds silently.
+    with pytest.warns(UserWarning, match="units mismatch for SLOPE"):
+        out, _ = customize_surface(
+            mismatched, {"SLOPE": 3.0}, tmp_path / "b.nc", units_policy="warn"
+        )
     da = _read(out, "SLOPE")
     assert da.values.ravel().tolist() == [3.0]
     assert da.attrs == {"units": "deg"}
 
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        customize_surface(
+            mismatched, {"SLOPE": 4.0}, tmp_path / "c.nc", units_policy="ignore"
+        )
 
-def test_integer_variable_overwrite_fails(surf_nc, tmp_path):
-    # PINS BUG B15: registry dtypes default to float32, so int vars can't be edited.
+
+def test_integer_variable_overwrite_keeps_dtype(surf_nc, tmp_path):
+    # Regression for B15: existing int vars keep their dtype instead of failing
+    # against the registry's default float32.
+    out, _ = customize_surface(surf_nc, {"URBAN_REGION_ID": 5}, tmp_path / "o.nc")
+    da = _read(out, "URBAN_REGION_ID")
+    assert da.values.ravel().tolist() == [5]
+    assert str(da.dtype) == "int32"
+
     with pytest.raises(CustomizeError, match="int/float switch"):
-        customize_surface(surf_nc, {"URBAN_REGION_ID": 5}, tmp_path / "o.nc")
+        customize_surface(
+            surf_nc,
+            {"URBAN_REGION_ID": {"value": 5, "dtype": "float32"}},
+            tmp_path / "p.nc",
+        )
 
 
 def test_add_variables(surf_nc, tmp_path):

@@ -287,10 +287,10 @@ def customize_surface(
         If True, run dapper.surf.validate.SurfaceValidator on the written file and return the report.
     validator_kwargs : dict
         Passed to SurfaceValidator(...).
-    units_policy : str
-        ``"enforce"`` raises when an existing variable's units differ from the
-        registry (registry units ``''``/``'varies'`` are skipped). Any other value
-        skips the check.
+    units_policy : {"enforce", "warn", "ignore"}
+        What to do when an existing variable's units differ from the registry
+        (registry units ``''``/``'varies'`` are skipped): raise ``CustomizeError``,
+        emit a ``UserWarning``, or proceed silently.
     engine : str, optional
         Deprecated and ignored; passing it emits a ``DeprecationWarning``.
 
@@ -333,20 +333,19 @@ def customize_surface(
                 file_units = str((targ.attrs or {}).get("units", "")).strip()
                 enforce = reg_units and reg_units.lower() not in ("varies",)
                 if enforce and file_units and (file_units != reg_units):
+                    msg = f"units mismatch for {var}: file={file_units!r}, registry={reg_units!r}"
                     if units_policy == "enforce":
-                        raise CustomizeError(
-                            f"units mismatch for {var}: file={file_units!r}, registry={reg_units!r}"
-                        )
+                        raise CustomizeError(msg)
+                    if units_policy == "warn":
+                        warnings.warn(msg, UserWarning, stacklevel=2)
                     # 'warn' / 'ignore': proceed without mutating attrs
 
             # Value → DataArray broadcastable to targ
             new_da = _ensure_dataarray(value, like=targ)
 
-            # Dtype coercion (registry or override)
-            reg_dtype = dtype_override or (
-                SC.REGISTRY[var].dtype if var in SC.REGISTRY else None
-            )
-            new_da = _coerce_dtype(new_da, reg_dtype)
+            # Existing variables keep their file dtype unless overridden; registry
+            # dtypes are only the "float32" default (specs carry no dtype).
+            new_da = _coerce_dtype(new_da, dtype_override)
             new_da.name = var
             new_da = _preserve_encoding(targ, new_da)
 

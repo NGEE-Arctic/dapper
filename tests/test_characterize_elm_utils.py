@@ -1,8 +1,8 @@
 """Characterization tests for ELM packing and humidity helpers (T-7).
 
 These pin current behavior ahead of refactoring. Assertions marked
-``PINS BUG Bn`` document known-incorrect behavior (see REFACTOR_NOTES.md)
-and should be updated when that bug is fixed.
+``Regression for Bn`` cover bugs fixed after the refactor (see
+REFACTOR_NOTES.md).
 """
 
 import numpy as np
