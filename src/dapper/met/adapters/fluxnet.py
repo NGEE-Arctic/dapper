@@ -447,8 +447,6 @@ class FluxnetAdapter(BaseAdapter):
                 "(source_column=number_of_values_used):\n  " + "\n  ".join(lines)
             )
             warnings.warn(msg, UserWarning)
-            # If you prefer stdout instead:
-            # print(msg)
 
         return out
 

@@ -75,9 +75,6 @@ def build_surface_dataset(
 
     data_vars = {}
 
-    def _is_int_dtype(dtype_str: str) -> bool:
-        return dtype_str.startswith(("int", "uint"))
-
     # Build each variable
     for name, spec in sampled.items():
         if name.startswith("__"):  # skip meta/coords
@@ -89,7 +86,6 @@ def build_surface_dataset(
         orig_dims = tuple(spec["orig_dims"])
         data = spec["data"]
         attrs = spec.get("attrs", {})
-        dtype_str = spec.get("dtype", "float32")
 
         # Optionally skip truly non-spatial arrays
         if drop_non_spatial_arrays and (
@@ -374,11 +370,6 @@ def _build_template_da_for_new_var(ds: xr.Dataset, var: str) -> xr.DataArray:
             raise CustomizeError(f"dataset is missing required dim for {var!r}: {d!r}")
         actual_dims.append(resolved)
 
-    # Build coords and shape from ds
-    coords = {
-        d: ds.coords[d] if d in ds.coords else (d, np.arange(ds.sizes[d]))
-        for d in actual_dims
-    }
     shape = tuple(ds.sizes[d] for d in actual_dims)
 
     # Create template
@@ -499,8 +490,6 @@ def customize_surface(
     ds = xr.open_dataset(src_path)
     ds_edit = ds.copy()
 
-    lat_dim, lon_dim = _latlon_dim_names(ds)  # detected, not strictly required here
-
     def _parse_spec(var: str, spec: Any) -> tuple[Any, str | None, str | None]:
         """Return (value, dtype_override, units_override)."""
         if isinstance(spec, dict) and "value" in spec:
@@ -568,12 +557,6 @@ def customize_surface(
                     raise CustomizeError(
                         f"dataset missing requested dim {d!r} for new var {var!r}"
                     )
-            coords = {
-                d: ds_edit.coords[d]
-                if d in ds_edit.coords
-                else (d, np.arange(ds_edit.sizes[d]))
-                for d in dims
-            }
             arr = np.zeros(
                 tuple(ds_edit.sizes[d] for d in dims), dtype=np.dtype(spec["dtype"])
             )

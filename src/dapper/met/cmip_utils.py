@@ -397,7 +397,7 @@ def _atomic_write(df: pd.DataFrame, out_path: Path, fmt: str = "parquet") -> Pat
     if fmt.lower() == "parquet":
         try:
             df.to_parquet(tmp, index=False)
-        except Exception as e:
+        except Exception:
             # Parquet engine may be missing; fall back to CSV in the same directory.
             csv_fallback = out_path.with_suffix(".csv")
             tmp_csv = csv_fallback.with_suffix(".csv.tmp")
@@ -501,12 +501,10 @@ def sample_bbox_means_for_aois(
 
     # Optional progress bar
     it = df.itertuples(index=False)
-    tqdm_obj = None
     if show_progress:
         try:
             from tqdm import tqdm  # type: ignore
 
-            tqdm_obj = tqdm
             it = tqdm(it, total=len(df), desc="Sampling CMIP6 datasets")
         except Exception:
             it = df.itertuples(index=False)
@@ -647,96 +645,6 @@ def sample_bbox_means_for_aois(
             out = pd.concat(out_rows, ignore_index=True) if out_rows else pd.DataFrame()
     else:
         out = pd.DataFrame()
-
-    if out_csv is not None:
-        out_path = Path(out_csv)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out.to_csv(out_path, index=False)
-
-    return out
-
-    required_cols = ["zstore", "variable_id", "source_id", "experiment_id", "member_id"]
-    missing = [c for c in required_cols if c not in df.columns]
-    if missing:
-        raise ValueError(f"df is missing required columns: {missing}")
-
-    time_coder = xr.coding.times.CFDatetimeCoder(use_cftime=True)
-
-    # Optional progress bar
-    it = df.itertuples(index=False)
-    if show_progress:
-        try:
-            from tqdm import tqdm  # type: ignore
-
-            it = tqdm(it, total=len(df), desc="Sampling CMIP6 datasets")
-        except Exception:
-            it = df.itertuples(index=False)
-
-    out_rows: list[pd.DataFrame] = []
-
-    for row in it:
-        var = row.variable_id
-        model = row.source_id
-        expid = row.experiment_id
-        member = row.member_id
-        table = getattr(row, "table_id", None)
-        grid = getattr(row, "grid_label", None)
-
-        ds = xr.open_zarr(
-            fsspec.get_mapper(row.zstore, token="anon", access="read_only"),
-            consolidated=True,
-            decode_times=time_coder,
-        )
-
-        if var not in ds:
-            continue
-
-        units_in = ds[var].attrs.get("units", "")
-        # pr: kg m-2 s-1 is numerically equal to mm s-1 water equivalent
-        units_out = (
-            "mm s-1"
-            if (
-                var == "pr"
-                and "kg" in units_in
-                and "m-2" in units_in
-                and "s-1" in units_in
-            )
-            else units_in
-        )
-
-        for aoi_id, (lat_bounds, lon_bounds) in aois.items():
-            da_sub = _subset_bbox(ds, var, lat_bounds=lat_bounds, lon_bounds=lon_bounds)
-            da_sub = _maybe_time_subset(da_sub, time_min=time_min, time_max=time_max)
-            ts = _spatial_mean(da_sub, ds)
-
-            # Force compute here so each AOI contributes real values.
-            # (This is where remote IO happens.)
-            ts = ts.load()
-
-            df_ts = ts.to_dataframe(name="value").reset_index()
-
-            # stringify cftime safely
-            if "time" in df_ts.columns and not np.issubdtype(
-                df_ts["time"].dtype, np.datetime64
-            ):
-                df_ts["time"] = df_ts["time"].astype(str)
-
-            df_ts["aoi_id"] = aoi_id
-            df_ts["variable"] = var
-            df_ts["units"] = units_out
-            df_ts["model"] = model
-            df_ts["experiment"] = expid
-            df_ts["member"] = member
-            if table is not None:
-                df_ts["table"] = table
-            if grid is not None:
-                df_ts["grid"] = grid
-            df_ts["lat_min"], df_ts["lat_max"] = min(lat_bounds), max(lat_bounds)
-            df_ts["lon_min"], df_ts["lon_max"] = lon_bounds[0], lon_bounds[1]
-
-            out_rows.append(df_ts)
-
-    out = pd.concat(out_rows, ignore_index=True) if out_rows else pd.DataFrame()
 
     if out_csv is not None:
         out_path = Path(out_csv)
