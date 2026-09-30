@@ -31,14 +31,14 @@ __all__ = [
 
 if TYPE_CHECKING:  # pragma: no cover
     from dapper.domains.domain import Domain
-    from dapper.met.adapters.era5 import ERA5Adapter
-    from dapper.met.exporter import Exporter
+    from dapper.integrations.earthengine.gee_utils import sample_e5lh
     from dapper.integrations.era5 import (
         ERA5SamplingPlan,
         plan_era5_land_sampling,
         sample_era5_land,
     )
-    from dapper.integrations.earthengine.gee_utils import sample_e5lh
+    from dapper.met.adapters.era5 import ERA5Adapter
+    from dapper.met.exporter import Exporter
 
 _LAZY = {
     "Domain": ("dapper.domains.domain", "Domain"),

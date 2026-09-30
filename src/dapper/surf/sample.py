@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
-from dapper.geo.lonwrap import infer_lon_wrap, normalize_lon
 import xarray as xr
+
+from dapper.geo.lonwrap import infer_lon_wrap, normalize_lon
 
 LatLonDimNames = Tuple[Optional[str], Optional[str]]
 

@@ -2,30 +2,29 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from functools import lru_cache
 import json
 import math
-from pathlib import Path
 import re
 import tempfile
 import time
-from typing import Sequence
-from urllib.request import Request, urlopen
 import warnings
 import zipfile
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Sequence
+from urllib.request import Request, urlopen
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import xarray as xr
 from pyproj import CRS, Transformer
 from shapely.geometry import MultiPolygon, Point, Polygon, box
 from shapely.ops import transform
-import xarray as xr
 
 from dapper.config.metsources import era5
 from dapper.domains.domain import Domain
-
 
 ARCO_DATASET = "reanalysis-era5-land-timeseries"
 ARCO_CATALOGUE_URL = (

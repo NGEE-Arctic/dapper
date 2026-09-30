@@ -1,12 +1,21 @@
 # dapper/met/exporter.py
 """Meteorological data export pipelines."""
 
-import warnings
-import numpy as np
-import pandas as pd
 import datetime as _dt
 import inspect
+import warnings
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+import dapper.met.temporal as dt
+from dapper.domains.domain import Domain
+from dapper.elm.utils import elm_data_dicts
+from dapper.geo.constants import LATLON_DECIMALS
+from dapper.io import fs as utils
+from dapper.met.writers import append_met_netcdf, initialize_met_netcdf
+from dapper.schemas.elm import ELM_UNITS
 
 
 def _parquet_write(path, df, *, append: bool = False) -> None:
@@ -33,15 +42,6 @@ def _parquet_write(path, df, *, append: bool = False) -> None:
         ) from e
 
     _fp_write(str(path), df, append=bool(append))
-
-
-from dapper.io import fs as utils
-import dapper.met.temporal as dt
-from dapper.domains.domain import Domain
-from dapper.met.writers import initialize_met_netcdf, append_met_netcdf
-from dapper.geo.constants import LATLON_DECIMALS
-from dapper.schemas.elm import ELM_UNITS
-from dapper.elm.utils import elm_data_dicts
 
 
 class Exporter:

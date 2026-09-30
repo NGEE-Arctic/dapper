@@ -7,7 +7,6 @@ NetCDF I/O is handled in dapper.met.writers. This module is intentionally small.
 import numpy as np
 import pandas as pd
 
-
 _CUMDAYS_NONLEAP = np.asarray(
     [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334], dtype=np.int64
 )

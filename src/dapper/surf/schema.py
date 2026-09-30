@@ -2,8 +2,9 @@
 """dapper module: surf.schema."""
 
 from __future__ import annotations
-from dataclasses import dataclass, asdict
-from typing import Dict, List, Tuple, Iterable, Optional, Any
+
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
 

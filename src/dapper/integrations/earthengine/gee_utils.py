@@ -1,6 +1,28 @@
 # Generic functions JPS
 """Google Earth Engine helpers and sampling utilities."""
 
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import geopandas as gpd
+import pandas as pd
+from dateutil.relativedelta import relativedelta
+from shapely.geometry import (
+    GeometryCollection,
+    LineString,
+    MultiLineString,
+    MultiPolygon,
+    Point,
+    Polygon,
+    shape,
+)
+from shapely.ops import unary_union
+
+import dapper
+from dapper.config.metsources import era5
+from dapper.domains.domain import Domain
+
 try:
     import ee  # type: ignore
 except Exception:  # pragma: no cover
@@ -32,30 +54,6 @@ if ee is None:  # pragma: no cover
     ee = _EEProxy()  # type: ignore
 
 
-import json
-import pandas as pd
-import geopandas as gpd
-from pathlib import Path
-from datetime import datetime, timedelta, timezone
-from shapely.ops import unary_union
-from shapely.geometry import Polygon, shape
-from dateutil.relativedelta import relativedelta
-from shapely.geometry import (
-    Point,
-    Polygon,
-    MultiPolygon,
-    LineString,
-    MultiLineString,
-    GeometryCollection,
-)
-
-from dapper.domains.domain import Domain
-from dapper.config.metsources import era5
-
-
-# Pathing for convenience
-import dapper
-
 _ROOT_DIR = Path(next(iter(dapper.__path__))).parent
 _DATA_DIR = _ROOT_DIR / "data"
 
@@ -69,15 +67,6 @@ def parse_geometry_object(geom, name=None):
       - shapely: Point / Polygon / MultiPolygon / LineString / MultiLineString / GeometryCollection
       - ee.Geometry / ee.Feature / ee.FeatureCollection
     """
-    from shapely.geometry import (
-        Point,
-        Polygon,
-        MultiPolygon,
-        LineString,
-        MultiLineString,
-        GeometryCollection,
-    )
-    from shapely.ops import unary_union
 
     def _ring_coords(ls):
         return [[float(x), float(y)] for x, y in ls.coords]

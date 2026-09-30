@@ -1,19 +1,18 @@
 """dapper module: elm.utils."""
 
+import warnings
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
-
-from pathlib import Path
 import dapper
-import warnings
+from dapper.domains.domain import Domain
 
 # NOTE: validate_met_vars currently depends on stats stored under docs/data.
 # We keep the concept around, but do not require those assets to exist at runtime.
 _ROOT_DIR = Path(next(iter(dapper.__path__))).parent.parent
 _DATA_DIR = _ROOT_DIR / "docs" / "data"
-
-from dapper.domains.domain import Domain
 
 
 def validate_met_vars(df):
