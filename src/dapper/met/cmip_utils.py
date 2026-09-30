@@ -17,9 +17,9 @@ Typical workflow:
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import fsspec
 import numpy as np
@@ -160,7 +160,7 @@ def dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
 def filter_complete(
     df: pd.DataFrame,
     required_vars: Sequence[str],
-    group_cols: Optional[Sequence[str]] = None,
+    group_cols: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     """
     Keep only dataset groups that contain *all* required variables.
@@ -224,8 +224,8 @@ def find_available_data(params: dict, col=None) -> pd.DataFrame:
 
 
 def bounds_from_geojson(
-    path: Union[str, Path],
-) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    path: str | Path,
+) -> tuple[tuple[float, float], tuple[float, float]]:
     """
     Read a polygon GeoJSON/shapefile and return:
         lat_bounds = (lat_min, lat_max)
@@ -249,7 +249,7 @@ def bounds_from_geojson(
 
 def _wrap_lon_like(
     ds: xr.Dataset, lon_min: float, lon_max: float
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Match bbox lon convention to dataset convention (rough but effective).
     If dataset uses 0..360 and bbox uses negatives, wrap bbox to 0..360.
@@ -269,8 +269,8 @@ def _wrap_lon_like(
 def _subset_bbox(
     ds: xr.Dataset,
     var: str,
-    lat_bounds: Tuple[float, float],
-    lon_bounds: Tuple[float, float],
+    lat_bounds: tuple[float, float],
+    lon_bounds: tuple[float, float],
 ) -> xr.DataArray:
     """
     Subset a variable to a bounding box.
@@ -318,7 +318,7 @@ def _spatial_mean(da: xr.DataArray, ds: xr.Dataset) -> xr.DataArray:
     Compute an (optionally cos(lat) weighted) mean over horizontal dims.
     """
     # Prefer horizontal dims implied by lat/lon coordinates
-    spatial_dims: List[str] = []
+    spatial_dims: list[str] = []
     if "lat" in ds.coords:
         spatial_dims.extend([d for d in ds["lat"].dims if d in da.dims])
     if "lon" in ds.coords:
@@ -340,7 +340,7 @@ def _spatial_mean(da: xr.DataArray, ds: xr.Dataset) -> xr.DataArray:
 
 
 def _maybe_time_subset(
-    da: xr.DataArray, time_min: Optional[str], time_max: Optional[str]
+    da: xr.DataArray, time_min: str | None, time_max: str | None
 ) -> xr.DataArray:
     if time_min is None and time_max is None:
         return da
@@ -415,7 +415,7 @@ def _atomic_write(df: pd.DataFrame, out_path: Path, fmt: str = "parquet") -> Pat
 
 def _read_chunks(out_dir: Path) -> pd.DataFrame:
     """Read all chunk files from out_dir (parquet and/or csv)."""
-    parts: List[pd.DataFrame] = []
+    parts: list[pd.DataFrame] = []
     for p in sorted(out_dir.glob("*.parquet")):
         parts.append(pd.read_parquet(p))
     for p in sorted(out_dir.glob("*.csv")):
@@ -423,7 +423,7 @@ def _read_chunks(out_dir: Path) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
-def _log_failure(fail_log: Optional[Path], dataset_key: str, err: Exception) -> None:
+def _log_failure(fail_log: Path | None, dataset_key: str, err: Exception) -> None:
     if fail_log is None:
         return
     fail_log.parent.mkdir(parents=True, exist_ok=True)
@@ -439,17 +439,17 @@ def _log_failure(fail_log: Optional[Path], dataset_key: str, err: Exception) -> 
 
 def sample_bbox_means_for_aois(
     df: pd.DataFrame,
-    aois: Dict[str, Tuple[Tuple[float, float], Tuple[float, float]]],
-    out_csv: Optional[Union[str, Path]] = None,
-    time_min: Optional[str] = None,
-    time_max: Optional[str] = None,
+    aois: dict[str, tuple[tuple[float, float], tuple[float, float]]],
+    out_csv: str | Path | None = None,
+    time_min: str | None = None,
+    time_max: str | None = None,
     show_progress: bool = True,
     *,
-    out_dir: Optional[Union[str, Path]] = None,
+    out_dir: str | Path | None = None,
     chunk_format: str = "parquet",
     resume: bool = True,
     return_df: bool = True,
-    fail_log: Optional[Union[str, Path]] = None,
+    fail_log: str | Path | None = None,
     retries: int = 3,
     retry_backoff: float = 1.0,
 ) -> pd.DataFrame:
@@ -511,7 +511,7 @@ def sample_bbox_means_for_aois(
         except Exception:
             it = df.itertuples(index=False)
 
-    out_rows: List[pd.DataFrame] = []
+    out_rows: list[pd.DataFrame] = []
 
     for row in it:
         dataset_key = _dataset_key_from_row(row)
@@ -568,7 +568,7 @@ def sample_bbox_means_for_aois(
                 else units_in
             )
 
-            aoi_dfs: List[pd.DataFrame] = []
+            aoi_dfs: list[pd.DataFrame] = []
 
             for aoi_id, (lat_bounds, lon_bounds) in aois.items():
                 da_sub = _subset_bbox(
@@ -608,8 +608,8 @@ def sample_bbox_means_for_aois(
             return pd.concat(aoi_dfs, ignore_index=True) if aoi_dfs else pd.DataFrame()
 
         # Retry wrapper (handles transient HTTP / chunk fetch failures)
-        last_err: Optional[Exception] = None
-        df_chunk: Optional[pd.DataFrame] = None
+        last_err: Exception | None = None
+        df_chunk: pd.DataFrame | None = None
         for attempt in range(max(1, retries)):
             try:
                 df_chunk = _compute_one()
@@ -672,7 +672,7 @@ def sample_bbox_means_for_aois(
         except Exception:
             it = df.itertuples(index=False)
 
-    out_rows: List[pd.DataFrame] = []
+    out_rows: list[pd.DataFrame] = []
 
     for row in it:
         var = row.variable_id
@@ -753,12 +753,12 @@ def sample_bbox_means_for_aois(
 
 def download_pangeo(
     df: pd.DataFrame,
-    dir_out: Union[str, Path],
-    lat: Optional[float] = None,
-    lon: Optional[float] = None,
-    lat_bounds: Optional[Tuple[float, float]] = None,
-    lon_bounds: Optional[Tuple[float, float]] = None,
-    polygon_path: Optional[Union[str, Path]] = None,
+    dir_out: str | Path,
+    lat: float | None = None,
+    lon: float | None = None,
+    lat_bounds: tuple[float, float] | None = None,
+    lon_bounds: tuple[float, float] | None = None,
+    polygon_path: str | Path | None = None,
 ):
     """
     Download CMIP6 data from Pangeo to NetCDF, with optional spatial subsetting.
@@ -825,10 +825,10 @@ def download_pangeo(
 
 
 def extract_vars_from_files(
-    files: Iterable[Union[str, Path]],
+    files: Iterable[str | Path],
     start_date: str,
     end_date: str,
-    path_out: Union[str, Path],
+    path_out: str | Path,
 ):
     """
     Robust CMIP6 NetCDF merger for multiple calendars — using CFDatetimeCoder.
@@ -836,7 +836,7 @@ def extract_vars_from_files(
     """
     from tqdm import tqdm
 
-    all_dfs: List[pd.DataFrame] = []
+    all_dfs: list[pd.DataFrame] = []
     time_coder = xr.coding.times.CFDatetimeCoder(use_cftime=True)
 
     for file in tqdm(list(files), desc="Processing"):

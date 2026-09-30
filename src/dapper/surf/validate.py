@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -22,7 +21,7 @@ class CheckResult:
     severity: str  # ERROR | WARN | INFO
     passed: bool
     detail: str
-    var: Optional[str] = None
+    var: str | None = None
 
 
 class SurfaceValidator:
@@ -65,9 +64,9 @@ class SurfaceValidator:
     def __init__(
         self,
         *,
-        expected_sizes: Dict[str, int] | None = None,
-        lat_candidates: Tuple[str, ...] = ("lsmlat", "lat", "latitude", "y"),
-        lon_candidates: Tuple[str, ...] = ("lsmlon", "lon", "longitude", "x"),
+        expected_sizes: dict[str, int] | None = None,
+        lat_candidates: tuple[str, ...] = ("lsmlat", "lat", "latitude", "y"),
+        lon_candidates: tuple[str, ...] = ("lsmlon", "lon", "longitude", "x"),
         enforce_known_vars_only: bool = False,
         require_point_dims: bool = True,
         skip_soft_checks: bool = False,
@@ -96,7 +95,7 @@ class SurfaceValidator:
             raise TypeError("validate() expects a NetCDF file path (str).")
         ds = xr.open_dataset(nc_path)
 
-        results: List[CheckResult] = []
+        results: list[CheckResult] = []
         lat_dim = next((d for d in ds.dims if d in self.lat_candidates), None)
         lon_dim = next((d for d in ds.dims if d in self.lon_candidates), None)
 
@@ -130,8 +129,8 @@ class SurfaceValidator:
 
     # ---------- individual checks ----------
     def _check_point_dims(
-        self, ds: xr.Dataset, lat_dim: Optional[str], lon_dim: Optional[str]
-    ) -> List[CheckResult]:
+        self, ds: xr.Dataset, lat_dim: str | None, lon_dim: str | None
+    ) -> list[CheckResult]:
         r = [
             CheckResult(
                 "V-001.lat_dim.present",
@@ -167,8 +166,8 @@ class SurfaceValidator:
                 )
         return r
 
-    def _check_expected_sizes(self, ds: xr.Dataset) -> List[CheckResult]:
-        r: List[CheckResult] = []
+    def _check_expected_sizes(self, ds: xr.Dataset) -> list[CheckResult]:
+        r: list[CheckResult] = []
         for dim, n in self.expected_sizes.items():
             if dim in ds.dims:
                 r.append(
@@ -267,8 +266,8 @@ class SurfaceValidator:
 
         return r
 
-    def _check_unknown_vars(self, ds: xr.Dataset) -> List[CheckResult]:
-        r: List[CheckResult] = []
+    def _check_unknown_vars(self, ds: xr.Dataset) -> list[CheckResult]:
+        r: list[CheckResult] = []
         known = set(SC.REGISTRY.keys())
         for v in ds.data_vars:
             if v not in known:
@@ -288,10 +287,10 @@ class SurfaceValidator:
         self,
         name: str,
         da: xr.DataArray,
-        lat_dim: Optional[str],
-        lon_dim: Optional[str],
-    ) -> List[CheckResult]:
-        r: List[CheckResult] = []
+        lat_dim: str | None,
+        lon_dim: str | None,
+    ) -> list[CheckResult]:
+        r: list[CheckResult] = []
         dims = tuple(da.dims)
         # spatial dims last
         if lat_dim and lon_dim and (lat_dim in dims and lon_dim in dims):
@@ -339,8 +338,8 @@ class SurfaceValidator:
                 )
         return r
 
-    def _check_dtype_units(self, name: str, da: xr.DataArray) -> List[CheckResult]:
-        r: List[CheckResult] = []
+    def _check_dtype_units(self, name: str, da: xr.DataArray) -> list[CheckResult]:
+        r: list[CheckResult] = []
         dt = str(da.dtype)
         units = (da.attrs or {}).get("units", "")
         # dtype int vs float
@@ -381,8 +380,8 @@ class SurfaceValidator:
                 )
         return r
 
-    def _check_fillvalue(self, name: str, da: xr.DataArray) -> List[CheckResult]:
-        r: List[CheckResult] = []
+    def _check_fillvalue(self, name: str, da: xr.DataArray) -> list[CheckResult]:
+        r: list[CheckResult] = []
         dt = str(da.dtype)
         fv = (da.encoding or {}).get("_FillValue", da.attrs.get("_FillValue"))
         if dt.startswith(("int", "uint")):
@@ -402,8 +401,8 @@ class SurfaceValidator:
             )
         return r
 
-    def _check_latlon_coord_presence(self, ds: xr.Dataset) -> List[CheckResult]:
-        r: List[CheckResult] = []
+    def _check_latlon_coord_presence(self, ds: xr.Dataset) -> list[CheckResult]:
+        r: list[CheckResult] = []
         r.append(
             CheckResult(
                 "V-013.coords.LATIXY",
@@ -438,8 +437,8 @@ class SurfaceValidator:
         return r
 
     # --------- soft checks (use reductions, never cast to float directly) ---------
-    def _check_ranges(self, ds: xr.Dataset) -> List[CheckResult]:
-        r: List[CheckResult] = []
+    def _check_ranges(self, ds: xr.Dataset) -> list[CheckResult]:
+        r: list[CheckResult] = []
 
         def _in_range(a, lo, hi):
             aa = np.asarray(a, dtype="float64")
@@ -479,8 +478,8 @@ class SurfaceValidator:
                     )
         return r
 
-    def _check_soft_consistency(self, ds: xr.Dataset) -> List[CheckResult]:
-        r: List[CheckResult] = []
+    def _check_soft_consistency(self, ds: xr.Dataset) -> list[CheckResult]:
+        r: list[CheckResult] = []
         # sum(PCT_NAT_PFT) ≈ 100 (natural-patch weights)
         if "PCT_NAT_PFT" in ds and "natpft" in ds["PCT_NAT_PFT"].dims:
             pftsum = ds["PCT_NAT_PFT"].sum(dim="natpft", skipna=True)
@@ -497,7 +496,7 @@ class SurfaceValidator:
             )
 
         # landunit closure ≈ 100 across available classes (incl urban aggregate)
-        landunit_terms: List[xr.DataArray] = []
+        landunit_terms: list[xr.DataArray] = []
         for name in (
             "PCT_NATVEG",
             "PCT_CROP",

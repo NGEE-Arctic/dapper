@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal
 
 import geopandas as gpd
 import numpy as np
@@ -40,7 +41,7 @@ def sample_landuse_timeseries(
     vars_include: Sequence[str] | None = None,
     vars_drop: Sequence[str] | None = None,
     sampling_method: Literal["nearest", "zonal"] = "nearest",
-    targets: "gpd.GeoDataFrame | None" = None,
+    targets: gpd.GeoDataFrame | None = None,
     agg_policy: dict[str, str] | None = None,
     write_zonal_mapping: bool = True,
     append_attrs: dict | None = None,

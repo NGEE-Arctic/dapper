@@ -13,7 +13,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 
 def to_elm_domain_dataset(
-    domain: "Domain",
+    domain: Domain,
     *,
     grid_shape: tuple[int, int] | None = None,
     cell_dx_deg: float = 0.5,

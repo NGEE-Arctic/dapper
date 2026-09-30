@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
 
 # matplotlib (headless)
 import matplotlib
@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 # ----------------------- plotting defaults & units -----------------------
 
 DEFAULT_ELM_VARS = ["TBOT", "RH", "QBOT", "WIND", "FSDS", "FLDS", "PSRF", "PRECTmms"]
-UNITS_ELM: Dict[str, str] = {
+UNITS_ELM: dict[str, str] = {
     "TBOT": "K",
     "DTBOT": "K",
     "RH": "%",
@@ -42,7 +42,7 @@ DEFAULT_RAW_VARS = [
     "surface_thermal_radiation_downwards_hourly",
     "total_precipitation_hourly",
 ]
-UNITS_RAW: Dict[str, str] = {
+UNITS_RAW: dict[str, str] = {
     "temperature_2m": "K",
     "dewpoint_temperature_2m": "K",
     "surface_pressure": "Pa",
@@ -123,11 +123,11 @@ def _t_from_dtime_var(vtime):
 def make_quicklooks(
     exporter=None,
     *,
-    write_directory: Optional[Path | str] = None,
-    mode: Optional[str] = None,
-    vars: Optional[Iterable[str]] = None,
-    gids: Optional[Iterable[str]] = None,
-    out_dir: Optional[Path | str] = None,
+    write_directory: Path | str | None = None,
+    mode: str | None = None,
+    vars: Iterable[str] | None = None,
+    gids: Iterable[str] | None = None,
+    out_dir: Path | str | None = None,
     max_vars: int = 9,
 ) -> None:
     """
@@ -258,7 +258,7 @@ def make_quicklooks(
 # ----------------------- mode detection -----------------------
 
 
-def _detect_mode(wd: Path, *, explicit: Optional[str] = None) -> str:
+def _detect_mode(wd: Path, *, explicit: str | None = None) -> str:
     if explicit in {"cellset", "sites", "raw-site-parquet", "raw-site-csv"}:
         return explicit
 
@@ -297,7 +297,7 @@ def _detect_mode(wd: Path, *, explicit: Optional[str] = None) -> str:
     raise RuntimeError("Could not determine export mode from outputs.")
 
 
-def _first_data_var_name(ds) -> Optional[str]:
+def _first_data_var_name(ds) -> str | None:
     cand = [
         n
         for n, v in ds.variables.items()
@@ -315,8 +315,8 @@ def _quicklooks_raw(
     data_dir: Path,
     is_parquet: bool,
     out_dir: Path,
-    vars: Optional[List[str]],
-    gids: Optional[List[str]],
+    vars: list[str] | None,
+    gids: list[str] | None,
     max_vars: int,
 ) -> None:
     ext = "*.parquet" if is_parquet else "*.csv"
@@ -420,8 +420,8 @@ def _quicklooks_elm_sites(
     *,
     wd: Path,
     out_dir: Path,
-    vars: List[str],
-    gids: Optional[List[str]],
+    vars: list[str],
+    gids: list[str] | None,
 ) -> None:
     from netCDF4 import Dataset as _DS
 
@@ -496,9 +496,9 @@ def _quicklooks_elm_combined(
     *,
     wd: Path,
     out_dir: Path,
-    vars: List[str],
+    vars: list[str],
     df_loc_norm: pd.DataFrame,
-    gids: Optional[List[str]],
+    gids: list[str] | None,
 ) -> None:
     from netCDF4 import Dataset as _DS
 

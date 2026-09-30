@@ -4,14 +4,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import xarray as xr
 
 from dapper.geo.lonwrap import infer_lon_wrap, normalize_lon
 
-LatLonDimNames = Tuple[Optional[str], Optional[str]]
+LatLonDimNames = tuple[str | None, str | None]
 
 
 def _detect_latlon_dim_names(ds: xr.Dataset) -> LatLonDimNames:
@@ -24,7 +24,7 @@ def _detect_latlon_dim_names(ds: xr.Dataset) -> LatLonDimNames:
 
 def _get_latlon_vectors(
     ds: xr.Dataset, lat_dim: str, lon_dim: str
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     lat_vec = lon_vec = None
     if "LATIXY" in ds and set(ds["LATIXY"].dims) == {lat_dim, lon_dim}:
         lat_vec = np.asarray(
@@ -70,8 +70,8 @@ def _slice_spatial(
 
 def _capture_small_dim_coords(
     ds: xr.Dataset, lat_dim: str, lon_dim: str
-) -> Dict[str, np.ndarray]:
-    coords: Dict[str, np.ndarray] = {}
+) -> dict[str, np.ndarray]:
+    coords: dict[str, np.ndarray] = {}
     for dim in ds.dims:
         if dim in (lat_dim, lon_dim):
             continue
@@ -110,9 +110,9 @@ class SurfacePointSampler:
         nc_in: str | Path,
         *,
         decode_times: bool = True,
-        chunks: Optional[Dict[str, int]] = None,
-        include: Optional[set[str]] = None,
-        exclude: Optional[set[str]] = None,
+        chunks: dict[str, int] | None = None,
+        include: set[str] | None = None,
+        exclude: set[str] | None = None,
     ) -> None:
         self.ds = xr.open_dataset(nc_in, decode_times=decode_times, chunks=chunks or {})
         self.lat_dim, self.lon_dim = _detect_latlon_dim_names(self.ds)
@@ -143,20 +143,20 @@ class SurfacePointSampler:
         except Exception:
             pass
 
-    def __enter__(self) -> "SurfacePointSampler":
+    def __enter__(self) -> SurfacePointSampler:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
-    def sample(self, lat: float, lon: float) -> Dict[str, Any]:
+    def sample(self, lat: float, lon: float) -> dict[str, Any]:
         """Sample surface variables at the provided locations and return a dict of arrays."""
 
         lon_norm = _normalize_lon_to_array(lon, self.lon_vec)
         i = int(np.abs(self.lat_vec - lat).argmin())
         j = int(np.abs(self.lon_vec - lon_norm).argmin())
 
-        out: Dict[str, Any] = {
+        out: dict[str, Any] = {
             "__meta__": {
                 "lat_in": float(lat),
                 "lon_in": float(lon),
@@ -209,10 +209,10 @@ def sample_point_values(
     lon: float,
     *,
     decode_times: bool = True,
-    chunks: Optional[Dict[str, int]] = None,
-    include: Optional[set[str]] = None,
-    exclude: Optional[set[str]] = None,
-) -> Dict[str, Any]:
+    chunks: dict[str, int] | None = None,
+    include: set[str] | None = None,
+    exclude: set[str] | None = None,
+) -> dict[str, Any]:
     """
     Backwards-friendly convenience wrapper: opens, samples one point, closes.
     """

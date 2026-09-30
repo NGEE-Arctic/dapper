@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import warnings
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -34,10 +33,10 @@ class FluxnetAdapter(BaseAdapter):
 
     def __init__(self) -> None:
         # Native FLUXNET resolution (hours, e.g. 0.5, 1, 24, 168, …)
-        self.native_dt_hours: Optional[float] = None
+        self.native_dt_hours: float | None = None
 
         # Resolution code inferred from filename: HH, HR, DD, WW, MM, YY
-        self.resolution: Optional[str] = None
+        self.resolution: str | None = None
 
     # ------------------------------------------------------------------
     # discovery
@@ -254,7 +253,7 @@ class FluxnetAdapter(BaseAdapter):
     # ------------------------------------------------------------------
     # internals
     # ------------------------------------------------------------------
-    def _infer_resolution_from_filename(self, path: str) -> Optional[str]:
+    def _infer_resolution_from_filename(self, path: str) -> str | None:
         """
         Infer FLUXNET resolution flag (HH/HR/DD/WW/MM/YY) from filename:
 
@@ -272,7 +271,7 @@ class FluxnetAdapter(BaseAdapter):
         resolution = parts[idx + 2]
         return resolution.upper()
 
-    def _required_roots_for_dformat(self, dformat: str) -> List[str]:
+    def _required_roots_for_dformat(self, dformat: str) -> list[str]:
         """
         FLUXNET variable *roots* needed to construct the ELM-required vars.
         """

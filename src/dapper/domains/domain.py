@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Literal
 
 import geopandas as gpd
 import numpy as np
@@ -21,7 +21,7 @@ CellKind = Literal["site_points", "as_provided"]
 
 
 def _ensure_geodf(
-    df: Union[gpd.GeoDataFrame, pd.DataFrame],
+    df: gpd.GeoDataFrame | pd.DataFrame,
     *,
     id_col: str = "gid",
     crs_epsg: int = 4326,
@@ -117,37 +117,37 @@ class Domain:
     cells: gpd.GeoDataFrame
 
     # --- optional topounits payload (filled after make_topounits) ---
-    topounits: "gpd.GeoDataFrame | None" = None
+    topounits: gpd.GeoDataFrame | None = None
     topounits_dim_name: str = "topounit"
     topounits_id_col: str = (
         "topounit_id"  # the column inside topounits holding unique ids
     )
     topounits_gid_col: str = "gid"  # column linking topounits -> parent cell/site gid
 
-    met_support: Optional[gpd.GeoDataFrame] = None
-    topo_support: Optional[gpd.GeoDataFrame] = None
+    met_support: gpd.GeoDataFrame | None = None
+    topo_support: gpd.GeoDataFrame | None = None
 
-    domain_nc: Optional[Path] = None
-    path_out: Optional[Path] = None
-    run_group: Optional[str] = None  # if None, defaults to self.name
+    domain_nc: Path | None = None
+    path_out: Path | None = None
+    run_group: str | None = None  # if None, defaults to self.name
 
     # ----------------------------- constructors -----------------------------
 
     @classmethod
     def from_provided(
         cls,
-        provided: Union[gpd.GeoDataFrame, pd.DataFrame],
+        provided: gpd.GeoDataFrame | pd.DataFrame,
         *,
         name: str = "domain",
-        mode: Optional[DomainMode] = None,
+        mode: DomainMode | None = None,
         id_col: str = "gid",
-        support: Optional[Union[gpd.GeoDataFrame, pd.DataFrame]] = None,
-        cells: Optional[Union[gpd.GeoDataFrame, pd.DataFrame]] = None,
-        cell_kind: Optional[CellKind] = None,
-        domain_nc: Optional[Union[str, Path]] = None,
-        path_out: Optional[Union[str, Path]] = None,
-        run_group: Optional[str] = None,
-    ) -> "Domain":
+        support: gpd.GeoDataFrame | pd.DataFrame | None = None,
+        cells: gpd.GeoDataFrame | pd.DataFrame | None = None,
+        cell_kind: CellKind | None = None,
+        domain_nc: str | Path | None = None,
+        path_out: str | Path | None = None,
+        run_group: str | None = None,
+    ) -> Domain:
         """Construct a Domain from a provided geometry table.
 
         The input can be a GeoDataFrame (preferred) or a DataFrame with a geometry column.
@@ -201,7 +201,7 @@ class Domain:
 
     # Back-compat-ish alias (you said you don’t care, but it’s convenient while refactoring)
     @classmethod
-    def from_gdf(cls, gdf: Union[gpd.GeoDataFrame, pd.DataFrame], **kwargs) -> "Domain":
+    def from_gdf(cls, gdf: gpd.GeoDataFrame | pd.DataFrame, **kwargs) -> Domain:
         """Alias for :meth:`Domain.from_provided`."""
 
         return cls.from_provided(gdf, **kwargs)
@@ -215,9 +215,9 @@ class Domain:
         name: str = "domain",
         mode: DomainMode = "cellset",
         cell_kind: CellKind = "site_points",
-        path_out: Optional[Union[str, Path]] = None,
-        run_group: Optional[str] = None,
-    ) -> "Domain":
+        path_out: str | Path | None = None,
+        run_group: str | None = None,
+    ) -> Domain:
         """Construct a single-feature Domain from a shapely geometry."""
 
         gdf = gpd.GeoDataFrame({"gid": [gid], "geometry": [geometry]}, crs="EPSG:4326")
@@ -233,16 +233,16 @@ class Domain:
     @classmethod
     def from_file(
         cls,
-        path: Union[str, Path],
+        path: str | Path,
         *,
-        name: Optional[str] = None,
-        layer: Optional[str] = None,
+        name: str | None = None,
+        layer: str | None = None,
         id_col: str = "gid",
-        mode: Optional[DomainMode] = None,
-        cell_kind: Optional[CellKind] = None,
-        path_out: Optional[Union[str, Path]] = None,
-        run_group: Optional[str] = None,
-    ) -> "Domain":
+        mode: DomainMode | None = None,
+        cell_kind: CellKind | None = None,
+        path_out: str | Path | None = None,
+        run_group: str | None = None,
+    ) -> Domain:
         """Load a geospatial file (e.g., GeoPackage, Shapefile) and construct a Domain."""
 
         path = Path(path)
@@ -264,15 +264,15 @@ class Domain:
     @classmethod
     def from_elm_domain(
         cls,
-        path_nc: Union[str, Path],
+        path_nc: str | Path,
         *,
-        name: Optional[str] = None,
+        name: str | None = None,
         mask_name: str = "mask",
         frac_name: str = "frac",
         frac_threshold: float = 0.0,
-        path_out: Optional[Union[str, Path]] = None,
-        run_group: Optional[str] = None,
-    ) -> "Domain":
+        path_out: str | Path | None = None,
+        run_group: str | None = None,
+    ) -> Domain:
         """
         Build a Domain from an ELM domain NetCDF. This naturally produces a 'cellset'.
         """
@@ -336,7 +336,7 @@ class Domain:
 
     # ----------------------------- core helpers -----------------------------
 
-    def copy(self, **updates) -> "Domain":
+    def copy(self, **updates) -> Domain:
         """Return a shallow copy of this Domain with updated fields."""
 
         return replace(self, **updates)
@@ -360,7 +360,7 @@ class Domain:
         """
         return self.cells
 
-    def ensure_cells_lon_lat(self) -> "Domain":
+    def ensure_cells_lon_lat(self) -> Domain:
         """Ensure ``cells`` contains ``lon`` and ``lat`` columns, derived from geometry if needed."""
 
         cel = _ensure_lon_lat(self.cells)
@@ -374,7 +374,7 @@ class Domain:
         self,
         *,
         source: Literal["provided", "support", "cells"] = "support",
-        step: Optional[StepName] = None,
+        step: StepName | None = None,
     ) -> gpd.GeoDataFrame:
         """
         Representative points for a given geometry view.
@@ -393,7 +393,7 @@ class Domain:
         out = _ensure_lon_lat(out)
         return out
 
-    def support_for(self, *, step: Optional[StepName] = None) -> gpd.GeoDataFrame:
+    def support_for(self, *, step: StepName | None = None) -> gpd.GeoDataFrame:
         """
         Return the geometry set that should be used for the given step.
         - step=None      -> support
@@ -408,7 +408,7 @@ class Domain:
             return self.topo_support if self.topo_support is not None else self.support
         raise ValueError(f"Unknown step={step!r}")
 
-    def with_step_support(self, step: StepName, gdf: gpd.GeoDataFrame) -> "Domain":
+    def with_step_support(self, step: StepName, gdf: gpd.GeoDataFrame) -> Domain:
         """Attach a step-specific support GeoDataFrame (for "met" or "topounits")."""
 
         gdf2 = _ensure_geodf(gdf, id_col="gid")
@@ -425,7 +425,7 @@ class Domain:
         step: StepName,
         preserve_topology: bool = True,
         equal_area_epsg: int = 6933,
-    ) -> "Domain":
+    ) -> Domain:
         """
         Simplify the support geometry for a step and store it as met_support/topo_support.
         Does NOT modify provided/support/cells.
@@ -720,12 +720,12 @@ class Domain:
 
     def with_topounits(
         self,
-        topounits: "gpd.GeoDataFrame",
+        topounits: gpd.GeoDataFrame,
         *,
         id_col: str = "band_name",
         gid_col: str = "gid",
         dim_name: str = "topounit",
-    ) -> "Domain":
+    ) -> Domain:
         """
         Attach topounits GeoDataFrame to this Domain.
         - Ensures a stable id column name (self.topounits_id_col == 'topounit_id')
@@ -779,7 +779,7 @@ class Domain:
         target_scale: float | None = None,
         verbose: bool = False,
         allow_slow_ncells: int = 25,
-    ) -> "Domain":
+    ) -> Domain:
         """
         Convenience wrapper that computes topounits for this Domain and returns a new Domain
         with `domain.topounits` attached.
