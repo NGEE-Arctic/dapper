@@ -47,6 +47,13 @@ Install from PyPI:
 
    pip install dapper-elm
 
+To run the tutorial notebooks, or to use ``topoplot.plot_interactive``, install
+the optional extras:
+
+.. code-block:: bash
+
+   pip install "dapper-elm[notebooks,plot]"
+
 **Step 3**
 
 Quick import test:
