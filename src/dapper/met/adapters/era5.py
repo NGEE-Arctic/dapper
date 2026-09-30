@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -75,7 +76,15 @@ class ERA5Adapter(BaseAdapter):
         return csv_files, start_year, end_year
 
     def id_column_for_csv(self, df_csv, id_col):
-        """Return the required identifier column name expected in ERA5 CSV shards ("gid")."""
+        """Return the identifier column name expected in ERA5 CSV shards ("gid").
+
+        Deprecated: the Exporter always uses ``gid`` and never calls this.
+        """
+        warnings.warn(
+            "ERA5Adapter.id_column_for_csv is deprecated and will be removed.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         if "gid" not in df_csv.columns:
             raise KeyError("Expected 'gid' column in input CSV.")
