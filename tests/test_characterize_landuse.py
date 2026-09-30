@@ -1,8 +1,8 @@
 """Characterization tests for landuse time-series sampling (T-2).
 
 These pin current behavior ahead of refactoring. Assertions marked
-``PINS BUG Bn`` document known-incorrect behavior (see REFACTOR_NOTES.md)
-and should be updated when that bug is fixed.
+``Regression for Bn`` cover bugs fixed after the refactor (see
+REFACTOR_NOTES.md).
 """
 
 import geopandas as gpd
@@ -119,11 +119,14 @@ def test_zonal_sampling(landuse_nc, tmp_path):
     )
 
     with xr.open_dataset(out) as ds:
-        # PINS BUG B18: zonal output places lsmlat first instead of last-but-one.
-        assert ds["PCT_NAT_PFT"].dims == ("lsmlat", "time", "natpft", "lsmlon")
-        assert ds["PCT_CROP"].dims == ("lsmlat", "time", "lsmlon")
+        # Regression for B18: spatial dims come last, in source order.
+        assert ds["PCT_NAT_PFT"].dims == ("time", "natpft", "lsmlat", "lsmlon")
+        assert ds["PCT_CROP"].dims == ("time", "lsmlat", "lsmlon")
+        # Values below are listed per target (lsmlat first) for readability.
         np.testing.assert_allclose(
-            ds["PCT_NAT_PFT"].values[..., 0],
+            ds["PCT_NAT_PFT"]
+            .transpose("lsmlat", "time", "natpft", "lsmlon")
+            .values[..., 0],
             [
                 [[20.0, 100 / 3, 140 / 3], [20.51282051, 100 / 3, 46.15384615]],
                 [
@@ -134,7 +137,8 @@ def test_zonal_sampling(landuse_nc, tmp_path):
             rtol=1e-7,
         )
         np.testing.assert_allclose(
-            ds["PCT_CROP"].values[..., 0], [[5.0, 21.0], [12.97790336, 28.97790336]]
+            ds["PCT_CROP"].transpose("lsmlat", "time", "lsmlon").values[..., 0],
+            [[5.0, 21.0], [12.97790336, 28.97790336]],
         )
         np.testing.assert_allclose(ds["LATIXY"].values[:, 0], [67.75, 68.5])
         np.testing.assert_allclose(ds["LONGXY"].values[:, 0], [-150.25, -149.25])
