@@ -1,20 +1,27 @@
 """Meteorological data export pipelines."""
 
+from __future__ import annotations
+
 import inspect
 import warnings
+from collections.abc import Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
-import dapper.met.temporal as dt
-from dapper.domains.domain import Domain
+from dapper.domains.domain import SAMPLING_PROVENANCE_COLUMNS, Domain
 from dapper.elm.utils import elm_data_dicts
 from dapper.geo.constants import LATLON_DECIMALS
-from dapper.io import fs as utils
+from dapper.io import fs
 from dapper.io.attrs import utc_timestamp
+from dapper.met import temporal
 from dapper.met.writers import append_met_netcdf, initialize_met_netcdf
 from dapper.schemas.elm import ELM_UNITS
+
+if TYPE_CHECKING:  # met.adapters imports this module
+    from dapper.met.adapters.base import BaseAdapter
 
 
 def _parquet_write(path, df, *, append: bool = False) -> None:
@@ -103,21 +110,21 @@ class Exporter:
 
     def __init__(
         self,
-        adapter,
-        src_path,
+        adapter: BaseAdapter,
+        src_path: str | Path,
         *,
         domain: Domain,
-        out_dir=None,
+        out_dir: str | Path | None = None,
         calendar: str = "noleap",
         dtime_resolution_hrs: float = 1,
         dtime_units: str = "days",
         dformat: str = "BYPASS",
         append_attrs: dict | None = None,
-        chunks=None,
-        include_vars=None,
-        exclude_vars=None,
+        chunks: tuple[int, ...] | None = None,
+        include_vars: Iterable[str] | None = None,
+        exclude_vars: Iterable[str] | None = None,
         clip_to_full_years: bool | None = None,
-    ):
+    ) -> None:
         """Create a MET exporter for ``domain``; see the class docstring."""
         if not isinstance(domain, Domain):
             raise TypeError("domain must be a dapper.domains.domain.Domain instance")
@@ -132,7 +139,7 @@ class Exporter:
         # (requires Domain.path_out to be set).
         self.group_dir = Path(out_dir) if out_dir is not None else self.domain.run_dir
 
-        self.calendar = dt.normalize_calendar(calendar)
+        self.calendar = temporal.normalize_calendar(calendar)
         self.dtime_resolution_hrs = dtime_resolution_hrs
         self.dtime_units = dtime_units
         self.dformat = dformat
@@ -169,6 +176,7 @@ class Exporter:
 
         # derived
         self.gid_to_isite = None
+        self.filename_prefix = None
 
         # Cached ELM descriptions (used for per-variable attrs)
         self._elm_desc = (elm_data_dicts() or {}).get("short_descriptions", {})
@@ -176,7 +184,11 @@ class Exporter:
     # ---------------------- public ----------------------
 
     def run(
-        self, *, pack_scope=None, filename: str | None = None, overwrite: bool = False
+        self,
+        *,
+        pack_scope: str | None = None,
+        filename: str | None = None,
+        overwrite: bool = False,
     ) -> None:
         """Run the MET export for this exporter’s Domain.
 
@@ -202,7 +214,7 @@ class Exporter:
         overwrite
             If True, clears existing MET outputs before writing.
         """
-        dom_mode = getattr(self.domain, "mode", None)
+        dom_mode = self.domain.mode
         if dom_mode not in ("sites", "cellset"):
             raise ValueError(
                 f"Domain.mode must be 'sites' or 'cellset' for MET export (got {dom_mode!r})."
@@ -223,7 +235,7 @@ class Exporter:
         # 1) shards → parquet (ELM-prep)
         self.temp_dir = self.group_dir / ".dapper_tmp" / "met_parquet"
         if self.temp_dir.exists():
-            utils.remove_directory_contents(self.temp_dir, remove_directory=False)
+            fs.remove_directory_contents(self.temp_dir, remove_directory=False)
         else:
             self.temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -241,7 +253,7 @@ class Exporter:
         parquet_files = sorted(self.temp_dir.glob("*.parquet"))
         if not parquet_files:
             print("No site Parquets to export; exiting.")
-            utils.remove_directory_contents(self.temp_dir, remove_directory=True)
+            fs.remove_directory_contents(self.temp_dir, remove_directory=True)
             return
 
         # 2) vars + canonical DTIME axis (cellset only)
@@ -250,7 +262,7 @@ class Exporter:
         self.var_cols = [c for c in sample_df.columns if c not in self.meta_cols]
         if not self.var_cols:
             print("No data variables found; exiting.")
-            utils.remove_directory_contents(self.temp_dir, remove_directory=True)
+            fs.remove_directory_contents(self.temp_dir, remove_directory=True)
             return
 
         # For cellset (lat/lon) outputs we need a single canonical DTIME axis.
@@ -284,17 +296,17 @@ class Exporter:
             self._write_elm_sites(parquet_files, nc_attrs)
 
         # 4) cleanup
-        utils.remove_directory_contents(self.temp_dir, remove_directory=True)
+        fs.remove_directory_contents(self.temp_dir, remove_directory=True)
 
     def _run_dir_for_gid(self, gid: str) -> Path:
         """Resolve run directory for a gid under the current output root."""
-        if getattr(self.domain, "mode", None) == "sites":
+        if self.domain.mode == "sites":
             return self.group_dir / str(gid)
         return self.group_dir
 
     def _met_dir_for_gid(self, gid: str | None = None) -> Path:
         """Resolve MET directory for a gid (sites mode) or the single run (cellset mode)."""
-        if getattr(self.domain, "mode", None) == "sites":
+        if self.domain.mode == "sites":
             if gid is None:
                 raise ValueError("gid is required when domain.mode == 'sites'.")
             return self._run_dir_for_gid(gid) / "MET"
@@ -310,7 +322,7 @@ class Exporter:
         With no override, use the ELM convention with the adapter driver tag,
         actual export years, and the single-zone suffix.
         """
-        if getattr(self, "filename_prefix", None):
+        if self.filename_prefix:
             # Check if template contains {var} placeholder
             if "{var}" in self.filename_prefix:
                 return f"{self.filename_prefix.format(var=var)}.nc"
@@ -349,10 +361,7 @@ class Exporter:
         df["zone_str"] = df["zone"].astype(int).astype(str).str.zfill(2)
 
         # Keep gid for filtering, but it won't get written to the file
-        lon_col = "lon_0-360" if "lon_0-360" in df.columns else "lon"
-        return df[["gid", lon_col, "lat", "zone_str", "id"]].rename(
-            columns={lon_col: "lon"}
-        )
+        return df[["gid", "lon", "lat", "zone_str", "id"]]
 
     def _var_attrs(self, var: str) -> dict:
         """Best-effort per-variable metadata for ELM outputs."""
@@ -408,21 +417,7 @@ class Exporter:
             value = self._attr_value(row["feature_count"])
             if value is not None:
                 attrs["source_feature_count"] = value
-        for column in (
-            "sampling_backend",
-            "sampling_dataset",
-            "sampling_reference_lon",
-            "sampling_reference_lat",
-            "sampling_grid_cell_count",
-            "sampling_grid_coordinates",
-            "sampling_grid_weights",
-            "sampling_requested_start",
-            "sampling_start",
-            "sampling_source_end",
-            "sampling_output_end",
-            "sampling_estimated_seconds",
-            "sampling_elapsed_seconds",
-        ):
+        for column in SAMPLING_PROVENANCE_COLUMNS:
             if column in row.index:
                 value = self._attr_value(row[column])
                 if value is not None:
@@ -431,15 +426,15 @@ class Exporter:
 
     def _clear_existing_outputs(self) -> None:
         """Remove existing MET outputs so this run is idempotent."""
-        if getattr(self.domain, "mode", None) == "sites":
+        if self.domain.mode == "sites":
             for gid in self.df_loc_norm["gid"].astype(str).tolist():
                 met_dir = self._met_dir_for_gid(gid)
                 if met_dir.exists():
-                    utils.remove_directory_contents(met_dir, remove_directory=True)
+                    fs.remove_directory_contents(met_dir, remove_directory=True)
         else:
             met_dir = self._met_dir_for_gid()
             if met_dir.exists():
-                utils.remove_directory_contents(met_dir, remove_directory=False)
+                fs.remove_directory_contents(met_dir, remove_directory=False)
 
     def _write_elm_combined(self, parquet_files, nc_attrs):
         # global packing scan
@@ -601,7 +596,7 @@ class Exporter:
                 pd.DataFrame(
                     [[lon0360, lat, zone_str, 1]],
                     columns=["lon", "lat", "zone_str", "id"],
-                ).to_csv(zm_path, index=False, header=False, sep="	")
+                ).to_csv(zm_path, index=False, header=False, sep="\t")
 
             # each var: per-site packing + write/append
             for v in self.var_cols:
@@ -727,7 +722,7 @@ class Exporter:
         )
 
     def _create_dtime(self, df):
-        return dt.create_dtime(
+        return temporal.create_dtime(
             df,
             self.calendar,
             self.dtime_units,

@@ -249,7 +249,7 @@ def determine_gee_batches(
 
     if verbose:
         if len(df) == 1:
-            print(f"Your request will be executed as one Task in Google Earth Engine.")
+            print("Your request will be executed as one Task in Google Earth Engine.")
         else:
             print(
                 f"Your request will be executed as {len(df)} Tasks in Google Earth Engine."
