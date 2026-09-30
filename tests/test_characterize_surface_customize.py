@@ -1,8 +1,8 @@
 """Characterization tests for surface-file customization and editing (T-8).
 
 These pin current behavior ahead of refactoring. Assertions marked
-``PINS BUG Bn`` document known-incorrect behavior (see REFACTOR_NOTES.md)
-and should be updated when that bug is fixed.
+``PINS BUG Bn`` document known-incorrect behavior (see REFACTOR_NOTES.md);
+``Regression for Bn`` cover bugs fixed after the refactor.
 """
 
 import re
@@ -122,9 +122,20 @@ def test_resize_dim(surf_nc):
         sf.resize_dim("nope", 3)
     sf.resize_dim("nlevsoi", 3)  # no-op
     assert sf.ds.sizes["nlevsoi"] == 3
-    # PINS BUG B19: resizing a dim used by a data variable always fails.
-    with pytest.raises(ValueError, match="conflicting sizes"):
-        sf.resize_dim("nlevsoi", 5)
+
+    # Regression for B19: resizing a dim used by a data variable works.
+    sf.resize_dim("nlevsoi", 5)
+    np.testing.assert_array_equal(
+        sf.ds["PCT_SAND"].values.ravel(), [40.0, 40.0, 40.0, np.nan, np.nan]
+    )
+    assert sf.ds["PCT_SAND"].dtype == np.float32
+    assert sf.ds["PCT_SAND"].attrs == {"units": "percent"}
+    assert list(sf.ds.data_vars) == ["PCT_SAND", "SLOPE", "URBAN_REGION_ID"]
+    assert sf.ds["nlevsoi"].values.tolist() == [0, 1, 2, 3, 4]
+
+    sf.resize_dim("nlevsoi", 2)
+    assert sf.ds["PCT_SAND"].values.ravel().tolist() == [40.0, 40.0]
+    assert sf.ds.sizes["nlevsoi"] == 2
 
 
 def test_small_editing_helpers(surf_nc):

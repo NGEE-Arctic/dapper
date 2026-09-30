@@ -1171,41 +1171,37 @@ class SurfaceFile:
         if new_size == old_size:
             return
 
-        # Coords: if missing, synthesize an index
+        if new_size < old_size:
+            self.ds = ds.isel({dim_name: slice(0, new_size)})
+            return
+
+        # Pad: build the padded variables first, then install the longer coordinate
+        # (assigning the coordinate first conflicts with the old variable sizes).
         coord = ds.coords.get(
             dim_name,
             xr.DataArray(np.arange(old_size), dims=(dim_name,)),
         )
+        new_coord = np.concatenate([coord.values, np.arange(old_size, new_size)])
 
-        if new_size < old_size:
-            new_coord = coord.isel({dim_name: slice(0, new_size)})
-        else:
-            extra = xr.DataArray(
-                np.arange(old_size, new_size),
-                dims=(dim_name,),
-            )
-            new_coord = xr.concat([coord, extra], dim=dim_name)
-
-        ds = ds.assign_coords({dim_name: new_coord})
-
-        # Adjust all vars that use this dim
-        for v in list(ds.data_vars):
+        padded = {}
+        for v in ds.data_vars:
             if dim_name not in ds[v].dims:
                 continue
-            da = ds[v]
-            axis = da.dims.index(dim_name)
-            if new_size < old_size:
-                ds[v] = da.isel({dim_name: slice(0, new_size)})
-            else:
-                pad_shape = list(da.shape)
-                pad_shape[axis] = new_size - old_size
-                pad = xr.DataArray(
-                    np.full(pad_shape, fill_value, dtype=da.dtype),
-                    dims=da.dims,
-                )
-                ds[v] = xr.concat([da, pad], dim=dim_name)
+            da = ds[v].drop_vars(dim_name, errors="ignore")
+            pad_shape = list(da.shape)
+            pad_shape[da.dims.index(dim_name)] = new_size - old_size
+            pad = xr.DataArray(
+                np.full(pad_shape, fill_value, dtype=da.dtype), dims=da.dims
+            )
+            padded[v] = xr.concat([da, pad], dim=dim_name)
 
-        self.ds = ds
+        ds = ds.drop_vars(list(padded))
+        ds = ds.drop_vars(dim_name, errors="ignore").assign_coords(
+            {dim_name: (dim_name, new_coord, coord.attrs)}
+        )
+        for v, da in padded.items():
+            ds[v] = da
+        self.ds = ds[list(self.ds.data_vars)]  # keep original variable order
 
     def set_scalar(self, name: str, value: ArrayLike) -> None:
         """
