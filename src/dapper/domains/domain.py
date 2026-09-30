@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
@@ -244,8 +245,8 @@ class Domain:
             name=name,
             mode=mode,
             cell_kind=cell_kind,
-            path_out=Path(path_out) if path_out is not None else None,
-            run_group=str(run_group) if run_group is not None else None,
+            path_out=path_out,
+            run_group=run_group,
         )
 
     @classmethod
@@ -265,18 +266,15 @@ class Domain:
 
         path = Path(path)
         gdf = gpd.read_file(path, layer=layer) if layer else gpd.read_file(path)
-        if gdf.crs is None:
-            gdf.set_crs(epsg=4326, inplace=True)
-        else:
-            gdf = gdf.to_crs("EPSG:4326")
+        # from_provided normalizes the CRS to EPSG:4326.
         return cls.from_provided(
             gdf,
             name=name or path.stem,
             id_col=id_col,
             mode=mode,
             cell_kind=cell_kind,
-            path_out=Path(path_out) if path_out is not None else None,
-            run_group=str(run_group) if run_group is not None else None,
+            path_out=path_out,
+            run_group=run_group,
         )
 
     @classmethod
@@ -458,7 +456,7 @@ class Domain:
 
     # ----------------------------- run iteration (internal) -----------------------------
 
-    def iter_runs(self):
+    def iter_runs(self) -> Iterator[tuple[str, Domain]]:
         """
         Yield (run_id, run_domain) where run_domain is always a single-run 'cellset' Domain.
         - mode='cellset' -> yields exactly one run (self)
@@ -711,7 +709,7 @@ class Domain:
 
         return self.topounits is not None and len(self.topounits) > 0
 
-    def topounits_for_gid(self, gid: str):
+    def topounits_for_gid(self, gid: str) -> gpd.GeoDataFrame | None:
         """
         Return the topounits subset for a single gid (or None if no topounits).
         """
