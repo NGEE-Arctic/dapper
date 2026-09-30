@@ -476,14 +476,14 @@ def customize_surface(
     ds = xr.open_dataset(src_path)
     ds_edit = ds.copy()
 
-    def _parse_spec(var: str, spec: Any) -> tuple[Any, str | None, str | None]:
+    def _parse_spec(spec: Any) -> tuple[Any, str | None, str | None]:
         """Return (value, dtype_override, units_override)."""
         if isinstance(spec, dict) and "value" in spec:
             return spec["value"], spec.get("dtype"), spec.get("units")
         return spec, None, None
 
     for var, spec in customizations.items():
-        value, dtype_override, units_override = _parse_spec(var, spec)
+        value, dtype_override, units_override = _parse_spec(spec)
         in_file = var in ds_edit
 
         # ---- Overwrite existing variable ----
@@ -1012,11 +1012,7 @@ class SurfaceFile:
             )
 
             # Attach topounit parameters (and TopounitFracArea) exactly once
-            if (
-                attach_topounits
-                and getattr(run_dom, "topounits", None) is not None
-                and run_dom.topounits is not None
-            ):
+            if attach_topounits and run_dom.topounits is not None:
                 sf.add_topounits_from_domain(run_dom)
 
             if append_attrs:
@@ -1045,7 +1041,7 @@ class SurfaceFile:
     def add_params_from_df(
         self,
         dim_name: str,
-        df,
+        df: pd.DataFrame,
         id_col: str,
         *,
         drop_cols: list[str] | None = None,
@@ -1070,8 +1066,7 @@ class SurfaceFile:
         if id_col not in df.columns:
             raise KeyError(f"id_col '{id_col}' not found in DataFrame.")
 
-        drop_cols = set(drop_cols or [])
-        drop_cols.add(id_col)
+        skip_cols = {*(drop_cols or []), id_col}
 
         # Normalize ids to string for robust alignment
         df = df.copy()
@@ -1097,7 +1092,7 @@ class SurfaceFile:
 
         # For each parameter column, align to dim coord and write
         for col in df.columns:
-            if col in drop_cols:
+            if col in skip_cols:
                 continue
 
             # Map id -> value (one per id)
@@ -1169,7 +1164,7 @@ class SurfaceFile:
         - pct_col (percent of the parent cell; sums to ~100 per gid)
         """
 
-        if getattr(domain, "topounits", None) is None or domain.topounits is None:
+        if getattr(domain, "topounits", None) is None:
             raise ValueError("Domain has no topounits attached.")
 
         topos = domain.topounits.copy()
@@ -1208,8 +1203,7 @@ class SurfaceFile:
         gid_to_j = {gid: j for j, gid in enumerate(gid_order)}
 
         # Create / align the topounit dimension
-        top_ids = pd.unique(topos[id_col]).astype(str)
-        top_ids = list(top_ids)
+        top_ids = list(pd.unique(topos[id_col]).astype(str))
 
         # Add 1D topounit parameters (all non-geometry, non-(gid/id/pct) columns)
         drop = {"geometry", gid_col, id_col, pct_col}
@@ -1336,7 +1330,7 @@ class SurfaceFile:
         if dim_name not in ds.dims:
             raise KeyError(f"dimension {dim_name!r} not found in dataset.")
 
-        old_size = ds.dims[dim_name]
+        old_size = ds.sizes[dim_name]
         if new_size == old_size:
             return
 
