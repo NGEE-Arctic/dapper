@@ -1,6 +1,9 @@
 # Test change proposals
 
-Nothing under `tests/` has been modified. Each entry needs your approve or reject before I act on it.
+Status (2026-09-30):
+- **T-1, T-2, T-7, T-8 and T-9 are approved and added** in commit `d38811c`, as `tests/test_characterize_*.py`.
+- P-1, T-3, T-4, T-5 and T-6 are still pending.
+- Existing test files are unchanged.
 
 ## Changes to existing tests
 
