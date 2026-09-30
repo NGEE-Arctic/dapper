@@ -416,16 +416,15 @@ def sample_gridded_dataset_polygons(
             da_red = da_red.expand_dims({lon_dim: 1})
             out_vars[v] = da_red
 
-        sel_ds = xr.Dataset(out_vars)
-        # Match per-variable dim ordering like point sampler does
-        for v in spatial_vars:
-            sel_ds[v] = sampling._reorder_like_source(
-                sel_ds[v], ds[v].dims, lat_dim, lon_dim
-            )
-
-        sampled_slices.append(sel_ds)
+        sampled_slices.append(xr.Dataset(out_vars))
 
     out_spatial = xr.concat(sampled_slices, dim=lat_dim, create_index_for_new_dim=False)
+    # Reorder after the concat (which prepends lat_dim), as the point sampler does,
+    # so spatial dims come last in source order.
+    for v in spatial_vars:
+        out_spatial[v] = sampling._reorder_like_source(
+            out_spatial[v], ds[v].dims, lat_dim, lon_dim
+        )
     out = xr.merge([out_spatial, ds[non_spatial_vars]])
 
     out.attrs["dapper_sampling_method"] = "zonal"
