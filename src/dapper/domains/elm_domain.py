@@ -74,8 +74,8 @@ def to_elm_domain_dataset(
             minx, maxx = lon_c - half_dx, lon_c + half_dx
             miny, maxy = lat_c - half_dy, lat_c + half_dy
 
-        # Bounding-box corners, consistent with existing behavior
-        xv[j, i, :] = [minx, maxx, minx, maxx]
+        # Counter-clockwise bounding-box corners: ll, lr, ur, ul (CIME convention)
+        xv[j, i, :] = [minx, maxx, maxx, minx]
         yv[j, i, :] = [miny, miny, maxy, maxy]
 
         xc[j, i] = lon_c

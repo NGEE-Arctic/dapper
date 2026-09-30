@@ -1,8 +1,7 @@
 """Characterization tests for Domain construction and ELM domain export (T-1).
 
-These pin current behavior ahead of refactoring. Assertions marked
-``PINS BUG B4`` document known-incorrect behavior (see REFACTOR_NOTES.md)
-and should be updated when that bug is fixed.
+These pin current behavior ahead of refactoring. Bug B4 (corner order) has
+been fixed; its former pins are now regression tests.
 """
 
 import math
@@ -40,8 +39,8 @@ def test_elm_domain_dataset_layout_and_values():
     )
     np.testing.assert_allclose(ds["area"].values[:, 0], [expected_area] * 2)
 
-    # PINS BUG B4: corners are written in Z order, not counter-clockwise.
-    np.testing.assert_allclose(ds["xv"].values[0, 0], [-150.0, -149.5, -150.0, -149.5])
+    # Regression for B4: corners are counter-clockwise (ll, lr, ur, ul).
+    np.testing.assert_allclose(ds["xv"].values[0, 0], [-150.0, -149.5, -149.5, -150.0])
     np.testing.assert_allclose(ds["yv"].values[0, 0], [68.0, 68.0, 68.5, 68.5])
 
     assert ds.attrs == {
@@ -112,8 +111,9 @@ def test_from_elm_domain_round_trip(tmp_path):
     np.testing.assert_allclose(back.cells["frac"], [1.0, 0.5])
     assert back.cells["i"].tolist() == [0, 0]
     assert back.cells["j"].tolist() == [0, 1]
-    # PINS BUG B4: Z-ordered corners read back as zero-area bowties.
-    np.testing.assert_allclose([g.area for g in back.cells.geometry], [0.0, 0.0])
+    # Regression for B4: cells read back as valid 0.5 x 0.5 degree boxes.
+    assert all(g.is_valid for g in back.cells.geometry)
+    np.testing.assert_allclose([g.area for g in back.cells.geometry], [0.25, 0.25])
 
     thresholded = Domain.from_elm_domain(path, frac_threshold=0.6, name="x")
     assert thresholded.name == "x"
