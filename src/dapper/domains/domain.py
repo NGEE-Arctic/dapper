@@ -317,7 +317,7 @@ class Domain:
 
                 lon_c = float(xc[j, i])
                 lat_c = float(yc[j, i])
-                corners = list(zip(xv[j, i, :], yv[j, i, :]))
+                corners = list(zip(xv[j, i, :], yv[j, i, :], strict=False))
                 poly = Polygon(corners)
 
                 gid = f"cell_{gid_counter:05d}"
@@ -845,7 +845,7 @@ class Domain:
         lons_axis.sort()
 
         gid_to_ij: dict[str, tuple[int, int]] = {}
-        for gid, lat, lon in zip(gdf["gid"].astype(str), lats, lons):
+        for gid, lat, lon in zip(gdf["gid"].astype(str), lats, lons, strict=False):
             iy = int(np.where(lats_axis == lat)[0][0])
             ix = int(np.where(lons_axis == lon)[0][0])
             gid_to_ij[str(gid)] = (iy, ix)

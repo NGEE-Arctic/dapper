@@ -196,7 +196,7 @@ EXPORT_POLICIES = {
             "when": {"dims": ("nlevsoi", "lsmlat", "lsmlon")},
             "policy": "SOIL_TOP_LAYER_DEFAULT",
             "band_name": lambda var, sizes: [
-                f"{var}_L{l:02d}" for l in range(sizes.get("nlevsoi", 0))
+                f"{var}_L{k:02d}" for k in range(sizes.get("nlevsoi", 0))
             ],
             "note": "Default L00; optionally L00/L05/L09 stack",
         },

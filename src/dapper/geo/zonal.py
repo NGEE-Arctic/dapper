@@ -248,8 +248,8 @@ def intersect_weights_rectilinear(
     by_gid: dict[str, pd.DataFrame] = {}
 
     for row in t_ea.itertuples(index=False):
-        gid = str(getattr(row, "gid"))
-        geom = getattr(row, "geometry")
+        gid = str(row.gid)
+        geom = row.geometry
 
         cand_idx = tree.query(geom)  # indices into src_polys
         rows = []

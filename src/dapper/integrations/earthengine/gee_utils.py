@@ -1,7 +1,7 @@
 """Google Earth Engine helpers and sampling utilities."""
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import geopandas as gpd
 import pandas as pd
@@ -216,9 +216,7 @@ def validate_bands(bandlist, gee_ic):
     not_in = [b for b in bandlist if b not in available_bands]
     if len(not_in) > 0:
         raise NameError(
-            "You requested the following bands which are not in ERA5-Land Hourly (perhaps check spelling?): {}. For a list of available bands, run md.e5lh_bands()['band_name'].".format(
-                not_in
-            )
+            f"You requested the following bands which are not in ERA5-Land Hourly (perhaps check spelling?): {not_in}. For a list of available bands, run md.e5lh_bands()['band_name']."
         )
 
     return
@@ -262,7 +260,7 @@ def _era5_source_end_exclusive(output_end_exclusive, latest_timestamp_ms):
     """Return a GEE end boundary with one hourly-forcing lookahead image."""
     latest_image_time = datetime.fromtimestamp(
         latest_timestamp_ms / 1000,
-        tz=timezone.utc,
+        tz=UTC,
     ).replace(tzinfo=None)
     return min(
         output_end_exclusive + timedelta(hours=1),
@@ -278,7 +276,7 @@ def _parse_era5_datetime(value, *, latest_timestamp_ms=None, allow_latest=False)
             raise ValueError("'latest' is only supported for end_date.")
         return datetime.fromtimestamp(
             latest_timestamp_ms / 1000,
-            tz=timezone.utc,
+            tz=UTC,
         ).replace(tzinfo=None)
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -287,7 +285,7 @@ def _parse_era5_datetime(value, *, latest_timestamp_ms=None, allow_latest=False)
             f"Invalid date boundary {value!r}; use an ISO date or datetime."
         ) from exc
     if parsed.tzinfo is not None:
-        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
     return parsed
 
 
@@ -691,7 +689,7 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
 
     # Fire off the Tasks
     if skip_tasks is False:
-        for batch_id, bdf in batches.iterrows():
+        for _, bdf in batches.iterrows():
             # Filter this Task by date range
             ic_filtered = ic.filterDate(
                 bdf["task_start"].strftime("%Y-%m-%dT%H:%M:%S"),
