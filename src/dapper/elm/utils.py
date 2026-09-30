@@ -235,8 +235,9 @@ def elm_var_packing_params(elm_var, data=(), dtype=np.int16):
     imin, imax = int(info.min * 0.9), int(info.max * 0.9)
 
     if len(data) > 0:
-        xmin = data.min()
-        xmax = data.max()
+        # Ignore gaps: one NaN must not turn offset/scale into NaN.
+        xmin = np.nanmin(data)
+        xmax = np.nanmax(data)
     else:
         xmin, xmax = ranges[elm_var]
 

@@ -49,10 +49,12 @@ def test_packing_params_from_data_and_dtype():
     )
 
 
-def test_packing_params_with_nan_data():
-    # PINS BUG B3: NaNs propagate into offset/scale instead of being ignored.
-    ao, sf = elm_var_packing_params("QBOT", data=np.array([1e-3, np.nan, 3e-3]))
-    assert np.isnan(ao) and np.isnan(sf)
+def test_packing_params_ignore_nan_data():
+    # Regression for B3: gaps must not turn offset/scale into NaN.
+    with_gap = elm_var_packing_params("QBOT", data=np.array([1e-3, np.nan, 3e-3]))
+    without_gap = elm_var_packing_params("QBOT", data=np.array([1e-3, 3e-3]))
+    np.testing.assert_allclose(with_gap, without_gap)
+    np.testing.assert_allclose(with_gap, (0.002000016954612502, 3.390922500466252e-08))
 
 
 def test_base_adapter_pack_params_fallbacks():
