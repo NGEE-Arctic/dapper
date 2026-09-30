@@ -7,7 +7,9 @@ import numpy as np
 import pandas as pd
 
 import dapper
+from dapper.config.metsources.era5 import RAW_TO_ELM
 from dapper.domains.domain import Domain
+from dapper.schemas.elm import ELM_REQUIRED, ELM_UNITS
 
 # NOTE: validate_met_vars currently depends on stats stored under docs/data.
 # We keep the concept around, but do not require those assets to exist at runtime.
@@ -209,31 +211,8 @@ def elm_data_dicts():
 
     # Distinguishing between OLMT's coupler_bypass mode and non-bypass (datm)
     elm_required_vars = {
-        "datm": [
-            "LONGXY",
-            "LATIXY",
-            "time",
-            "ZBOT",
-            "TBOT",
-            "PRECTmms",
-            "RH",
-            "FSDS",
-            "FLDS",
-            "PSRF",
-            "WIND",
-        ],
-        "cbypass": [
-            "LONGXY",
-            "LATIXY",
-            "time",
-            "TBOT",
-            "PRECTmms",
-            "QBOT",
-            "FSDS",
-            "FLDS",
-            "PSRF",
-            "WIND",
-        ],
+        "datm": list(ELM_REQUIRED["DATM_MODE"]),
+        "cbypass": list(ELM_REQUIRED["BYPASS"]),
     }
 
     # Name mappings to ELM
@@ -251,35 +230,10 @@ def elm_data_dicts():
         "hur": "RH",
     }
 
-    e5_to_elm_short_name = {
-        "u_component_of_wind_10m": "UWIND",
-        "v_component_of_wind_10m": "VWIND",
-        "wind_speed": "WIND",
-        "surface_solar_radiation_downwards_hourly": "FSDS",
-        "surface_thermal_radiation_downwards_hourly": "FLDS",
-        "specific_humidity": "QBOT",
-        "total_precipitation_hourly": "PRECTmms",
-        "surface_pressure": "PSRF",
-        "temperature_2m": "TBOT",
-        "dewpoint_temperature_2m": "DTBOT",
-        "relative_humidity": "RH",
-    }
+    e5_to_elm_short_name = dict(RAW_TO_ELM)
 
     # Output units
-    units = {
-        "TBOT": "K",
-        "DTBOT": "unsure",
-        "RH": "%",
-        "WIND": "m/s",
-        "FSDS": "W/m2",
-        "FLDS": "W/m2",
-        "PSRF": "Pa",
-        "PRECTmms": "mm/s",  # equivalent to kg/m2/s
-        "QBOT": "kg/kg",
-        "ZBOT": "m",
-        "UWIND": "m/s",
-        "VWIND": "m/s",
-    }
+    units = {**ELM_UNITS, "DTBOT": "unsure"}
 
     # For scaling to make "short" netcdf.
     # Taken from https://github.com/fmyuan/elm-pf-tools/blob/db70b67a28969154748f53e2446559ada323a136/pytools/metdata_processing/elm_metdata_write.py#L347C1-L366C1
