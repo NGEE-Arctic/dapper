@@ -1,6 +1,6 @@
 # dapper refactor plan
 
-Status: **Approved 2026-09-30. Phase 2 in progress on branch `refactor/cleanup`.**
+Status: **Phase 2 done up to the pause points** (branch `refactor/cleanup`). Steps 0–12 and 17 are done; 8b turned out to need no change. The §5 breaking changes are done, except §5.2, which was declined. Pinned bugs are fixed. Still waiting on you: steps 13–16, and the regression tests R-1…R-8 for the remaining bugs. See `REFACTOR_NOTES.md`.
 
 Decisions (answers to §6 and the follow-up questions):
 1. The plan is approved. All work stays on `refactor/cleanup`.

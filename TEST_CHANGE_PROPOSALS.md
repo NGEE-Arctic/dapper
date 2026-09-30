@@ -30,3 +30,18 @@ All tests would be offline, use `tmp_path`, and build tiny synthetic inputs.
 | T-9 | `geo/sampling.write_netcdf`, `infer_grid_metadata`, `points_to_nearest_cells` (uncovered) | Attr precedence (`append_attrs` > source > `dapper_attrs`), the `dapper_created_utc` format (`YYYY-MM-DDTHH:MM:SS.ffffffZ`), compression encoding skips strings, and grid metadata keys. | 6, 8a |
 
 Recommendation: approve at least **T-1, T-2, T-7, T-8, T-9**. These guard the medium-risk steps that I would otherwise have to pause on. T-3, T-5 and T-6 matter only if you want steps 14–16 done.
+
+## Regression tests for remaining bug fixes (proposed; not added)
+
+These bugs (see `REFACTOR_NOTES.md`) have no test covering them yet, so each fix waits for its regression test to be approved. All tests would be offline; the Earth Engine ones use a small fake `ee` object patched into the module.
+
+| ID | Bug | Test | Fix it guards |
+|---|---|---|---|
+| R-1 | B1 | Run a sites-mode ERA5 export (same synthetic CSV pattern as `test_met_temporal`) and assert the `TBOT` variable has `long_name == "temperature at the lowest atm level (TBOT)"`. | Read the `"descriptions"` key in `Exporter.__init__`. |
+| R-2 | B6 | `sample_image_over_polygons(gdf, image, geometry_id_field="gid")` with `parse_geometry_objects`, `ensure_pixel_centers_within_geometries` and `try_to_download_featurecollection` monkeypatched. Assert the result keeps `gid` and gains the sampled column. | Only drop `gid` after the merge when `geometry_id_field != "gid"`. |
+| R-3 | B7 | `validate_bands(["b1"], gee_ic="X/Y")` with a fake `ee.ImageCollection` whose first image reports `["b1", "b2"]`. It should pass; `["zz"]` should raise `NameError`. | Read `available_bands` from `gee_ic`. |
+| R-4 | B8 | `_compute_equalwidth_edges` with a fake image whose `reduceRegion(...).getInfo()` returns `{"v_min": 0, "v_max": 10}`. Expect `[0, 2.5, 5, 7.5, 10]` for `n_bins=4`. | `getInfo()` the stats before reading the keys. |
+| R-5 | B9 | `prepare_for_plot` on a 1°×1° box at 68–69°N gives `area_km2` ≈ 4,640 km² (±1%). EPSG:3857 currently gives about 33,000 km². | Compute the area in a data-centered LAEA CRS. |
+| R-6 | B12 | `_detect_mode` on a directory holding one NetCDF whose data var has non-standard dims but a global `domain_mode="sites"` returns `"sites"`. | Check `domain_mode` (then legacy `export_mode`). |
+| R-7 | B14 | `Exporter._resolve_pack_scope("sites", "global")` raises `ValueError`, while `None`, `"per-site"`, `"per_site"`, `"site"` and `"local"` return `"per-site"`. **This changes behavior**: bad values currently pass silently. | Validate `pack_scope` in sites mode. |
+| R-8 | B16 | After `SurfaceValidator().validate(path)`, reopening `path` with `netCDF4.Dataset(path, "w")` succeeds (HDF5 refuses to reopen a file that is still open). | `with xr.open_dataset(...)` in `validate`. |

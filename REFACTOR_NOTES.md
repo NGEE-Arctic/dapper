@@ -1,12 +1,24 @@
 # dapper refactor notes
 
-Baseline commit: `8b43332c37dc30d122749fb85a2399517163f009`.
-The before/after numbers and per-module change log get filled in at wrap-up. The baseline numbers are in `REFACTOR_PLAN.md` §2.
+Baseline commit: `8b43332c37dc30d122749fb85a2399517163f009`. Branch: `refactor/cleanup`.
+Baseline numbers are in `REFACTOR_PLAN.md` §2.
 
-## Bugs found (logged, NOT fixed)
+## Bugs found
 
-These were found during the Phase 1 survey. Current behavior is left as-is unless you approve a fix, and any fix goes in its own commit, separate from the refactor.
-"Verified" means I reproduced it in a throwaway script against the baseline code. "By inspection" means I confirmed it by reading the code.
+Found during the survey (B1–B17) and while writing characterization tests (B18–B19).
+"Verified" means I reproduced it against the baseline code. "By inspection" means I confirmed it by reading the code.
+
+### Status
+
+| Status | Bugs | Notes |
+|---|---|---|
+| **Fixed** (separate commits, each with a regression test) | B2 `a9b84af`, B3 `4e7a21f`, B4 `6f1c10b`, B5 `643a699`, B15 `fc4e7a9`, B18 `5c7f515`, B19 `bcb81ba` | The pins in the approved characterization tests became the regression tests. |
+| **Fixed by an approved breaking change** | B13 `9ed4a0a` | `Domain.make_topounits` now raises. |
+| **Gone with deleted code** | B10 (`wind_direction`, step 4), B11 (`validate_met_vars`, §5.1) | – |
+| **Awaiting regression-test approval** | B1, B6, B7, B8, B9, B12, B14, B16 | See R-1…R-8 in `TEST_CHANGE_PROPOSALS.md`. B14's fix changes behavior (it rejects invalid `pack_scope`). |
+| **Design question, left as-is** | B17 | – |
+
+Line numbers in the table below refer to the baseline commit.
 
 | # | Location | Symptom | Suggested fix | Evidence |
 |---|---|---|---|---|
@@ -30,23 +42,106 @@ These were found during the Phase 1 survey. Current behavior is left as-is unles
 | B19 | `surf/sfile.py:1210` (`SurfaceFile.resize_dim`) | `assign_coords` with the new-length coordinate runs **before** the data variables are resized. So resizing any dim that a data variable uses always raises `ValueError: conflicting sizes`, and the method never works for its intended purpose. | Build the resized variables first, then assign the coordinate (or `ds.isel`/`ds.pad`). | Verified (pinned in T-8) |
 | B17 | `met/adapters/fluxnet.py:161` vs ERA5 | FLUXNET filters to `start_year..end_year` with no lookahead. ERA5 keeps the next Jan-1 00:00 for interval alignment. FLUXNET has no `INTERVAL_END_VARS`, so this is consistent today. Flagged only because TIMESTAMP_END-labelled fluxes are interval-end values too, so the same alignment question applies. | Decide whether FLUXNET fluxes should be relabelled to interval start like ERA5. | By inspection (design question) |
 
-## Remaining smells deliberately left alone
-
-To be filled in at wrap-up. Candidates so far:
-- Broad `except` blocks whose narrowing could change behavior (`BaseAdapter.pack_params`, `cmip_utils` retry loop, `met/validation` mode detection, `gee_utils.try_to_download_featurecollection`). Kept to preserve behavior.
-
 ## Per-module change log
 
-To be filled in during Phase 2.
+All changes are on `refactor/cleanup`. Refactor, breaking-change and bug-fix commits are kept separate.
+
+**Repo-wide**
+- ruff/mypy config added. `ruff format` applied (AST-identical; the commit is listed in `.git-blame-ignore-revs`).
+- Imports sorted and moved to the top. Annotations modernized.
+- 27 placeholder module docstrings replaced, and stale or conversational comments removed.
+
+**Per module**
+- **domains/domain**:
+  - `SAMPLING_PROVENANCE_COLUMNS` is shared with the exporter.
+  - Redundant CRS, `Path` and `str` conversions removed from `from_file`/`from_geometry`.
+  - Return types added.
+  - `make_topounits` raises instead of returning `None` (§5.3).
+- **domains/elm_domain**: counter-clockwise cell corners (B4).
+- **met/exporter**:
+  - Removed the never-called `_pass1_to_parquet_raw` and `_zone_mappings_path`, unused private params, an unreachable mode check, and redundant pack-scope branches.
+  - `domain.mode` is read directly; `filename_prefix` is initialized in `__init__`.
+  - Import aliases renamed (`utils` → `fs`, `dt` → `temporal`).
+  - Type hints added; the class docstring is rewritten to match the real API.
+- **met/temporal**:
+  - `is_feb29()` replaces six copies of the Feb-29 mask.
+  - `create_dtime` reuses `_numeric_dtime`; one `_LINEAR_VARS`/`_FFILL_VARS` definition.
+  - Old vs new outputs verified identical across 292 input combinations.
+- **met/writers**: unreachable dtype alias table and no-op chunk branches removed (verified identical across 225 combinations).
+- **met/adapters/era5**:
+  - Discarded `wind_direction` computation removed.
+  - Docstring now matches the real preprocessing.
+  - `id_column_for_csv` deprecated (§5.7).
+- **met/adapters/fluxnet**: uses `temporal.is_feb29`.
+- **met/validation**:
+  - Raw-mode quicklooks removed (§5.1).
+  - No backend switch at import (§5.4).
+  - Impossible netCDF4 `None` check removed.
+- **met/cmip_utils**:
+  - 77 unreachable lines removed.
+  - `extract_vars_from_files`, `cftime_date` and `summarize_search` removed (§5.1).
+- **elm/utils**:
+  - `validate_met_vars` and `gen_zone_mappings` removed (§5.1), so the module no longer imports `Domain`.
+  - `elm_data_dicts` builds its identical entries from the canonical constants.
+  - B2 and B3 fixed.
+- **geo/lonwrap, geo/zonal, geo/sampling, landuse**:
+  - One `LonWrap` definition; `normalize_lons` replaces the hand-rolled loops.
+  - `_median_step` variants merged; dead `_reduce_da` and unreachable guards removed.
+  - B5 and B18 fixed.
+- **io/attrs**:
+  - New `merge_global_attrs` / `utc_timestamp` replace three copies of the attribute merge and the deprecated `utcnow`.
+  - `apply_append_attrs` removed. `io/provenance` deleted and `io.fs.make_directory` removed (§5.1).
+- **surf/sfile**:
+  - Shared attribute merge; dead locals and the unused `_latlon_dim_names` removed; redundant checks simplified.
+  - `build_surface_dataset*` removed (§5.1).
+  - `engine=` deprecated (§5.7).
+  - B15 and B19 fixed.
+- **surf/schema**:
+  - Module docstring moved to the top.
+  - Unused export-policy, registration and validation helpers removed (§5.1).
+- **surf/validate**: docstring corrected (V-105, plus V-108 and V-109).
+- **integrations/earthengine/gee_utils**:
+  - Unused `_ROOT_DIR`/`_DATA_DIR` removed.
+  - `split_into_dfs`, `infer_id_field` and `featurecollection_to_df_loc` removed (§5.1).
+  - Docstrings fixed.
+- **`__init__`**: `__version__` comes from the package metadata (§5.5).
+- **pyproject / environment.yml**:
+  - Dependencies match the actual imports; `notebooks` and `plot` extras added (§5.6).
+  - ruff and mypy config added.
+
+## Remaining smells deliberately left alone
+
+- **Broad `except` blocks** whose narrowing could change behavior: `BaseAdapter.pack_params`, the `cmip_utils` retry loop and parquet fallback, `met/validation` mode detection, `gee_utils.try_to_download_featurecollection`, and the lazy `ee` import proxies. Kept to preserve behavior.
+- **`print` for progress and warnings** (about 60 calls): converting to logging was declined (decision 3).
+- **Plan steps 13–16**, paused because they have almost no tests:
+  - 13: share the Earth Engine proxy between `gee_utils` and `topomake`
+  - 14: dedupe the fluxnet timestamp parsing
+  - 15: dedupe the topomake combiner metadata
+  - 16: dedupe the quicklook plotting
+  - T-3, T-5 and T-6 would unblock them.
+- **Step 18 (splitting `sfile.py` and `gee_utils.py`)**: skipped because the question wasn't answered.
+- **Constants that disagree** (QBOT packing range 0.1 vs 0.04, DTBOT units `"unsure"`): preserved.
+- **Other unanswered questions, current behavior kept**:
+  - Two topounit-attach paths (§6 Q7).
+  - No fraction closure on the nearest-landuse path (§6 Q8).
+- **`surf/sample.SurfacePointSampler`**: a legacy sampler that parallels `geo.sampling`, kept because `surf.sample` is in the documented module list.
+- **Remaining mypy errors** (88), mostly xarray `Hashable` vs `str` and `None`-initialized Exporter attributes. Fixing the latter means restructuring `Exporter.run` state.
+- **One remaining ruff finding** (F841 in `gee_utils.validate_bands`): it is bug B7 and goes away with that fix.
+- **`dev/` and `elmtest/`**: kept (decision 2).
 
 ## Before / after
 
-| Metric | Before | After |
+| Metric | Before (`8b43332`) | After (`refactor/cleanup`) |
 |---|---|---|
-| Package LOC (src/dapper excl. dev) | 13,741 | – |
-| `ruff check` src (0.16 defaults, excl. dev) | 434 | – |
-| `ruff check` src (E4,E7,E9,F, excl. dev) | 70 | – |
-| `ruff format --check` src files needing reformat (excl. dev) | 39 / 48 | – |
-| mypy errors (excl. dev) | 100 in 17 files | – |
-| Coverage | 36% | – |
-| Tests | 47 passed, 1 skipped | – |
+| Package lines (src/dapper excl. dev), both formatted with ruff at 88 cols | 15,049 | 13,665 (−9.2%) |
+| Package lines as committed (baseline unformatted) | 13,741 | 13,665 |
+| Python statements (AST, excl. dev) | 5,767 | 5,213 (−9.6%) |
+| `ruff check` src with the project config (E4/E7/E9/F/I/UP/B) | 412 | 1 (B7) |
+| `ruff check` src, ruff 0.16 defaults (`--isolated`, excl. dev) | 434 | 71 |
+| `ruff check` src (E4,E7,E9,F, excl. dev) | 70 | 1 (B7) |
+| `ruff format --check` src files needing reformat | 39 / 48 | 0 / 47 |
+| mypy errors (excl. dev) | 100 in 17 files | 88 in 16 files |
+| Coverage (statements) | 36% (1,963 / 5,456) | 49% (2,451 / 4,974) |
+| Tests | 47 passed, 1 skipped | 82 passed, 1 skipped (+35 approved characterization/regression tests) |
+
+`git diff 8b43332 -- tests/` shows only the five **added** approved files (`tests/test_characterize_*.py`). All six original test files are byte-identical to the baseline.
