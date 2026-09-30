@@ -8,8 +8,6 @@
 
    .. autosummary::
    
-      build_surface_dataset
-      build_surface_dataset_cellset
       customize_surface
       write_surface_nc
    
