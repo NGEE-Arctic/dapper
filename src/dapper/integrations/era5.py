@@ -9,10 +9,10 @@ import tempfile
 import time
 import warnings
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Sequence
 from urllib.request import Request, urlopen
 
 import geopandas as gpd

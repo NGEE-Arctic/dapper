@@ -2,7 +2,7 @@
 
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -47,9 +47,9 @@ _NETCDF4_STRIP = {
 
 
 def build_surface_dataset(
-    sampled: Dict[str, Any],
+    sampled: dict[str, Any],
     *,
-    include: Optional[set[str]] = None,
+    include: set[str] | None = None,
     drop_non_spatial_arrays: bool = False,
 ) -> xr.Dataset:
     """
@@ -134,9 +134,9 @@ def build_surface_dataset(
 
 
 def build_surface_dataset_cellset(
-    sampled_list: List[Dict[str, Any]],
+    sampled_list: list[dict[str, Any]],
     *,
-    include: Optional[set[str]] = None,
+    include: set[str] | None = None,
     drop_non_spatial_arrays: bool = False,
 ) -> xr.Dataset:
     """
@@ -168,7 +168,7 @@ def build_surface_dataset_cellset(
     if include:
         names = [n for n in names if n in include]
 
-    data_vars: Dict[str, Any] = {}
+    data_vars: dict[str, Any] = {}
 
     for name in names:
         spec0 = sampled_list[0][name]
@@ -249,7 +249,7 @@ def write_surface_nc(
     ds2.attrs = merged
 
     closure_critical = closure_critical_variables(ds2.data_vars)
-    enc: Dict[str, dict] = {}
+    enc: dict[str, dict] = {}
     for v in ds2.data_vars:
         # Fill values must match dtype. Most float vars are written as float32,
         # while closure-critical fractions stay float64 to preserve exact sums.
@@ -270,7 +270,7 @@ class CustomizeError(ValueError):
 # --------- helpers reused across update/add ---------
 
 
-def _latlon_dim_names(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
+def _latlon_dim_names(ds: xr.Dataset) -> tuple[str | None, str | None]:
     lat_candidates = ("lsmlat", "lat", "latitude", "y")
     lon_candidates = ("lsmlon", "lon", "longitude", "x")
     lat = next((d for d in ds.dims if d in lat_candidates), None)
@@ -285,7 +285,7 @@ _DIM_ALIASES = {
 }
 
 
-def _resolve_dim_name(ds: xr.Dataset, reg_dim: str) -> Optional[str]:
+def _resolve_dim_name(ds: xr.Dataset, reg_dim: str) -> str | None:
     """Map a registry dim to the actual name used in ds (handles common aliases)."""
     candidates = _DIM_ALIASES.get(reg_dim, (reg_dim,))
     return next((d for d in ds.dims if d in candidates), None)
@@ -326,7 +326,7 @@ def _ensure_dataarray(value: ArrayLike, like: xr.DataArray) -> xr.DataArray:
     raise CustomizeError(f"Unsupported customization type: {type(value).__name__}")
 
 
-def _coerce_dtype(da: xr.DataArray, reg_dtype: Optional[str]) -> xr.DataArray:
+def _coerce_dtype(da: xr.DataArray, reg_dtype: str | None) -> xr.DataArray:
     """Cast to registry dtype when provided; disallow float↔int switches."""
     if not reg_dtype:
         return da
@@ -439,16 +439,16 @@ def _sanitize_netcdf4_encoding(var_enc: dict, dtype) -> dict:
 
 def customize_surface(
     src_path: str | Path,
-    customizations: Dict[str, Any],
-    nc_out: Optional[str | Path] = None,
+    customizations: dict[str, Any],
+    nc_out: str | Path | None = None,
     *,
     strict_registry: bool = True,
     allow_add: bool = True,
     run_validation: bool = False,
-    validator_kwargs: Optional[Dict[str, Any]] = None,
+    validator_kwargs: dict[str, Any] | None = None,
     units_policy: str = "enforce",  # <— default enforce
     engine: str = "netcdf4",  # future-proof, we sanitize netcdf4 above
-) -> Tuple[str, Optional["pd.DataFrame"]]:
+) -> tuple[str, Optional["pd.DataFrame"]]:
     """
     Update or add parameters in an existing ELM surface NetCDF (path-only API).
 
@@ -501,7 +501,7 @@ def customize_surface(
 
     lat_dim, lon_dim = _latlon_dim_names(ds)  # detected, not strictly required here
 
-    def _parse_spec(var: str, spec: Any) -> Tuple[Any, Optional[str], Optional[str]]:
+    def _parse_spec(var: str, spec: Any) -> tuple[Any, str | None, str | None]:
         """Return (value, dtype_override, units_override)."""
         if isinstance(spec, dict) and "value" in spec:
             return spec["value"], spec.get("dtype"), spec.get("units")
@@ -634,8 +634,8 @@ def customize_surface(
 def _surface_zonal_agg_policy_from_registry(
     ds_src: xr.Dataset,
     *,
-    include: Optional[set[str]],
-    exclude: Optional[set[str]],
+    include: set[str] | None,
+    exclude: set[str] | None,
 ) -> tuple[dict[str, str], set[str]]:
     """
     Returns:
@@ -705,11 +705,11 @@ class SurfaceFile:
     def __init__(
         self,
         ds: xr.Dataset,
-        registry: Optional[Dict[str, SC.ParDef]] = None,
+        registry: dict[str, SC.ParDef] | None = None,
     ) -> None:
         self.ds: xr.Dataset = ds
         # Fall back to global REGISTRY
-        self.registry: Dict[str, SC.ParDef] = registry or SC.REGISTRY
+        self.registry: dict[str, SC.ParDef] = registry or SC.REGISTRY
 
     # ------------------------------------------------------------------
     # Constructors
@@ -717,8 +717,8 @@ class SurfaceFile:
     @classmethod
     def from_netcdf(
         cls,
-        path: Union[str, Path],
-        registry: Optional[Dict[str, SC.ParDef]] = None,
+        path: str | Path,
+        registry: dict[str, SC.ParDef] | None = None,
         decode_times: bool = True,
     ) -> "SurfaceFile":
         """
@@ -735,10 +735,10 @@ class SurfaceFile:
         *,
         src_path: str | Path,
         decode_times: bool = True,
-        chunks: Optional[Dict[str, int]] = None,
-        include: Optional[set[str]] = None,
-        exclude: Optional[set[str]] = None,
-        registry: Optional[Dict[str, SC.ParDef]] = None,
+        chunks: dict[str, int] | None = None,
+        include: set[str] | None = None,
+        exclude: set[str] | None = None,
+        registry: dict[str, SC.ParDef] | None = None,
     ) -> "SurfaceFile":
         """
         Sample the global half-degree surface at (lat, lon) and return a 1x1 SurfaceFile.
@@ -769,10 +769,10 @@ class SurfaceFile:
         src_path: str | Path,
         *,
         decode_times: bool = True,
-        chunks: Optional[Dict[str, int]] = None,
-        include: Optional[set[str]] = None,
-        exclude: Optional[set[str]] = None,
-        registry: Optional[Dict[str, SC.ParDef]] = None,
+        chunks: dict[str, int] | None = None,
+        include: set[str] | None = None,
+        exclude: set[str] | None = None,
+        registry: dict[str, SC.ParDef] | None = None,
         attach_topounits: bool = True,
         sampling_method: Literal["nearest", "zonal"] = "nearest",
         lon_wrap: sampling.LonWrap = "auto",
@@ -987,17 +987,17 @@ class SurfaceFile:
         overwrite: bool = False,
         append_attrs=None,
         decode_times: bool = True,
-        chunks: Optional[Dict[str, int]] = None,
-        include: Optional[set[str]] = None,
-        exclude: Optional[set[str]] = None,
-        registry: Optional[Dict[str, SC.ParDef]] = None,
+        chunks: dict[str, int] | None = None,
+        include: set[str] | None = None,
+        exclude: set[str] | None = None,
+        registry: dict[str, SC.ParDef] | None = None,
         attach_topounits: bool = True,
         sampling_method: Literal["nearest", "zonal"] = "nearest",
         lon_wrap: sampling.LonWrap = "auto",
         agg_policy: dict[str, str] | None = None,
         validate: bool = False,
-        validator_kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Path]:
+        validator_kwargs: dict[str, Any] | None = None,
+    ) -> dict[str, Path]:
         """
         Export surface file(s) for a Domain.
 
@@ -1016,7 +1016,7 @@ class SurfaceFile:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        outputs: Dict[str, Path] = {}
+        outputs: dict[str, Path] = {}
 
         for run_id, run_dom in domain.iter_runs():
             run_id = str(run_id)
@@ -1079,7 +1079,7 @@ class SurfaceFile:
         df,
         id_col: str,
         *,
-        drop_cols: Optional[List[str]] = None,
+        drop_cols: list[str] | None = None,
     ) -> None:
         """
         Attach / update 1D parameters along `dim_name` using a DataFrame.
@@ -1329,7 +1329,7 @@ class SurfaceFile:
 
         self.ds = ds
 
-    def drop_params(self, names: Union[str, List[str]]) -> None:
+    def drop_params(self, names: str | list[str]) -> None:
         """
         Drop one or more data variables from the surface dataset.
         """
@@ -1416,7 +1416,7 @@ class SurfaceFile:
     # ------------------------------------------------------------------
     # Validation and writing
     # ------------------------------------------------------------------
-    def basic_registry_check(self) -> Dict[str, set[str]]:
+    def basic_registry_check(self) -> dict[str, set[str]]:
         """
         Quick registry sanity check.
 
@@ -1438,7 +1438,7 @@ class SurfaceFile:
         self,
         strict: bool = False,
         use_external_validator: bool = False,
-        validator_kwargs: Optional[Dict[str, Any]] = None,
+        validator_kwargs: dict[str, Any] | None = None,
     ):
         """
         Validate the surface Dataset.
@@ -1476,9 +1476,9 @@ class SurfaceFile:
 
     def to_netcdf(
         self,
-        path: Union[str, Path],
+        path: str | Path,
         overwrite: bool = False,
-        encoding: Optional[Dict[str, Dict[str, Any]]] = None,
+        encoding: dict[str, dict[str, Any]] | None = None,
         append_attrs: dict | None = None,
         dapper_attrs: dict | None = None,
         add_created_utc: bool = True,

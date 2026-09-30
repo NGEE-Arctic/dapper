@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
 
@@ -94,13 +95,13 @@ class ParDef:
         Extra NetCDF attributes (long_name, standard_name, etc.).
     """
 
-    dims: Tuple[str, ...]
+    dims: tuple[str, ...]
     dtype: str = "float32"
     units: str = ""
     doc: str = ""
     required_level: str = ""
-    attrs: Optional[Dict[str, Any]] = None
-    contexts: Tuple[str, ...] = ()
+    attrs: dict[str, Any] | None = None
+    contexts: tuple[str, ...] = ()
 
 
 def pdef(
@@ -109,7 +110,7 @@ def pdef(
     units: str = "",
     doc: str = "",
     required_level: str = "",
-    contexts: Tuple[str, ...] = (),
+    contexts: tuple[str, ...] = (),
     **attrs,
 ) -> ParDef:
     """
@@ -134,7 +135,7 @@ def pdef(
     )
 
 
-def register_many(names: Iterable[str], v: ParDef) -> Dict[str, ParDef]:
+def register_many(names: Iterable[str], v: ParDef) -> dict[str, ParDef]:
     """Register many variables with the same ParDef in one call."""
     return {name: v for name in names}
 
@@ -151,7 +152,7 @@ DIMS_SLOPE = "nlevslp,lsmlat,lsmlon"
 # This is the single source of truth. A small subset is populated now;
 # additional entries from report.rst can be merged here later.
 
-REGISTRY: Dict[str, ParDef] = {}
+REGISTRY: dict[str, ParDef] = {}
 
 for name, spec in SURFACE_VAR_SPECS.items():
     attrs = spec.get("attrs", {})
@@ -171,7 +172,7 @@ for name, spec in SURFACE_VAR_SPECS.items():
 # cross-variable rules. Per-variable "requiredness" is stored in
 # ParDef.required_level inside REGISTRY.
 
-SCHEMA: Dict[str, Dict] = {
+SCHEMA: dict[str, dict] = {
     "TIER0_CORE_COORD_MASK": {
         # Core spatial metadata & land mask
         "vars": ["LATIXY", "LONGXY", "AREA", "LANDFRAC_PFT", "PFTDATA_MASK"],
@@ -281,13 +282,13 @@ EXPORT_POLICIES = {
 # ---------------------- Runtime utilities --------------------------------
 
 
-def expand_registry(as_json: bool = False) -> Dict[str, Dict]:
+def expand_registry(as_json: bool = False) -> dict[str, dict]:
     """Return the full registry as plain dict (easy to dump/serialize)."""
     d = {k: asdict(v) for k, v in REGISTRY.items()}
     return d
 
 
-def validate_against_schema(present_vars: Iterable[str]) -> Dict[str, List[str]]:
+def validate_against_schema(present_vars: Iterable[str]) -> dict[str, list[str]]:
     """
     Validate a set of variable names against SCHEMA rules.
 
@@ -297,8 +298,8 @@ def validate_against_schema(present_vars: Iterable[str]) -> Dict[str, List[str]]
     - 'conditional' rules are enforced as warnings when violated.
     """
     present = set(present_vars)
-    errors: List[str] = []
-    warnings: List[str] = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     for tier, spec in SCHEMA.items():
         tier_vars = spec.get("vars", [])
@@ -335,7 +336,7 @@ def validate_against_schema(present_vars: Iterable[str]) -> Dict[str, List[str]]
 
 
 def propose_export_policy(
-    var: str, sizes: Dict[str, int], ParDef: ParDef | None = None
+    var: str, sizes: dict[str, int], ParDef: ParDef | None = None
 ):
     """Return a compact policy dict for a variable, based on its dims and overrides."""
     # override first

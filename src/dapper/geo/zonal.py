@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Sequence
+from typing import Literal
 
 import geopandas as gpd
 import numpy as np
@@ -338,7 +339,7 @@ def sample_gridded_dataset_polygons(
     agg_policy: dict[str, str] | None = None,
     default_float: str = "wmean",
     default_int: str = "wmode",
-    weights: "ZonalWeights | None" = None,  # NEW
+    weights: ZonalWeights | None = None,  # NEW
 ) -> xr.Dataset:
     """
     Zonal-sample spatial vars (those with BOTH lat_dim and lon_dim) onto target polygons.
