@@ -16,6 +16,24 @@ from shapely.geometry.base import BaseGeometry
 from dapper.geo.constants import LATLON_DECIMALS
 
 DomainMode = Literal["sites", "cellset"]
+
+# Sampling provenance columns that sampling backends may attach to Domain cells;
+# they travel into MET NetCDF attributes (see Exporter._site_attrs).
+SAMPLING_PROVENANCE_COLUMNS = (
+    "sampling_backend",
+    "sampling_dataset",
+    "sampling_reference_lon",
+    "sampling_reference_lat",
+    "sampling_grid_cell_count",
+    "sampling_grid_coordinates",
+    "sampling_grid_weights",
+    "sampling_requested_start",
+    "sampling_start",
+    "sampling_source_end",
+    "sampling_output_end",
+    "sampling_estimated_seconds",
+    "sampling_elapsed_seconds",
+)
 StepName = Literal["met", "topounits"]
 CellKind = Literal["site_points", "as_provided"]
 
@@ -661,19 +679,7 @@ class Domain:
             "sampled_geometry",
             "source_file",
             "feature_count",
-            "sampling_backend",
-            "sampling_dataset",
-            "sampling_reference_lon",
-            "sampling_reference_lat",
-            "sampling_grid_cell_count",
-            "sampling_grid_coordinates",
-            "sampling_grid_weights",
-            "sampling_requested_start",
-            "sampling_start",
-            "sampling_source_end",
-            "sampling_output_end",
-            "sampling_estimated_seconds",
-            "sampling_elapsed_seconds",
+            *SAMPLING_PROVENANCE_COLUMNS,
         )
         for col in provenance_columns:
             if col in gdf.columns:
