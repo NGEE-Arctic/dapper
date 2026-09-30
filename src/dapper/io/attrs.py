@@ -3,23 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, date, datetime
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import Any
-
-
-def apply_append_attrs(ds: Any, append_attrs: dict | None):
-    """Update xarray Dataset global attrs in a NetCDF-safe way."""
-    if not append_attrs:
-        return ds
-
-    for k, v in append_attrs.items():
-        if isinstance(v, Path):
-            v = str(v)
-        elif isinstance(v, (datetime, date)):
-            v = v.isoformat()
-        ds.attrs[str(k)] = v
-    return ds
 
 
 def utc_timestamp() -> str:

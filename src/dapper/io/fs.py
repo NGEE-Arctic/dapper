@@ -5,15 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def make_directory(path: str | Path, delete_all_contents: bool = False) -> Path:
-    """Create a directory (optionally clearing its contents)."""
-    p = Path(path)
-    p.mkdir(parents=True, exist_ok=True)
-    if delete_all_contents:
-        remove_directory_contents(p, remove_directory=False)
-    return p
-
-
 def remove_directory_contents(
     path: str | Path, *, remove_directory: bool = False
 ) -> None:

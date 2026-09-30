@@ -21,8 +21,7 @@ Used by :mod:`dapper.surf.sfile` (customization and topounit parameters) and
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any
 
 from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
@@ -88,11 +87,6 @@ def pdef(
         attrs=attrs or {},
         contexts=tuple(contexts or ()),
     )
-
-
-def register_many(names: Iterable[str], v: ParDef) -> dict[str, ParDef]:
-    """Register many variables with the same ParDef in one call."""
-    return {name: v for name in names}
 
 
 # Common dim-sets (reusable)
@@ -181,143 +175,5 @@ SCHEMA: dict[str, dict] = {
 
 # ------------- Export Policies (rule-based, dimension-aware) ------------
 
-EXPORT_POLICIES = {
-    # rules evaluated in order; first match wins
-    "rules": [
-        {
-            "when": {"dims": ("time", "lsmlat", "lsmlon")},
-            "policy": "MONTHLY_12_BANDS",
-            "band_name": lambda var, sizes: [
-                f"{var}_m{m:02d}" for m in range(1, sizes.get("time", 0) + 1)
-            ],
-            "note": "Export 12 monthly bands; optionally also annual_mean",
-        },
-        {
-            "when": {"dims": ("nlevsoi", "lsmlat", "lsmlon")},
-            "policy": "SOIL_TOP_LAYER_DEFAULT",
-            "band_name": lambda var, sizes: [
-                f"{var}_L{k:02d}" for k in range(sizes.get("nlevsoi", 0))
-            ],
-            "note": "Default L00; optionally L00/L05/L09 stack",
-        },
-        {
-            "when": {"dims": ("natpft", "lsmlat", "lsmlon")},
-            "policy": "PFT_ALL_BANDS",
-            "band_name": lambda var, sizes: [
-                f"{var}_pft{p:02d}" for p in range(sizes.get("natpft", 0))
-            ],
-            "note": "Export all PFT bands; optionally aggregated classes",
-        },
-        {
-            "when": {"dims": ("nlevslp", "lsmlat", "lsmlon")},
-            "policy": "SLOPE_REDUCE_DEFAULT",
-            "band_name": lambda var, sizes: [
-                f"{var}_slp{b:02d}" for b in range(sizes.get("nlevslp", 0))
-            ],
-            "note": "Default reduce (weighted mean); optionally keep all bins",
-        },
-        {
-            "when": {"dims": ("lsmlat", "lsmlon")},
-            "policy": "SINGLE_BAND",
-            "band_name": lambda var, sizes: [var],
-            "note": "Static 2D",
-        },
-    ],
-    # fine-grained overrides if you need them (keep small)
-    "overrides": {
-        # "PCT_SAND": {"policy": "SOIL_MULTI_BANDS_3", "band_keep": ["L00","L05","L09"]},
-        # "PCT_NAT_PFT": {"policy": "PFT_AGG_WGC", "band_keep": ["woody","grass","crop"]},
-    },
-}
-
 
 # ---------------------- Runtime utilities --------------------------------
-
-
-def expand_registry(as_json: bool = False) -> dict[str, dict]:
-    """Return the full registry as plain dict (easy to dump/serialize)."""
-    d = {k: asdict(v) for k, v in REGISTRY.items()}
-    return d
-
-
-def validate_against_schema(present_vars: Iterable[str]) -> dict[str, list[str]]:
-    """
-    Validate a set of variable names against SCHEMA rules.
-
-    - Per-variable requirement is taken from ParDef.required_level
-      (currently only 'required' is treated as hard-required).
-    - 'choose_one_of' groups are enforced at the tier level.
-    - 'conditional' rules are enforced as warnings when violated.
-    """
-    present = set(present_vars)
-    errors: list[str] = []
-    warnings: list[str] = []
-
-    for tier, spec in SCHEMA.items():
-        tier_vars = spec.get("vars", [])
-
-        # required vars in this tier: those with required_level == "required"
-        for vname in tier_vars:
-            pdef_obj = REGISTRY.get(vname)
-            if not pdef_obj:
-                continue  # allow schema to reference vars not yet in registry
-            if pdef_obj.required_level.lower() == "required" and vname not in present:
-                errors.append(f"{tier}: missing required var '{vname}'")
-
-        # choose_one_of groups
-        for group in spec.get("choose_one_of", []):
-            if isinstance(group, dict):
-                group_vars = group.get("vars", [])
-            else:
-                group_vars = list(group)
-            if group_vars and not (present & set(group_vars)):
-                errors.append(f"{tier}: need one of {group_vars}")
-
-        # conditional: driver presence implies dependent vars should also exist
-        for cond in spec.get("conditional", []):
-            driver = cond["if_var_present"]
-            deps = cond["then_require"]
-            if driver in present:
-                for dep in deps:
-                    if dep not in present:
-                        warnings.append(
-                            f"{tier}: '{dep}' is conditionally required because '{driver}' is present"
-                        )
-
-    return {"errors": errors, "warnings": warnings}
-
-
-def propose_export_policy(
-    var: str, sizes: dict[str, int], ParDef: ParDef | None = None
-):
-    """Return a compact policy dict for a variable, based on its dims and overrides."""
-    # override first
-    ov = EXPORT_POLICIES["overrides"].get(var)
-    if ov:
-        return {
-            "var": var,
-            "policy": ov["policy"],
-            "note": "override",
-            "bands": ov.get("band_keep", []),
-        }
-
-    dims = tuple(ParDef.dims if ParDef else ())
-    for rule in EXPORT_POLICIES["rules"]:
-        if dims == tuple(rule["when"]["dims"]):
-            bands = (
-                rule["band_name"](var, sizes) if callable(rule["band_name"]) else [var]
-            )
-            return {
-                "var": var,
-                "policy": rule["policy"],
-                "note": rule.get("note", ""),
-                "bands": bands,
-            }
-
-    # fallback
-    return {
-        "var": var,
-        "policy": "UNKNOWN",
-        "note": "no rule matched",
-        "bands": [var],
-    }

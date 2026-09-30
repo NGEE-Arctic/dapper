@@ -1,106 +1,9 @@
 """ELM MET helpers: humidity conversions, packing parameters, legacy tables."""
 
-import warnings
-from pathlib import Path
-
 import numpy as np
-import pandas as pd
 
-import dapper
 from dapper.config.metsources.era5 import RAW_TO_ELM
-from dapper.domains.domain import Domain
 from dapper.schemas.elm import ELM_REQUIRED, ELM_UNITS
-
-# NOTE: validate_met_vars currently depends on stats stored under docs/data.
-# We keep the concept around, but do not require those assets to exist at runtime.
-_ROOT_DIR = Path(next(iter(dapper.__path__))).parent.parent
-_DATA_DIR = _ROOT_DIR / "docs" / "data"
-
-
-def validate_met_vars(df):
-    """
-    Uses pre-computed statistics to ensure that the unit conversions resulted in
-    distributions for each variable that make sense.
-    """
-    # Load pre-computed variable statistics (optional; not shipped in some installs)
-    path_stats = _DATA_DIR / "elm_met_var_stats.csv"
-    if not path_stats.exists():
-        warnings.warn(
-            f"validate_met_vars: stats file not found at {path_stats}. "
-            "Skipping validation (this is expected if docs/data isn't installed).",
-            RuntimeWarning,
-        )
-        return
-    sdf = pd.read_csv(path_stats, index_col=0)
-
-    # Determine which variables can/can't be validated
-    namemap = elm_data_dicts()["e5namemap"]
-    nostats = []
-    for c in df.columns:
-        if c in ["pid", "date"]:
-            continue
-        if c in namemap:
-            if namemap[c] in sdf.columns:
-                continue
-            else:
-                nostats.append(c)
-        else:
-            nostats.append(c)
-    check_vars = set(df.columns) - set(nostats) - set(["pid", "date"])
-
-    # Perform the validation of data ranges and orders of magnitude
-    for v in check_vars:
-        dmean, dmin, dmax = df[v].mean(), df[v].min(), df[v].max()
-
-        this_stats = sdf[namemap[v]]
-        vmean, vmin, vmax = this_stats["mean"], this_stats["min"], this_stats["max"]
-
-        # Check order of magnitude
-        oom_dif = np.log10(vmean) - np.log10(dmean)
-        if abs(oom_dif) > 0.5:
-            print(
-                "HIGH CONCERN: {} is {} orders of magnitude different mean than the reference variable {}.".format(
-                    v, f"{oom_dif:.1f}", namemap[v]
-                )
-            )
-
-        # Check range
-        frac_beyond_range = np.sum(
-            np.logical_or(df[v].values > vmax, df[v].values < vmin)
-        ) / len(df)
-        if frac_beyond_range > 0.1:  # More than 10% raise concern
-            print(
-                f"LOW CONCERN: {int(frac_beyond_range * 100)}% of the values in {v} are beyond the range of the reference variable {namemap[v]}."
-            )
-
-        # OLMT provided the following code as well: see https://github.com/dmricciuto/OLMT/blob/ca01781f4925e4aad32cc697c2d09eb94eddd920/metdata_tools/site/data_to_elmbypass.py#L30
-        # Use the OLMT ranges as an additional check
-        olmt_vars = ["TBOT", "RH", "WIND", "PSRF", "FSDS", "PRECTmms"]
-        olmt_mins = [180.00, 0, 0, 8e4, 0, 0]
-        olmt_maxs = [350.00, 100.0, 80, 1.5e5, 2500, 15]
-        if namemap[v] in olmt_vars:
-            if (
-                dmax > olmt_maxs[olmt_vars.index(namemap[v])]
-                or dmin < olmt_mins[olmt_vars.index(namemap[v])]
-            ):
-                print(
-                    f"MED CONCERN: the max and/or min values in {v} exceed the expected range provided by OLMT (variable name {namemap[v]})."
-                )
-
-    if len(nostats) > 0:
-        print(
-            f"No reference statistics were available for the following variables, so their ranges were not validated: {nostats}"
-        )
-
-    # Perform validation of negative values
-    nonneg_bands = elm_data_dicts()["nonneg"]
-    for c in df.columns:
-        if c in nonneg_bands:
-            negs = df[c] < 0
-            if sum(negs) > 0:
-                print({f"Negative values detected in variable {c}"})
-
-    return
 
 
 def compute_humidities(temp, dewpoint_temp, surf_pressure):
@@ -307,56 +210,6 @@ def elm_data_dicts():
         "elm_required_bands": e5_required_bands,
         "short_names": e5_to_elm_short_name,
     }
-
-
-def gen_zone_mappings(domain_or_df, site: bool = False):
-    """
-    Create a dataframe of zone mappings.
-
-    Parameters
-    ----------
-    domain_or_df : Domain or (geo)DataFrame
-        - Preferred: a ``dapper.domain.Domain`` instance whose ``gdf`` has
-          at least ['gid','lon','lat','zone'].
-        - Legacy: a df_loc-style (geo)DataFrame with the same columns.
-
-    site : bool, default False
-        If False:
-            Returns a DataFrame with columns ['lon', 'lat', 'zone', 'id'].
-        If True:
-            Returns a dictionary: {gid: single-row DataFrame}.
-    """
-
-    # Accept either Domain or raw df_loc for backward compatibility
-    if isinstance(domain_or_df, Domain):
-        # In the refactored Domain, "cells" is the run-level geometry table.
-        df_loc = domain_or_df.ensure_cells_lon_lat().cells
-    else:
-        df_loc = domain_or_df
-
-    # Base mapping
-    # Ensure a zone column exists (default to 1 like Domain.to_df_loc()).
-    if "zone" not in df_loc.columns:
-        df_loc = df_loc.copy()
-        df_loc["zone"] = 1
-
-    zone_mapping = df_loc[["lon", "lat", "zone"]].copy()
-    zone_mapping["lon"] = zone_mapping["lon"] % 360  # ELM uses 0–360 longitudes
-    zone_mapping["id"] = np.arange(1, len(zone_mapping) + 1)
-    zone_mapping["zone"] = zone_mapping["zone"].astype(int).astype(str).str.zfill(2)
-
-    if site:
-        # Override ID and zone to just "01"
-        zone_mapping["id"] = 1
-        zone_mapping["zone"] = "01"
-
-        # Export a dictionary of single-row DataFrames
-        zone_mapping_site = {
-            gid: zone_mapping.iloc[[i]] for i, gid in enumerate(df_loc["gid"].values)
-        }
-        return zone_mapping_site
-
-    return zone_mapping
 
 
 def elm_var_packing_params(elm_var, data=(), dtype=np.int16):

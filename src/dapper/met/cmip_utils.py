@@ -17,7 +17,7 @@ Typical workflow:
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
 
@@ -99,27 +99,6 @@ def search_cmip6(params: dict, col=None) -> pd.DataFrame:
     col = col or open_cmip6_catalog()
     matches = col.search(**search_args)
     return matches.df.copy()
-
-
-def summarize_search(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convenience: quick summary of what you matched.
-    Returns a small table you can print/log.
-    """
-    cols = [
-        c
-        for c in ["experiment_id", "table_id", "variable_id", "member_id", "grid_label"]
-        if c in df.columns
-    ]
-    if not cols:
-        return pd.DataFrame({"rows": [len(df)]})
-    return (
-        df.groupby(cols, dropna=False)
-        .size()
-        .rename("n")
-        .reset_index()
-        .sort_values("n", ascending=False)
-    )
 
 
 def dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
@@ -730,101 +709,3 @@ def download_pangeo(
             ds.to_netcdf(dir_out / filename)
         except Exception as e:
             print(f"Failed to download {filename}: {e}")
-
-
-def extract_vars_from_files(
-    files: Iterable[str | Path],
-    start_date: str,
-    end_date: str,
-    path_out: str | Path,
-):
-    """
-    Robust CMIP6 NetCDF merger for multiple calendars — using CFDatetimeCoder.
-    This is slow but robust.
-    """
-    from tqdm import tqdm
-
-    all_dfs: list[pd.DataFrame] = []
-    time_coder = xr.coding.times.CFDatetimeCoder(use_cftime=True)
-
-    for file in tqdm(list(files), desc="Processing"):
-        try:
-            ds = xr.open_dataset(str(file), decode_times=time_coder)
-
-            varnames = [
-                v
-                for v in ds.data_vars
-                if {"time", "lat", "lon"}.intersection(ds[v].dims)
-            ]
-            for var in varnames:
-                arr = ds[var]
-                time = ds["time"].values
-
-                if isinstance(time[0], np.datetime64):
-                    times = pd.to_datetime(time)
-                    mask = (times >= start_date) & (times <= end_date)
-                else:
-                    times = time
-                    mask = np.array(
-                        [
-                            (t >= cftime_date(start_date, t))
-                            and (t <= cftime_date(end_date, t))
-                            for t in time
-                        ]
-                    )
-
-                values = arr.values[mask]
-                filtered_times = np.array(times)[mask]
-
-                lon = (
-                    ds["lon"].values.item() if ds["lon"].size == 1 else ds["lon"].values
-                )
-                lat = (
-                    ds["lat"].values.item() if ds["lat"].size == 1 else ds["lat"].values
-                )
-
-                parts = Path(file).stem.split("_")
-                model = parts[1] if len(parts) > 1 else ""
-                ssp = parts[2] if len(parts) > 2 else ""
-
-                df1 = pd.DataFrame(
-                    {
-                        "date": filtered_times,
-                        "lon": lon,
-                        "lat": lat,
-                        "value": values,
-                        "var": var,
-                        "model": model,
-                        "ssp": ssp,
-                    }
-                )
-                all_dfs.append(df1)
-
-        except Exception as e:
-            print(f"Failed: {file} — {e}")
-
-    path_out = Path(path_out)
-    path_out.parent.mkdir(parents=True, exist_ok=True)
-
-    if all_dfs:
-        out_df = pd.concat(all_dfs, ignore_index=True)
-        if not np.issubdtype(out_df["date"].dtype, np.datetime64):
-            out_df["date"] = out_df["date"].astype(str)
-        out_df.to_csv(path_out, index=False)
-        print(f"Saved to {path_out}")
-    else:
-        print("No valid data extracted.")
-
-
-def cftime_date(string_date: str, sample_cftime):
-    """
-    Convert YYYY-MM-DD to same cftime type as sample_cftime.
-    """
-    import cftime
-
-    y, m, d = map(int, string_date.split("-"))
-    if isinstance(sample_cftime, cftime.DatetimeNoLeap):
-        return cftime.DatetimeNoLeap(y, m, d)
-    if isinstance(sample_cftime, cftime.Datetime360Day):
-        return cftime.Datetime360Day(y, m, min(d, 30))
-    return cftime.DatetimeProlepticGregorian(y, m, d)

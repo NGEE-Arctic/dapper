@@ -295,36 +295,6 @@ def _gee_boundary_label(value):
     return value.strftime("%Y-%m-%d_%H%M")
 
 
-def split_into_dfs(path_csv):
-    """
-    Splits a GEE-exported csv (from sample_e5lh_at_points) into a dictionary of dataframes
-    based on the unique values in the 'pid' column.
-    """
-    df = pd.read_csv(path_csv)
-    return {k: group for k, group in df.groupby("pid")}
-
-
-def infer_id_field(columns, verbose=False):
-    """
-    Tries to discern the id field from a list of columns.
-    Used when id_col is not specified.
-    """
-    poss_id = [c for c in columns if "id" in c]
-    if len(poss_id) == 0:
-        raise NameError(
-            "Could not infer id column. Specify it with 'id_col' kwarg when calling e5lh_to_elm()."
-        )
-    else:
-        poss_id_lens = [len(pi) for pi in poss_id]
-        id_col = poss_id[poss_id_lens.index(min(poss_id_lens))]
-        if verbose:
-            print(
-                f"Inferred '{id_col}' as id column. If this is not correct, re-run this function and specify 'id_col' kwarg."
-            )
-
-    return id_col
-
-
 def kill_all_tasks(verbose=True):
     """Cancel all Earth Engine tasks visible to the current account."""
 
@@ -478,16 +448,6 @@ def featurecollection_to_domain(
     # A FeatureCollection is (almost always) multiple features; make that explicit.
     # Use sites-mode: one run per feature.
     return Domain.from_gdf(gdf_loc, name=name, mode=mode, domain_nc=domain_nc)
-
-
-def featurecollection_to_df_loc(fc, name="gee"):
-    """
-    Legacy wrapper: convert a FeatureCollection to a df_loc-style GeoDataFrame.
-
-    Prefer `featurecollection_to_domain(fc).cells` in new code.
-    """
-    dom = featurecollection_to_domain(fc, name=name)
-    return dom.cells
 
 
 def sample_e5lh(params, domain_name=None, skip_tasks=False):
