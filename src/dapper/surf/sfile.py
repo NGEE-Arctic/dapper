@@ -256,14 +256,6 @@ class CustomizeError(ValueError):
 # --------- helpers reused across update/add ---------
 
 
-def _latlon_dim_names(ds: xr.Dataset) -> tuple[str | None, str | None]:
-    lat_candidates = ("lsmlat", "lat", "latitude", "y")
-    lon_candidates = ("lsmlon", "lon", "longitude", "x")
-    lat = next((d for d in ds.dims if d in lat_candidates), None)
-    lon = next((d for d in ds.dims if d in lon_candidates), None)
-    return lat, lon
-
-
 _DIM_ALIASES = {
     "lsmlat": ("lsmlat", "lat", "latitude", "y"),
     "lsmlon": ("lsmlon", "lon", "longitude", "x"),
