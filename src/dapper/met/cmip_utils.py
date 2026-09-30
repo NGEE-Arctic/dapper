@@ -698,7 +698,7 @@ def download_pangeo(
                         if _lon is not None and _lon < 0:
                             _lon = _lon % 360
                         if _lon_bounds is not None:
-                            _lon_bounds = tuple(l % 360 for l in _lon_bounds)
+                            _lon_bounds = tuple(b % 360 for b in _lon_bounds)
                 except Exception:
                     pass
 

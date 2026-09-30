@@ -1245,7 +1245,7 @@ class SurfaceFile:
             # normalize to 1.0 (decimal fraction) just in case
             vals = 1.0 * (vals / s)
 
-            for tid, v in zip(grp[id_col].astype(str).tolist(), vals):
+            for tid, v in zip(grp[id_col].astype(str).tolist(), vals, strict=False):
                 k = id_to_k[tid]
                 pct[k, j, 0] = float(v)
 

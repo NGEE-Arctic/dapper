@@ -68,9 +68,7 @@ def validate_met_vars(df):
         ) / len(df)
         if frac_beyond_range > 0.1:  # More than 10% raise concern
             print(
-                "LOW CONCERN: {}% of the values in {} are beyond the range of the reference variable {}.".format(
-                    int(frac_beyond_range * 100), v, namemap[v]
-                )
+                f"LOW CONCERN: {int(frac_beyond_range * 100)}% of the values in {v} are beyond the range of the reference variable {namemap[v]}."
             )
 
         # OLMT provided the following code as well: see https://github.com/dmricciuto/OLMT/blob/ca01781f4925e4aad32cc697c2d09eb94eddd920/metdata_tools/site/data_to_elmbypass.py#L30
@@ -84,16 +82,12 @@ def validate_met_vars(df):
                 or dmin < olmt_mins[olmt_vars.index(namemap[v])]
             ):
                 print(
-                    "MED CONCERN: the max and/or min values in {} exceed the expected range provided by OLMT (variable name {}).".format(
-                        v, namemap[v]
-                    )
+                    f"MED CONCERN: the max and/or min values in {v} exceed the expected range provided by OLMT (variable name {namemap[v]})."
                 )
 
     if len(nostats) > 0:
         print(
-            "No reference statistics were available for the following variables, so their ranges were not validated: {}".format(
-                nostats
-            )
+            f"No reference statistics were available for the following variables, so their ranges were not validated: {nostats}"
         )
 
     # Perform validation of negative values
@@ -102,7 +96,7 @@ def validate_met_vars(df):
         if c in nonneg_bands:
             negs = df[c] < 0
             if sum(negs) > 0:
-                print({"Negative values detected in variable {}".format(c)})
+                print({f"Negative values detected in variable {c}"})
 
     return
 
@@ -411,7 +405,7 @@ def gen_zone_mappings(domain_or_df, site: bool = False):
     return zone_mapping
 
 
-def elm_var_packing_params(elm_var, data=[], dtype=np.int16):
+def elm_var_packing_params(elm_var, data=(), dtype=np.int16):
     """
     Compute robust offset and scale factor for BYPASS packing.
     Uses the preset range if `data` is empty, else the data min/max.

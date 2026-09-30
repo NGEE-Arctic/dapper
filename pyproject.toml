@@ -56,6 +56,13 @@ extend-exclude = ["src/dapper/dev", "tests", "docs", "workspace"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+# B028: adding stacklevel would change where existing warnings are attributed.
+ignore = ["B028"]
+
+[tool.ruff.lint.per-file-ignores]
+# Closures are called within the same loop iteration, so late binding is safe.
+"src/dapper/met/cmip_utils.py" = ["B023"]
+"src/dapper/met/validation.py" = ["B023"]
 
 [tool.mypy]
 # No python_version pin: numpy>=2.5 stubs need 3.12 syntax.

@@ -685,7 +685,7 @@ def _format_grid_values(cells: pd.DataFrame, column: str) -> str:
         return ", ".join(f"{value:.8f}" for value in cells[column])
     return "; ".join(
         f"({lon:.1f}, {lat:.1f})"
-        for lon, lat in zip(cells["longitude"], cells["latitude"])
+        for lon, lat in zip(cells["longitude"], cells["latitude"], strict=False)
     )
 
 
@@ -818,7 +818,7 @@ def _sample_arco(
 
     records = []
     per_request_estimate = plan.estimated_seconds / max(1, plan.feature_count)
-    for spec, safe_name in zip(specs, safe_names):
+    for spec, safe_name in zip(specs, safe_names, strict=False):
         output_csv = output_dir / f"era5_land_arco_{safe_name}.csv"
         if output_csv.exists() and not overwrite:
             raise FileExistsError(f"{output_csv} already exists (overwrite=False).")

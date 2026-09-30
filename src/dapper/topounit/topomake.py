@@ -1057,8 +1057,8 @@ def make_topounits_for_domain(
 
     parts = []
     for row in gdf.itertuples(index=False):
-        gid = str(getattr(row, "gid"))
-        geom = getattr(row, "geometry")
+        gid = str(row.gid)
+        geom = row.geometry
 
         if verbose:
             print(f"[topounits] gid={gid}: building topounits...")
