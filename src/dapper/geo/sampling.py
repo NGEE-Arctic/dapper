@@ -18,6 +18,7 @@ SampleMethod = Literal["nearest"]
 @dataclass(frozen=True)
 class LatLonSpec:
     """Minimal spec for mapping (lat, lon) -> (i, j) in a gridded dataset."""
+
     lat_var: str
     lon_var: str
     lat_dim: str
@@ -63,6 +64,7 @@ def infer_lat_lon_vars(ds: xr.Dataset) -> tuple[str, str]:
 
 def _to_0_360(lon_da: xr.DataArray) -> xr.DataArray:
     return ((lon_da % 360.0) + 360.0) % 360.0
+
 
 def _lon_distance_deg(lon_vec: np.ndarray, lon0: float) -> np.ndarray:
     """
@@ -127,6 +129,7 @@ def infer_latlon_spec(
         lat_1d=np.asarray(lat_1d),
         lon_1d=np.asarray(lon_1d),
     )
+
 
 def infer_grid_metadata(
     ds: xr.Dataset,
@@ -202,6 +205,7 @@ def infer_grid_metadata(
 
     return meta
 
+
 def nearest_ij(spec: LatLonSpec, lat: float, lon: float) -> tuple[int, int]:
     """
     Nearest-neighbor (i, j) on a regular lat/lon grid (lat_1d, lon_1d).
@@ -212,7 +216,9 @@ def nearest_ij(spec: LatLonSpec, lat: float, lon: float) -> tuple[int, int]:
     return i, j
 
 
-def _reorder_like_source(var_da: xr.DataArray, src_dims: Sequence[str], lat_dim: str, lon_dim: str) -> xr.DataArray:
+def _reorder_like_source(
+    var_da: xr.DataArray, src_dims: Sequence[str], lat_dim: str, lon_dim: str
+) -> xr.DataArray:
     """
     After sampling/concat, force dimension order to match source
     (with spatial dims in the same relative position).
@@ -271,7 +277,9 @@ def sample_gridded_dataset_points(
         drop = set(vars_drop)
         data_vars = [v for v in data_vars if v not in drop]
 
-    spatial_vars = [v for v in data_vars if (lat_dim in ds[v].dims and lon_dim in ds[v].dims)]
+    spatial_vars = [
+        v for v in data_vars if (lat_dim in ds[v].dims and lon_dim in ds[v].dims)
+    ]
     non_spatial_vars = [v for v in data_vars if v not in spatial_vars]
 
     # Build spatial-only sampled datasets and concat along lat_dim.
@@ -286,7 +294,9 @@ def sample_gridded_dataset_points(
 
     # Force per-variable dimension ordering to match the source dataset.
     for v in spatial_vars:
-        out_spatial[v] = _reorder_like_source(out_spatial[v], ds[v].dims, lat_dim, lon_dim)
+        out_spatial[v] = _reorder_like_source(
+            out_spatial[v], ds[v].dims, lat_dim, lon_dim
+        )
 
     # Merge in non-spatial vars once (YEAR, time, scalar strings, etc.)
     out = xr.merge([out_spatial, ds[non_spatial_vars]])
@@ -307,7 +317,7 @@ def write_netcdf(
     add_created_utc: bool = True,
 ) -> Path:
     """Write a Dataset to NetCDF with optional encoding and attribute handling."""
-    
+
     out_path = Path(out_path)
 
     encoding = {}
@@ -338,6 +348,7 @@ def write_netcdf(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ds2.to_netcdf(out_path, encoding=encoding)
     return out_path
+
 
 def points_to_nearest_cells(
     ds: xr.Dataset,
@@ -374,8 +385,12 @@ def points_to_nearest_cells(
         lon_n = normalize_lon(lon0, spec.lon_wrap)
         i, j = nearest_ij(spec, lat0, lon0)
 
-        lat_cell = float(ds[spec.lat_var].isel({spec.lat_dim: i, spec.lon_dim: j}).values)
-        lon_cell = float(ds[spec.lon_var].isel({spec.lat_dim: i, spec.lon_dim: j}).values)
+        lat_cell = float(
+            ds[spec.lat_var].isel({spec.lat_dim: i, spec.lon_dim: j}).values
+        )
+        lon_cell = float(
+            ds[spec.lon_var].isel({spec.lat_dim: i, spec.lon_dim: j}).values
+        )
 
         rows.append(
             {

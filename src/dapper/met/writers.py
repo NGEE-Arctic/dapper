@@ -10,6 +10,7 @@ from dapper.met.temporal import normalize_calendar
 
 # --------------------------- chunking helper ---------------------------
 
+
 def _infer_dt_hours(dtime_vals, dtime_units: str) -> float:
     """Infer timestep (hours) from numeric DTIME and CF-like units string."""
     arr = np.asarray(dtime_vals, dtype=float)
@@ -113,7 +114,9 @@ def _compute_auto_chunks(
             p *= int(max(1, v))
         return p
 
-    other_prod = prod(chunks[:t_axis] + chunks[t_axis+1:])  # should be 1 for our patterns
+    other_prod = prod(
+        chunks[:t_axis] + chunks[t_axis + 1 :]
+    )  # should be 1 for our patterns
     other_bytes = max(elem_bytes * other_prod, elem_bytes)
 
     # Start with t_seed
@@ -143,7 +146,9 @@ def _compute_auto_chunks(
 
     return tuple(chunks)
 
+
 # --------------------------- initialize / append ---------------------------
+
 
 def initialize_met_netcdf(
     *,
@@ -223,7 +228,7 @@ def initialize_met_netcdf(
         vtime.setncattr("calendar", str(calendar))
 
         # Other coords
-        for spec in (coord_specs or []):
+        for spec in coord_specs or []:
             cname = spec["name"]
             cdtype = spec.get("dtype", "f4")
             cdims = tuple(spec["dims"])
@@ -235,15 +240,22 @@ def initialize_met_netcdf(
                 cv.setncattr(str(ak), av)
 
         # Data variable
-        create_kwargs = dict(zlib=bool(zlib), shuffle=bool(shuffle),
-                             complevel=int(complevel), fill_value=fill_value)
+        create_kwargs = dict(
+            zlib=bool(zlib),
+            shuffle=bool(shuffle),
+            complevel=int(complevel),
+            fill_value=fill_value,
+        )
         if chunks is not None:
             create_kwargs["chunksizes"] = tuple(int(x) for x in chunks)
 
         v = ds.createVariable(var_name, dtype, tuple(dims), **create_kwargs)
         v.setncattr("add_offset", float(add_offset))
         v.setncattr("scale_factor", float(scale_factor))
-        v.setncattr("missing_value", np.int16(fill_value) if _dtype_nbytes(dtype) == 2 else fill_value)
+        v.setncattr(
+            "missing_value",
+            np.int16(fill_value) if _dtype_nbytes(dtype) == 2 else fill_value,
+        )
 
         # Per-variable attributes (units, long_name, etc.)
         if var_attrs:
@@ -265,8 +277,10 @@ def append_met_netcdf(
     *,
     path_nc,
     var_name: str,
-    data,                         # 1D time series or ND slice consistent with indexers
-    indexers: dict[str, int | slice],  # e.g., {"n": isite, "DTIME": slice(0, nt)} or {"DTIME": slice(0, nt), "lat": iy, "lon": ix}
+    data,  # 1D time series or ND slice consistent with indexers
+    indexers: dict[
+        str, int | slice
+    ],  # e.g., {"n": isite, "DTIME": slice(0, nt)} or {"DTIME": slice(0, nt), "lat": iy, "lon": ix}
 ):
     """
     Append `data` to variable `var_name` using `indexers` to select the region.

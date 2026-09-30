@@ -51,9 +51,10 @@ class ERA5Adapter(BaseAdapter):
       ``dewpoint_temperature_2m``, and ``surface_pressure`` are present.
     - Precipitation conversion uses ``m/hr → mm/s`` via division by ``3.6``.
     """
+
     # These are just for netCDF metadata
     SOURCE_NAME = "ERA5-Land hourly reanalysis"
-    DRIVER_TAG  = "ERA5"
+    DRIVER_TAG = "ERA5"
     INTERVAL_END_VARS = ("FSDS", "FLDS", "PRECTmms")
     SOURCE_INTERVAL_HOURS = 1.0
     GEE_COLLECTION_START = pd.Timestamp("1950-01-01 01:00:00")
@@ -62,7 +63,7 @@ class ERA5Adapter(BaseAdapter):
 
     def discover_files(self, csv_directory, calendar, *, clip_to_full_years=None):
         """Discover ERA5 CSV shards in a directory and infer the inclusive year range."""
-        
+
         csv_directory = Path(csv_directory)
 
         # ignore directories; only pick real files that end with .csv (case-insensitive)
@@ -86,7 +87,7 @@ class ERA5Adapter(BaseAdapter):
 
     def id_column_for_csv(self, df_csv, id_col):
         """Return the required identifier column name expected in ERA5 CSV shards ("gid")."""
-        
+
         if "gid" not in df_csv.columns:
             raise KeyError("Expected 'gid' column in input CSV.")
         return "gid"
@@ -134,7 +135,9 @@ class ERA5Adapter(BaseAdapter):
         # --- rename to canonical ELM names based on RAW_TO_ELM ---
         want_canon = set(elm_required_vars(dformat))  # includes LONGXY/LATIXY/time
         # keep only mappings that land in required canonical vars
-        rename_map = {src: canon for src, canon in RAW_TO_ELM.items() if canon in want_canon}
+        rename_map = {
+            src: canon for src, canon in RAW_TO_ELM.items() if canon in want_canon
+        }
         df = df.rename(columns=rename_map)
 
         # coords/time to canonical names
@@ -148,7 +151,9 @@ class ERA5Adapter(BaseAdapter):
         # --- final selection/order ---
         # Remove coords/meta from the "required data vars" list for column ordering
         coord_meta = {"LONGXY", "LATIXY", "time", "gid", "zone"}
-        required_data_vars = [v for v in elm_required_vars(dformat) if v not in coord_meta]
+        required_data_vars = [
+            v for v in elm_required_vars(dformat) if v not in coord_meta
+        ]
         final_cols = required_data_vars + ["LONGXY", "LATIXY", "time", "gid", "zone"]
 
         # Keep only those that exist (some formats/inputs may not provide all)
@@ -182,7 +187,9 @@ class ERA5Adapter(BaseAdapter):
             "interval_start_variables": ", ".join(self.INTERVAL_END_VARS),
             "source_interval_hours": self.SOURCE_INTERVAL_HOURS,
         }
-        if options.get("target_start") == self.GEE_COLLECTION_START - pd.Timedelta(hours=1):
+        if options.get("target_start") == self.GEE_COLLECTION_START - pd.Timedelta(
+            hours=1
+        ):
             attrs["initial_state_fill"] = (
                 "1950-01-01 00:00 instantaneous states filled from the earliest "
                 "available values because the GEE collection starts at 01:00"
@@ -191,7 +198,7 @@ class ERA5Adapter(BaseAdapter):
 
     def required_vars(self, dformat):
         """Return the canonical ELM variables required for the requested output format."""
-        
+
         return elm_required_vars(dformat)
 
     # ---------------- packing ----------------
@@ -199,8 +206,10 @@ class ERA5Adapter(BaseAdapter):
     def pack_params(self, elm_var, data=None):
         # Delegate to your existing robust packer (range→offset/scale)
         """Return (add_offset, scale_factor) used to pack a variable for NetCDF output."""
-        
-        ao, sf = eu.elm_var_packing_params(elm_var, data=(data if data is not None else []))
+
+        ao, sf = eu.elm_var_packing_params(
+            elm_var, data=(data if data is not None else [])
+        )
         return float(ao), float(sf)
 
     # ---------------- internal: ERA5 unit conversions ----------------
@@ -212,7 +221,10 @@ class ERA5Adapter(BaseAdapter):
         out = df.copy()
 
         # Wind speed from u,v
-        if "u_component_of_wind_10m" in out.columns and "v_component_of_wind_10m" in out.columns:
+        if (
+            "u_component_of_wind_10m" in out.columns
+            and "v_component_of_wind_10m" in out.columns
+        ):
             u = out["u_component_of_wind_10m"].values
             v = out["v_component_of_wind_10m"].values
             out["wind_speed"] = np.sqrt(u**2 + v**2)
@@ -225,7 +237,9 @@ class ERA5Adapter(BaseAdapter):
 
         # Precip: meters/hour → mm/s
         if "total_precipitation_hourly" in out.columns:
-            out["total_precipitation_hourly"] = out["total_precipitation_hourly"].values / 3.6
+            out["total_precipitation_hourly"] = (
+                out["total_precipitation_hourly"].values / 3.6
+            )
 
         # SW/LW: J/hr/m2 → W/m2
         if "surface_solar_radiation_downwards_hourly" in out.columns:

@@ -6,6 +6,7 @@ try:
 except Exception:  # pragma: no cover
     ee = None  # type: ignore
 
+
 def _require_ee_global():
     """Import Earth Engine lazily and bind it to the module global 'ee'."""
     global ee
@@ -20,8 +21,10 @@ def _require_ee_global():
         ee = _ee
     return ee
 
+
 # If Earth Engine is not importable, expose a proxy that raises a clear error on use.
 if ee is None:  # pragma: no cover
+
     class _EEProxy:
         def __getattr__(self, name):
             return getattr(_require_ee_global(), name)
@@ -37,7 +40,14 @@ from datetime import datetime, timedelta, timezone
 from shapely.ops import unary_union
 from shapely.geometry import Polygon, shape
 from dateutil.relativedelta import relativedelta
-from shapely.geometry import Point, Polygon, MultiPolygon, LineString, MultiLineString, GeometryCollection
+from shapely.geometry import (
+    Point,
+    Polygon,
+    MultiPolygon,
+    LineString,
+    MultiLineString,
+    GeometryCollection,
+)
 
 from dapper.domains.domain import Domain
 from dapper.config.metsources import era5
@@ -45,6 +55,7 @@ from dapper.config.metsources import era5
 
 # Pathing for convenience
 import dapper
+
 _ROOT_DIR = Path(next(iter(dapper.__path__))).parent
 _DATA_DIR = _ROOT_DIR / "data"
 
@@ -59,8 +70,11 @@ def parse_geometry_object(geom, name=None):
       - ee.Geometry / ee.Feature / ee.FeatureCollection
     """
     from shapely.geometry import (
-        Point, Polygon, MultiPolygon,
-        LineString, MultiLineString,
+        Point,
+        Polygon,
+        MultiPolygon,
+        LineString,
+        MultiLineString,
         GeometryCollection,
     )
     from shapely.ops import unary_union
@@ -119,7 +133,10 @@ def parse_geometry_object(geom, name=None):
         return ee.FeatureCollection(geom).geometry()
 
     # shapely
-    if isinstance(geom, (Point, Polygon, MultiPolygon, LineString, MultiLineString, GeometryCollection)):
+    if isinstance(
+        geom,
+        (Point, Polygon, MultiPolygon, LineString, MultiLineString, GeometryCollection),
+    ):
         return _to_ee_geometry(geom)
 
     raise TypeError(f"Unsupported geometry type: {type(geom)}")
@@ -182,7 +199,9 @@ def parse_geometry_objects(geom, geometry_id_field=None):
         gdf_reduced = gdf_reduced[[geometry_id_field, geom_field]].copy()
 
         # force string IDs (preserve leading zeros)
-        gdf_reduced[geometry_id_field] = gdf_reduced[geometry_id_field].astype(str).str.strip()
+        gdf_reduced[geometry_id_field] = (
+            gdf_reduced[geometry_id_field].astype(str).str.strip()
+        )
 
         # standardize to 'gid' for EE properties
         gdf_reduced = gdf_reduced.rename(columns={geometry_id_field: "gid"})
@@ -224,7 +243,9 @@ def validate_bands(bandlist, gee_ic):
     return
 
 
-def determine_gee_batches(start_date, end_date, max_date, years_per_task=5, verbose=True):
+def determine_gee_batches(
+    start_date, end_date, max_date, years_per_task=5, verbose=True
+):
     """
     Calculates how to batch tasks for splitting bigger GEE jobs.
     Currently assumes ERA5-Land hourly (i.e. hourly data with a known date range).
@@ -249,7 +270,9 @@ def determine_gee_batches(start_date, end_date, max_date, years_per_task=5, verb
         if len(df) == 1:
             print(f"Your request will be executed as one Task in Google Earth Engine.")
         else:
-            print(f"Your request will be executed as {len(df)} Tasks in Google Earth Engine.")
+            print(
+                f"Your request will be executed as {len(df)} Tasks in Google Earth Engine."
+            )
 
     return df
 
@@ -325,7 +348,7 @@ def infer_id_field(columns, verbose=False):
 
 def kill_all_tasks(verbose=True):
     """Cancel all Earth Engine tasks visible to the current account."""
-    
+
     tasks = ee.data.listOperations()
     for task in tasks:
         task_id = task["name"]
@@ -362,7 +385,7 @@ def ensure_pixel_centers_within_geometries(fc, sample_img, scale):
             return ee.Algorithms.If(
                 count.gt(0),
                 feature,
-                feature.setGeometry(geom.centroid(1, sample_img.projection()))
+                feature.setGeometry(geom.centroid(1, sample_img.projection())),
             )
 
         # Return feature unchanged if not polygon/multipolygon
@@ -486,6 +509,7 @@ def featurecollection_to_df_loc(fc, name="gee"):
     """
     dom = featurecollection_to_domain(fc, name=name)
     return dom.cells
+
 
 def sample_e5lh(params, domain_name=None, skip_tasks=False):
     """
@@ -618,7 +642,9 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
     source_end_exclusive = _era5_source_end_exclusive(end_date, max_timestamp)
     output_end_effective = source_end_exclusive - timedelta(hours=1)
     if output_end_effective <= start_date:
-        raise ValueError("The requested range does not overlap available ERA5-Land data.")
+        raise ValueError(
+            "The requested range does not overlap available ERA5-Land data."
+        )
 
     # Batch the requested output period, then extend only the final task. This
     # avoids creating a separate GEE task for the single lookahead image.
@@ -651,13 +677,16 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
         .first()
         .select("temperature_2m")
     )
-    
+
     # make sure every feature has 'gid' set from the chosen id_field
     id_field = params.get("geometry_id_field", "gid")
+
     def _ensure_gid(f):
-        return ee.Feature(f).set("gid", ee.String(f.get(id_field)))    
-    
-    geometries_fc = ensure_pixel_centers_within_geometries(geometries_fc, sample_img, scale)
+        return ee.Feature(f).set("gid", ee.String(f.get(id_field)))
+
+    geometries_fc = ensure_pixel_centers_within_geometries(
+        geometries_fc, sample_img, scale
+    )
     geometries_fc = geometries_fc.map(_ensure_gid)
 
     # Function to extract spatially averaged values over each feature (polygon or point)
@@ -680,11 +709,9 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
         domain_nc=None,
     )
 
-
     # Fire off the Tasks
     if skip_tasks is False:
         for batch_id, bdf in batches.iterrows():
-
             # Filter this Task by date range
             ic_filtered = ic.filterDate(
                 bdf["task_start"].strftime("%Y-%m-%dT%H:%M:%S"),
@@ -713,12 +740,16 @@ def sample_e5lh(params, domain_name=None, skip_tasks=False):
             task.start()
 
             print(f"GEE Export task submitted: {export_filename}")
-        print("All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion.")
+        print(
+            "All export tasks started. Check Google Drive or Task Status in the Javascript Editor for completion."
+        )
 
     return domain
 
 
-def masks_to_featurecollection(mask_entries, region, export_scale, extra_image_props=None):
+def masks_to_featurecollection(
+    mask_entries, region, export_scale, extra_image_props=None
+):
     """
     mask_entries: list of {'band_name','mask','meta'}
     Returns ee.FeatureCollection with metadata as properties.
@@ -726,24 +757,27 @@ def masks_to_featurecollection(mask_entries, region, export_scale, extra_image_p
     """
     features = []
     for entry in mask_entries:
-        vectors = entry['mask'].reduceToVectors(
+        vectors = entry["mask"].reduceToVectors(
             geometry=region,
             scale=export_scale,
-            geometryType='polygon',
+            geometryType="polygon",
             eightConnected=False,
             bestEffort=True,
-            maxPixels=1e13
+            maxPixels=1e13,
         )
         geom = vectors.geometry()  # union geometry of all parts; may be empty
         # Skip empty geometries (optional)
-        feature = ee.Feature(geom, {
-            'band_name': entry['band_name'],
-            'schema': entry['meta'].get('topounit_schema'),
-            'source_ids': entry['meta'].get('source_ids'),
-            'labels': entry['meta'].get('labels'),
-            'bin_bounds': entry['meta'].get('bin_bounds'),
-            'bin_method': entry['meta'].get('bin_method'),
-        })
+        feature = ee.Feature(
+            geom,
+            {
+                "band_name": entry["band_name"],
+                "schema": entry["meta"].get("topounit_schema"),
+                "source_ids": entry["meta"].get("source_ids"),
+                "labels": entry["meta"].get("labels"),
+                "bin_bounds": entry["meta"].get("bin_bounds"),
+                "bin_method": entry["meta"].get("bin_method"),
+            },
+        )
         if extra_image_props:
             feature = feature.setMulti(extra_image_props)
         features.append(feature)
@@ -754,7 +788,7 @@ def try_to_download_featurecollection(fc, verbose=True):
     """Attempt to load FeatureCollection as a GeoDataFrame; else return None."""
     try:
         fc_geojson = fc.getInfo()  # May raise EEException on large/complex geoms
-        gdf = gpd.GeoDataFrame.from_features(fc_geojson['features'])
+        gdf = gpd.GeoDataFrame.from_features(fc_geojson["features"])
         gdf.set_crs(epsg=4326, inplace=True)
         if verbose:
             print("Success! FeatureCollection loaded as GeoDataFrame.")
@@ -764,6 +798,7 @@ def try_to_download_featurecollection(fc, verbose=True):
             print("Direct download failed. Reason:", e)
         return None
 
+
 def _geom_from_any(x):
     """Return ee.Geometry from ee.Feature, ee.FeatureCollection, or ee.Geometry."""
     if isinstance(x, ee.Feature):
@@ -772,9 +807,11 @@ def _geom_from_any(x):
         return x.geometry()
     return x  # assume ee.Geometry
 
+
 def _nominal_scale_m(image):
     """Return nominal scale in meters for an ee.Image."""
     return float(image.projection().nominalScale().getInfo())
+
 
 def sample_image_over_polygons(
     gdf,
