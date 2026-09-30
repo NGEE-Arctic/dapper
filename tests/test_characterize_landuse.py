@@ -186,6 +186,8 @@ def test_export_landuse_sites_zonal(landuse_nc, tmp_path):
     with xr.open_dataset(out["z1"]) as ds:
         np.testing.assert_allclose(ds["PCT_CROP"].values.ravel(), [5.0, 21.0])
     with xr.open_dataset(out["z2"]) as ds:
-        # PINS BUG B5: the second site reuses the first site's zonal target.
-        np.testing.assert_allclose(ds["PCT_CROP"].values.ravel(), [5.0, 21.0])
-        np.testing.assert_allclose(ds["LATIXY"].values.ravel(), [67.75])
+        # Regression for B5: each site uses its own zonal target.
+        np.testing.assert_allclose(
+            ds["PCT_CROP"].values.ravel(), [12.97792564549251, 28.97792564549251]
+        )
+        np.testing.assert_allclose(ds["LATIXY"].values.ravel(), [68.5])

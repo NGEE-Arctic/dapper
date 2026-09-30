@@ -333,15 +333,16 @@ def export_landuse_timeseries(
         if out_path.exists() and not overwrite:
             raise FileExistsError(f"{out_path} exists (overwrite=False).")
 
-        if kwargs.get("sampling_method", "nearest") == "zonal":
-            kwargs.setdefault("targets", run_dom.cells[["gid", "geometry"]].copy())
+        run_kwargs = dict(kwargs)
+        if run_kwargs.get("sampling_method", "nearest") == "zonal":
+            run_kwargs.setdefault("targets", run_dom.cells[["gid", "geometry"]].copy())
 
         path_written, _df_cells = sample_landuse_timeseries(
             src_path=src_path,
             df_loc=df_loc,
             out_path=out_path,
             append_attrs=append_attrs,
-            **kwargs,
+            **run_kwargs,
         )
         outputs[run_id] = Path(path_written)
 
