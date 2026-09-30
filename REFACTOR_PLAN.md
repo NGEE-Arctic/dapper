@@ -1,6 +1,22 @@
 # dapper refactor plan
 
-Status: **Phase 1 (survey & plan). No code changed. Awaiting approval.**
+Status: **Approved 2026-09-30. Phase 2 in progress on branch `refactor/cleanup`.**
+
+Decisions (answers to §6 and the follow-up questions):
+1. The plan is approved. All work stays on `refactor/cleanup`.
+2. `dev/` and `elmtest/` stay as they are for now. They remain excluded from lint and type checks.
+3. The print → logging change (§5.2) is **skipped**.
+4. Ruff line length is **88**.
+5. The breaking changes in §5 are approved, except §5.2 (see item 3).
+6. Characterization tests T-1, T-2, T-7, T-8 and T-9 are approved. P-1 and T-3/T-4/T-5/T-6 are not approved yet.
+7. Bug fixes are wanted. Each one goes in its own commit, after the refactor.
+
+Not answered, so the defaults apply:
+- §6 Q5: no module splits, so step 18 is skipped.
+- §6 Q6: constant values are preserved as they are.
+- §6 Q7 and Q8: current behavior is kept.
+
+Steps 13–16 still wait for your go-ahead, because the tests that would cover them were not approved.
 
 - Baseline commit: `8b43332c37dc30d122749fb85a2399517163f009` (`main`)
 - Companion files:
