@@ -1,2 +1,1 @@
-"""dapper module: config.__init__."""
-
+"""Static configuration for meteorological sources."""

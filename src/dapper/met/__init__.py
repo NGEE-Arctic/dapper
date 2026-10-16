@@ -1,2 +1,1 @@
-"""dapper module: met.__init__."""
-
+"""Meteorological forcing: adapters, exporter, and temporal helpers."""

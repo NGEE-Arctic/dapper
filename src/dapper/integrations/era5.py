@@ -2,35 +2,33 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from functools import lru_cache
 import json
 import math
-from pathlib import Path
 import re
 import tempfile
 import time
-from typing import Sequence
-from urllib.request import Request, urlopen
 import warnings
 import zipfile
+from collections.abc import Sequence
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from urllib.request import Request, urlopen
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import xarray as xr
 from pyproj import CRS, Transformer
 from shapely.geometry import MultiPolygon, Point, Polygon, box
 from shapely.ops import transform
-import xarray as xr
 
 from dapper.config.metsources import era5
 from dapper.domains.domain import Domain
 
-
 ARCO_DATASET = "reanalysis-era5-land-timeseries"
 ARCO_CATALOGUE_URL = (
-    "https://cds.climate.copernicus.eu/api/catalogue/v1/collections/"
-    f"{ARCO_DATASET}"
+    f"https://cds.climate.copernicus.eu/api/catalogue/v1/collections/{ARCO_DATASET}"
 )
 ARCO_GRID_DEGREES = 0.1
 # ECMWF omits dates with fewer than 24 source samples when building the
@@ -63,9 +61,7 @@ _RAW_TO_CDS = {
     "surface_pressure": "surface_pressure",
     "u_component_of_wind_10m": "10m_u_component_of_wind",
     "v_component_of_wind_10m": "10m_v_component_of_wind",
-    "surface_solar_radiation_downwards_hourly": (
-        "surface_solar_radiation_downwards"
-    ),
+    "surface_solar_radiation_downwards_hourly": ("surface_solar_radiation_downwards"),
     "surface_thermal_radiation_downwards_hourly": (
         "surface_thermal_radiation_downwards"
     ),
@@ -129,7 +125,9 @@ def _planning_end(end_date) -> pd.Timestamp:
 def _resolve_variables(variables) -> tuple[list[str], list[str]]:
     if isinstance(variables, str):
         if variables.strip().lower() != "elm":
-            raise ValueError("variables must be 'elm' or a sequence of supported names.")
+            raise ValueError(
+                "variables must be 'elm' or a sequence of supported names."
+            )
         raw_names = list(era5.REQUIRED_RAW_BANDS)
     elif isinstance(variables, Sequence):
         raw_names = []
@@ -162,7 +160,9 @@ def _domain_support(domain: Domain) -> gpd.GeoDataFrame:
         raise KeyError("The domain meteorology support must contain a 'gid' column.")
     support["gid"] = support["gid"].astype(str).str.strip()
     if support["gid"].duplicated().any():
-        raise ValueError("The domain meteorology support contains duplicate gid values.")
+        raise ValueError(
+            "The domain meteorology support contains duplicate gid values."
+        )
     return support
 
 
@@ -227,7 +227,9 @@ def era5_land_grid_cells(geometry) -> pd.DataFrame:
 
     if not rows:
         raise ValueError("The geometry does not overlap any ERA5-Land grid cells.")
-    cells = pd.DataFrame(rows).sort_values(["latitude", "longitude"]).reset_index(drop=True)
+    cells = (
+        pd.DataFrame(rows).sort_values(["latitude", "longitude"]).reset_index(drop=True)
+    )
     cells["weight"] = cells["area_m2"] / cells["area_m2"].sum()
     return cells
 
@@ -399,7 +401,9 @@ def _build_plan(
     ]
     if requested_backend == "arco":
         if hard_reasons:
-            raise ValueError("ARCO cannot serve this request: " + "; ".join(hard_reasons))
+            raise ValueError(
+                "ARCO cannot serve this request: " + "; ".join(hard_reasons)
+            )
         selected = "arco"
         reason = "ARCO was explicitly requested."
     elif requested_backend == "gee":
@@ -479,7 +483,9 @@ def _read_json(url: str):
 
 
 @lru_cache(maxsize=16)
-def _arco_available_range(cds_variables: tuple[str, ...]) -> tuple[pd.Timestamp, pd.Timestamp]:
+def _arco_available_range(
+    cds_variables: tuple[str, ...],
+) -> tuple[pd.Timestamp, pd.Timestamp]:
     collection = _read_json(ARCO_CATALOGUE_URL)
     constraints_url = next(
         link["href"] for link in collection["links"] if link.get("rel") == "constraints"
@@ -489,7 +495,9 @@ def _arco_available_range(cds_variables: tuple[str, ...]) -> tuple[pd.Timestamp,
     starts = []
     ends = []
     for variable in cds_variables:
-        matches = [entry for entry in constraints if variable in entry.get("variable", [])]
+        matches = [
+            entry for entry in constraints if variable in entry.get("variable", [])
+        ]
         if not matches:
             raise ValueError(f"No ARCO availability metadata found for {variable!r}.")
         for match in matches:
@@ -677,7 +685,7 @@ def _format_grid_values(cells: pd.DataFrame, column: str) -> str:
         return ", ".join(f"{value:.8f}" for value in cells[column])
     return "; ".join(
         f"({lon:.1f}, {lat:.1f})"
-        for lon, lat in zip(cells["longitude"], cells["latitude"])
+        for lon, lat in zip(cells["longitude"], cells["latitude"], strict=False)
     )
 
 
@@ -701,9 +709,7 @@ def _frame_from_arco(
     dataset = dataset.sel(valid_time=slice(start, source_end))
     sampled, actual_cells = _select_arco_cells(dataset, spec)
     rename = {
-        short: raw
-        for short, raw in _ARCO_SHORT_TO_RAW.items()
-        if raw in raw_names
+        short: raw for short, raw in _ARCO_SHORT_TO_RAW.items() if raw in raw_names
     }
     frame = sampled[list(rename)].rename(rename).to_dataframe().reset_index()
     frame = frame.rename(columns={"valid_time": "date"})
@@ -711,7 +717,9 @@ def _frame_from_arco(
     frame = frame[["gid", "date", *raw_names]].sort_values("date")
     all_missing = [name for name in raw_names if frame[name].isna().all()]
     if all_missing:
-        raise ValueError(f"ARCO returned no valid values for {all_missing} at {spec.gid!r}.")
+        raise ValueError(
+            f"ARCO returned no valid values for {all_missing} at {spec.gid!r}."
+        )
     return frame, actual_cells
 
 
@@ -810,7 +818,7 @@ def _sample_arco(
 
     records = []
     per_request_estimate = plan.estimated_seconds / max(1, plan.feature_count)
-    for spec, safe_name in zip(specs, safe_names):
+    for spec, safe_name in zip(specs, safe_names, strict=False):
         output_csv = output_dir / f"era5_land_arco_{safe_name}.csv"
         if output_csv.exists() and not overwrite:
             raise FileExistsError(f"{output_csv} already exists (overwrite=False).")
@@ -858,7 +866,9 @@ def _sample_arco(
         "features": records,
     }
     manifest_path = output_dir / "era5_land_sampling_manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, default=str), encoding="utf-8"
+    )
     print(f"Wrote sampling manifest: {manifest_path}")
     return _annotate_domain(domain, records)
 
@@ -881,9 +891,11 @@ def _sample_gee(
     support = _domain_support(domain)
     if all(spec.method == "nearest" for spec in specs):
         support["geometry"] = support.geometry.apply(
-            lambda geometry: geometry
-            if isinstance(geometry, Point)
-            else geometry.representative_point()
+            lambda geometry: (
+                geometry
+                if isinstance(geometry, Point)
+                else geometry.representative_point()
+            )
         )
     params = {
         "start_date": str(start_date),
@@ -999,7 +1011,9 @@ def sample_era5_land(
 
     if plan.backend == "arco":
         if output_dir is None:
-            raise ValueError("output_dir is required when the selected backend is ARCO.")
+            raise ValueError(
+                "output_dir is required when the selected backend is ARCO."
+            )
         return _sample_arco(
             domain,
             specs,

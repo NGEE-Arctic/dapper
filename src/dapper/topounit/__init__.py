@@ -1,2 +1,1 @@
-"""dapper module: topounit.__init__."""
-
+"""Topographic unit (topounit) generation and plotting."""

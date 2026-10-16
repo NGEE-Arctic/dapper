@@ -1,10 +1,12 @@
-# dapper/met/adapters/base.py
-"""dapper module: met.adapters.base."""
+"""Adapter interface between met sources and the Exporter."""
 
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
+
 import numpy as np
 import pandas as pd
+
 
 class BaseAdapter(ABC):
     """
@@ -54,7 +56,9 @@ class BaseAdapter(ABC):
             out["zone"] = out["zone"].fillna(1).astype(int)
 
         if (out["zone"] < 1).any():
-            raise ValueError("df_loc contains zone values < 1. Zones must be positive integers.")
+            raise ValueError(
+                "df_loc contains zone values < 1. Zones must be positive integers."
+            )
 
         return out.sort_values(["lat", "lon"]).reset_index(drop=True)
 
@@ -66,7 +70,7 @@ class BaseAdapter(ABC):
         start_year: int,
         end_year: int,
         calendar: str,
-        dformat: str
+        dformat: str,
     ) -> pd.DataFrame:
         """
         Return a DataFrame with at least:
@@ -105,7 +109,10 @@ class BaseAdapter(ABC):
         """
         try:
             from dapper.elm import utils as eu
-            ao, sf = eu.elm_var_packing_params(elm_var, data=data if data is not None else [])
+
+            ao, sf = eu.elm_var_packing_params(
+                elm_var, data=data if data is not None else []
+            )
             return float(ao), float(sf)
         except Exception:
             # Very safe fallback: map around min(data) (or 0) with unit scale.

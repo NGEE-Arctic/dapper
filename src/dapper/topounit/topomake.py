@@ -1,9 +1,15 @@
 """Topographic unit generation utilities."""
 
+import math
+
+from dapper.domains.domain import Domain
+from dapper.integrations.earthengine import gee_utils as gu
+
 try:
     import ee  # type: ignore
 except Exception:  # pragma: no cover
     ee = None  # type: ignore
+
 
 def _require_ee_global():
     global ee
@@ -18,29 +24,27 @@ def _require_ee_global():
         ee = _ee
     return ee
 
+
 if ee is None:  # pragma: no cover
+
     class _EEProxy:
         def __getattr__(self, name):
             return getattr(_require_ee_global(), name)
 
     ee = _EEProxy()  # type: ignore
 
-import math
-
-from dapper.domains.domain import Domain
-from dapper.integrations.earthengine import gee_utils as gu
-
 
 # ----------------------------
 # Utilities
 # ----------------------------
+
 
 def _require_single_band_image(img, sid):
     """
     Ensure 'img' behaves like an ee.Image with exactly one band.
     We do not try to guess the band; users should select/mosaic beforehand.
     """
-    if not hasattr(img, 'bandNames') or not hasattr(img, 'select'):
+    if not hasattr(img, "bandNames") or not hasattr(img, "select"):
         raise TypeError(
             f"binning['{sid}']['image'] must be an ee.Image (single band). "
             f"Pass an ee.Image you've already prepared with .mosaic()/.select()."
@@ -64,9 +68,11 @@ def _require_single_band_image(img, sid):
         )
     return img
 
+
 # -----------------------------------
 # Multi-scale HAND auto-selection
 # -----------------------------------
+
 
 def choose_hand_image(desired_scale=None, hand_edges=None, verbose=False):
     """Auto-select among available HAND products based on a desired scale (m)
@@ -74,14 +80,31 @@ def choose_hand_image(desired_scale=None, hand_edges=None, verbose=False):
     Returns (hand_image_single_band, native_scale_m).
     """
     # Candidates
-    hand30_100  = ee.ImageCollection("users/gena/global-hand/hand-100").mosaic()      # up to 100 m
-    hand30_1000 = ee.Image("users/gena/GlobalHAND/30m/hand-1000")                    # up to 1000 m
-    hand90_1000 = ee.Image("users/gena/GlobalHAND/90m-global/hand-1000")             # up to 1000 m
+    hand30_100 = ee.ImageCollection(
+        "users/gena/global-hand/hand-100"
+    ).mosaic()  # up to 100 m
+    hand30_1000 = ee.Image("users/gena/GlobalHAND/30m/hand-1000")  # up to 1000 m
+    hand90_1000 = ee.Image("users/gena/GlobalHAND/90m-global/hand-1000")  # up to 1000 m
 
     cand = [
-        {"name": "hand30_1000", "img": hand30_1000, "scale": gu._nominal_scale_m(hand30_1000), "maxval": 1000},
-        {"name": "hand90_1000", "img": hand90_1000, "scale": gu._nominal_scale_m(hand90_1000), "maxval": 1000},
-        {"name": "hand30_100",  "img": hand30_100,  "scale": gu._nominal_scale_m(hand30_100),  "maxval": 100},
+        {
+            "name": "hand30_1000",
+            "img": hand30_1000,
+            "scale": gu._nominal_scale_m(hand30_1000),
+            "maxval": 1000,
+        },
+        {
+            "name": "hand90_1000",
+            "img": hand90_1000,
+            "scale": gu._nominal_scale_m(hand90_1000),
+            "maxval": 1000,
+        },
+        {
+            "name": "hand30_100",
+            "img": hand30_100,
+            "scale": gu._nominal_scale_m(hand30_100),
+            "maxval": 100,
+        },
     ]
 
     # If user-provided edges exceed 100 m, prefer *_1000 products
@@ -94,15 +117,21 @@ def choose_hand_image(desired_scale=None, hand_edges=None, verbose=False):
         # Prefer 90 m *_1000 as a sensible default
         pick = next((c for c in preferred if c["name"] == "hand90_1000"), preferred[0])
         if verbose:
-            print(f"[HAND] Auto-selected {pick['name']} @ ~{pick['scale']} m (no desired scale).")
+            print(
+                f"[HAND] Auto-selected {pick['name']} @ ~{pick['scale']} m (no desired scale)."
+            )
         return pick["img"].select(0).rename("v"), pick["scale"]
 
     # Choose not-finer-than desired_scale; otherwise fallback to coarsest
     candidates = sorted(preferred, key=lambda c: c["scale"])
     not_finer = [c for c in candidates if c["scale"] >= desired_scale]
-    pick = sorted(not_finer, key=lambda c: c["scale"])[0] if not_finer else candidates[-1]
+    pick = (
+        sorted(not_finer, key=lambda c: c["scale"])[0] if not_finer else candidates[-1]
+    )
     if verbose:
-        print(f"[HAND] Desired ~{desired_scale:.1f} m → selected {pick['name']} @ ~{pick['scale']} m.")
+        print(
+            f"[HAND] Desired ~{desired_scale:.1f} m → selected {pick['name']} @ ~{pick['scale']} m."
+        )
     return pick["img"].select(0).rename("v"), pick["scale"]
 
 
@@ -110,7 +139,15 @@ def choose_hand_image(desired_scale=None, hand_edges=None, verbose=False):
 # Sources: elevation, HAND, aspect (as a source)
 # ----------------------------------------------------
 
-def build_source(source_id, feature, desired_scale_hint, binning_spec, dem_source='arcticdem', verbose=False):
+
+def build_source(
+    source_id,
+    feature,
+    desired_scale_hint,
+    binning_spec,
+    dem_source="arcticdem",
+    verbose=False,
+):
     """
     Returns (single-band ee.Image renamed to 'v', native_scale_m, meta dict).
 
@@ -126,6 +163,7 @@ def build_source(source_id, feature, desired_scale_hint, binning_spec, dem_sourc
       If the image advertises a degree-based/undefined native scale (~111,319 m), we coerce
       the native scale to desired_scale_hint (if provided) or 90 m to avoid over-clamping.
     """
+
     def _coerce_native_scale_m(img, fallback_m=90.0):
         """Return a reasonable native scale in meters; fix ~1° (≈111 km) projections."""
         try:
@@ -134,64 +172,91 @@ def build_source(source_id, feature, desired_scale_hint, binning_spec, dem_sourc
             s = float(fallback_m)
         # If scale looks like degrees/undefined (> ~5 km), trust the hint or fallback
         if s > 5000.0:
-            return float(desired_scale_hint) if (desired_scale_hint is not None) else float(fallback_m)
+            return (
+                float(desired_scale_hint)
+                if (desired_scale_hint is not None)
+                else float(fallback_m)
+            )
         return s
 
     region = gu._geom_from_any(feature)
 
     # --- 0) Generic custom image (takes precedence if provided) ---
-    if isinstance(binning_spec, dict) and ('image' in binning_spec):
-        img = _require_single_band_image(binning_spec['image'], source_id)
-        img = img.clip(region).select(0).rename('v')
+    if isinstance(binning_spec, dict) and ("image" in binning_spec):
+        img = _require_single_band_image(binning_spec["image"], source_id)
+        img = img.clip(region).select(0).rename("v")
         scale = _coerce_native_scale_m(img, fallback_m=90.0)
         meta = {
-            "units": binning_spec.get("units", ""),                 # cosmetic
-            "name":  binning_spec.get("name", str(source_id).upper())
+            "units": binning_spec.get("units", ""),  # cosmetic
+            "name": binning_spec.get("name", str(source_id).upper()),
         }
         if verbose:
             print(f"[SRC {source_id}] custom image, native_scale≈{scale:.1f} m")
         return img, scale, meta
 
     # --- 1) Elevation (ArcticDEM) ---
-    if source_id == 'elev':
-        if dem_source != 'arcticdem':
+    if source_id == "elev":
+        if dem_source != "arcticdem":
             raise KeyError(f"DEM source '{dem_source}' not supported.")
-        img = ee.Image("UMN/PGC/ArcticDEM/V4/2m_mosaic").select('elevation').rename('v').clip(region)
+        img = (
+            ee.Image("UMN/PGC/ArcticDEM/V4/2m_mosaic")
+            .select("elevation")
+            .rename("v")
+            .clip(region)
+        )
         scale = _coerce_native_scale_m(img, fallback_m=2.0)
         if verbose:
             print(f"[SRC elev] native_scale≈{scale:.1f} m")
         return img, scale, {"units": "m", "name": "Elevation"}
 
     # --- 2) HAND (auto-pick scale/product) ---
-    if source_id == 'hand':
-        hand_edges = binning_spec.get('edges') if binning_spec.get('strategy') == 'fixed' else None
-        img, scale_native = choose_hand_image(desired_scale=desired_scale_hint, hand_edges=hand_edges, verbose=verbose)
-        img = img.updateMask(img.mask()).rename('v').clip(region)
+    if source_id == "hand":
+        hand_edges = (
+            binning_spec.get("edges")
+            if binning_spec.get("strategy") == "fixed"
+            else None
+        )
+        img, scale_native = choose_hand_image(
+            desired_scale=desired_scale_hint, hand_edges=hand_edges, verbose=verbose
+        )
+        img = img.updateMask(img.mask()).rename("v").clip(region)
         scale = _coerce_native_scale_m(img, fallback_m=scale_native)
         if verbose:
             print(f"[SRC hand] native_scale≈{scale:.1f} m")
         return img, scale, {"units": "m", "name": "HAND"}
 
     # --- 3) Aspect (from DEM) ---
-    if source_id == 'aspect':
-        if dem_source != 'arcticdem':
+    if source_id == "aspect":
+        if dem_source != "arcticdem":
             raise KeyError(f"DEM source '{dem_source}' not supported for aspect.")
-        dem = ee.Image("UMN/PGC/ArcticDEM/V4/2m_mosaic").select('elevation').clip(region)
-        aspect = ee.Terrain.aspect(dem).rename('v')
+        dem = (
+            ee.Image("UMN/PGC/ArcticDEM/V4/2m_mosaic").select("elevation").clip(region)
+        )
+        aspect = ee.Terrain.aspect(dem).rename("v")
         scale = _coerce_native_scale_m(dem, fallback_m=2.0)  # use DEM’s native scale
         if verbose:
             print(f"[SRC aspect] derived from DEM, native_scale≈{scale:.1f} m")
         return aspect, scale, {"units": "deg", "name": "Aspect", "from_dem": True}
 
     # --- 4) CTI (flow index) — unitless with scale factor 1e8 ---
-    if source_id == 'cti':
-        img = (ee.ImageCollection("projects/sat-io/open-datasets/HYDROGRAPHY90/flow_index/cti")
-               .mosaic().select(0).toFloat().divide(1e8)   # apply 1e8 scale factor
-               .rename('v').clip(region))
-        scale = _coerce_native_scale_m(img, fallback_m=90.0)  # many tiles advertise ~1°; coerce to 90 m
+    if source_id == "cti":
+        img = (
+            ee.ImageCollection(
+                "projects/sat-io/open-datasets/HYDROGRAPHY90/flow_index/cti"
+            )
+            .mosaic()
+            .select(0)
+            .toFloat()
+            .divide(1e8)  # apply 1e8 scale factor
+            .rename("v")
+            .clip(region)
+        )
+        scale = _coerce_native_scale_m(
+            img, fallback_m=90.0
+        )  # many tiles advertise ~1°; coerce to 90 m
         if verbose:
             print(f"[SRC cti] scaled by 1e8, native_scale≈{scale:.1f} m")
-        return img, scale, {"units": "", "name": "CTI"}       # unitless
+        return img, scale, {"units": "", "name": "CTI"}  # unitless
 
     # Unknown source id
     raise ValueError(f"Unknown source_id: {source_id}")
@@ -201,18 +266,21 @@ def build_source(source_id, feature, desired_scale_hint, binning_spec, dem_sourc
 # Binning helpers per source
 # --------------------------------
 
+
 def _clone_meta(acc_meta):
     """Deep-copy the nested bits so each branch mutates its own dicts."""
     return {
         **acc_meta,
-        'source_ids': list(acc_meta.get('source_ids', [])),
-        'labels':     {**acc_meta.get('labels', {})},
-        'bin_bounds': {**acc_meta.get('bin_bounds', {})},
-        'bin_method': {**acc_meta.get('bin_method', {})},
+        "source_ids": list(acc_meta.get("source_ids", [])),
+        "labels": {**acc_meta.get("labels", {})},
+        "bin_bounds": {**acc_meta.get("bin_bounds", {})},
+        "bin_method": {**acc_meta.get("bin_method", {})},
     }
 
 
-def _compute_percentile_edges(image, region, n_bins, analysis_scale, max_samples=200_000, band_name='v'):
+def _compute_percentile_edges(
+    image, region, n_bins, analysis_scale, max_samples=200_000, band_name="v"
+):
     """
     Return monotonically increasing bin edges (list length n_bins+1) using
     sampling-based empirical quantiles inside 'region'.
@@ -222,7 +290,7 @@ def _compute_percentile_edges(image, region, n_bins, analysis_scale, max_samples
         scale=analysis_scale,
         geometries=False,
         dropNulls=True,
-        numPixels=max_samples
+        numPixels=max_samples,
     )
     arr = ee.List(samples.aggregate_array(band_name))
     size = ee.Number(arr.size())
@@ -236,6 +304,7 @@ def _compute_percentile_edges(image, region, n_bins, analysis_scale, max_samples
             # clamp to size-1 (in case of k==n_bins)
             idx = idx.min(size.subtract(1))
             return sorted_arr.get(idx)
+
         return ee.List.sequence(0, n_bins).map(idx_to_val)
 
     def _edges_from_minmax():
@@ -244,14 +313,16 @@ def _compute_percentile_edges(image, region, n_bins, analysis_scale, max_samples
             geometry=region,
             scale=analysis_scale,
             bestEffort=True,
-            maxPixels=1e13
+            maxPixels=1e13,
         )
         vmin = ee.Number(stats.get(f"{band_name}_min"))
         vmax = ee.Number(stats.get(f"{band_name}_max"))
         step = vmax.subtract(vmin).divide(n_bins)
         return ee.List.sequence(vmin, vmax, step)
 
-    quant_edges = ee.Algorithms.If(size.gt(0), _edges_from_samples(), _edges_from_minmax())
+    quant_edges = ee.Algorithms.If(
+        size.gt(0), _edges_from_samples(), _edges_from_minmax()
+    )
     edges = ee.List(quant_edges).getInfo()  # client-side list
 
     # Ensure strict monotonicity (collapse duplicates with tiny epsilon)
@@ -262,13 +333,14 @@ def _compute_percentile_edges(image, region, n_bins, analysis_scale, max_samples
         cleaned.append(float(e))
     return cleaned
 
-def _compute_equalwidth_edges(image, region, n_bins, analysis_scale, band_name='v'):
+
+def _compute_equalwidth_edges(image, region, n_bins, analysis_scale, band_name="v"):
     stats = image.reduceRegion(
         reducer=ee.Reducer.minMax(),
         geometry=region,
         scale=analysis_scale,
         bestEffort=True,
-        maxPixels=1e13
+        maxPixels=1e13,
     )
     vmin = stats.get(f"{band_name}_min")
     vmax = stats.get(f"{band_name}_max")
@@ -281,45 +353,61 @@ def _compute_equalwidth_edges(image, region, n_bins, analysis_scale, band_name='
     step = (vmax - vmin) / n_bins
     return [vmin + i * step for i in range(n_bins + 1)]
 
-def build_bins_for_source(source_id, image, region, binning_spec, analysis_scale, aspect_ranges_default=None):
+
+def build_bins_for_source(
+    source_id, image, region, binning_spec, analysis_scale, aspect_ranges_default=None
+):
     """
     Produces a list of bin definitions for a source.
     Numeric sources (elev, hand): [{'id', 'low', 'high', 'label', 'method', 'units'}]
     Aspect (circular): [{'id','start','end','wrap','label','method','units'}]
     """
-    strategy = binning_spec.get('strategy')
-    label_prefix = binning_spec.get('label_prefix', source_id.upper())
+    strategy = binning_spec.get("strategy")
+    label_prefix = binning_spec.get("label_prefix", source_id.upper())
     bins = []
 
-    if source_id == 'aspect':
-        if strategy != 'fixed':
+    if source_id == "aspect":
+        if strategy != "fixed":
             raise ValueError("Aspect currently supports 'fixed' ranges only.")
-        ranges = binning_spec.get('ranges') or aspect_ranges_default or [(270, 90, 'N'), (90.01, 269.99, 'S')]
+        ranges = (
+            binning_spec.get("ranges")
+            or aspect_ranges_default
+            or [(270, 90, "N"), (90.01, 269.99, "S")]
+        )
         for i, (start, end, name) in enumerate(ranges, start=1):
-            start = float(start); end = float(end)
+            start = float(start)
+            end = float(end)
             wrap = start > end
-            bins.append({
-                'id': i,
-                'label': f"{label_prefix}_{name}",
-                'start': start,
-                'end': end,
-                'wrap': wrap,
-                'method': 'fixed',
-                'units': 'deg'
-            })
+            bins.append(
+                {
+                    "id": i,
+                    "label": f"{label_prefix}_{name}",
+                    "start": start,
+                    "end": end,
+                    "wrap": wrap,
+                    "method": "fixed",
+                    "units": "deg",
+                }
+            )
         return bins
 
     # Numeric sources: elev, hand
-    if strategy == 'percentiles':
-        n_bins = int(binning_spec.get('n_bins', 5))
-        edges = _compute_percentile_edges(image, region, n_bins, analysis_scale, band_name='v')
-    elif strategy == 'equalwidth':
-        n_bins = int(binning_spec.get('n_bins', 5))
-        edges = _compute_equalwidth_edges(image, region, n_bins, analysis_scale, band_name='v')
-    elif strategy == 'fixed':
-        edges = binning_spec.get('edges', None)
+    if strategy == "percentiles":
+        n_bins = int(binning_spec.get("n_bins", 5))
+        edges = _compute_percentile_edges(
+            image, region, n_bins, analysis_scale, band_name="v"
+        )
+    elif strategy == "equalwidth":
+        n_bins = int(binning_spec.get("n_bins", 5))
+        edges = _compute_equalwidth_edges(
+            image, region, n_bins, analysis_scale, band_name="v"
+        )
+    elif strategy == "fixed":
+        edges = binning_spec.get("edges", None)
         if edges is None or len(edges) < 2:
-            raise ValueError("Fixed-edge binning requires 'edges' with at least two values.")
+            raise ValueError(
+                "Fixed-edge binning requires 'edges' with at least two values."
+            )
         edges = [float(x) for x in edges]
         n_bins = len(edges) - 1
     else:
@@ -329,14 +417,16 @@ def build_bins_for_source(source_id, image, region, binning_spec, analysis_scale
         low, high = float(edges[i]), float(edges[i + 1])
         if high <= low:
             continue  # skip degenerate
-        bins.append({
-            'id': i + 1,
-            'label': f"{label_prefix}_{low:.3f}-{high:.3f}",
-            'low': low,
-            'high': high,
-            'method': strategy,
-            'units': 'm'
-        })
+        bins.append(
+            {
+                "id": i + 1,
+                "label": f"{label_prefix}_{low:.3f}-{high:.3f}",
+                "low": low,
+                "high": high,
+                "method": strategy,
+                "units": "m",
+            }
+        )
     return bins
 
 
@@ -344,18 +434,25 @@ def build_bins_for_source(source_id, image, region, binning_spec, analysis_scale
 # Mask builders & combination logic
 # ----------------------------------------
 
+
 def _numeric_bin_mask(image, low, high):
     return image.gte(low).And(image.lt(high)).selfMask()
 
+
 def _aspect_bin_mask(aspect_img, start, end, wrap):
-    return (aspect_img.gte(start).Or(aspect_img.lt(end)) if wrap
-            else aspect_img.gte(start).And(aspect_img.lt(end))).selfMask()
+    return (
+        aspect_img.gte(start).Or(aspect_img.lt(end))
+        if wrap
+        else aspect_img.gte(start).And(aspect_img.lt(end))
+    ).selfMask()
+
 
 def _apply_min_patch(mask_img, min_patch_pixels):
     if min_patch_pixels is None or min_patch_pixels <= 1:
         return mask_img
     cpp = mask_img.connectedPixelCount(100, True)
     return mask_img.updateMask(cpp.gte(min_patch_pixels))
+
 
 def _combine_cartesian(bin_masks_by_source, max_topounits=None, min_patch_pixels=None):
     items = list(bin_masks_by_source.items())
@@ -370,7 +467,7 @@ def _combine_cartesian(bin_masks_by_source, max_topounits=None, min_patch_pixels
         if idx == len(items):
             band_name = "topounit_" + "__".join(acc_code)
             mask = _apply_min_patch(acc_mask, min_patch_pixels)
-            combined.append({'band_name': band_name, 'mask': mask, 'meta': acc_meta})
+            combined.append({"band_name": band_name, "mask": mask, "meta": acc_meta})
             return
 
         sid, binlist = items[idx]
@@ -378,24 +475,32 @@ def _combine_cartesian(bin_masks_by_source, max_topounits=None, min_patch_pixels
             meta = _clone_meta(acc_meta)  # <-- deep-clone nested dicts/lists
 
             # append this source's info
-            meta.setdefault('source_ids', []).append(sid)
-            meta.setdefault('labels', {})[sid] = entry['def']['label']
-            if 'low' in entry['def']:
-                meta.setdefault('bin_bounds', {})[sid] = {'low': entry['def']['low'], 'high': entry['def']['high']}
-            else:
-                meta.setdefault('bin_bounds', {})[sid] = {
-                    'start': entry['def']['start'], 'end': entry['def']['end'], 'wrap': entry['def']['wrap']
+            meta.setdefault("source_ids", []).append(sid)
+            meta.setdefault("labels", {})[sid] = entry["def"]["label"]
+            if "low" in entry["def"]:
+                meta.setdefault("bin_bounds", {})[sid] = {
+                    "low": entry["def"]["low"],
+                    "high": entry["def"]["high"],
                 }
-            meta.setdefault('bin_method', {})[sid] = entry['def']['method']
+            else:
+                meta.setdefault("bin_bounds", {})[sid] = {
+                    "start": entry["def"]["start"],
+                    "end": entry["def"]["end"],
+                    "wrap": entry["def"]["wrap"],
+                }
+            meta.setdefault("bin_method", {})[sid] = entry["def"]["method"]
 
             codepiece = f"{sid}{entry['def']['id']}"
-            mask = entry['mask'] if acc_mask is None else acc_mask.And(entry['mask'])
+            mask = entry["mask"] if acc_mask is None else acc_mask.And(entry["mask"])
             _recurse(idx + 1, meta, mask, acc_code + [codepiece])
 
-    _recurse(0, {'topounit_schema': 'cartesian'}, None, [])
+    _recurse(0, {"topounit_schema": "cartesian"}, None, [])
     return combined
 
-def _combine_hierarchical(order, bin_masks_by_source, max_topounits=None, min_patch_pixels=None):
+
+def _combine_hierarchical(
+    order, bin_masks_by_source, max_topounits=None, min_patch_pixels=None
+):
     if not order:
         return []
     combined = []
@@ -408,24 +513,37 @@ def _combine_hierarchical(order, bin_masks_by_source, max_topounits=None, min_pa
         sid = order[idx]
         entries = bin_masks_by_source[sid]
         for entry in entries:
-            this_mask = entry['mask'] if parent_mask is None else parent_mask.And(entry['mask'])
+            this_mask = (
+                entry["mask"] if parent_mask is None else parent_mask.And(entry["mask"])
+            )
 
             meta = _clone_meta(parent_meta)  # <-- deep-clone nested dicts/lists
-            meta.setdefault('source_ids', []).append(sid)
-            meta.setdefault('labels', {})[sid] = entry['def']['label']
-            if 'low' in entry['def']:
-                meta.setdefault('bin_bounds', {})[sid] = {'low': entry['def']['low'], 'high': entry['def']['high']}
-            else:
-                meta.setdefault('bin_bounds', {})[sid] = {
-                    'start': entry['def']['start'], 'end': entry['def']['end'], 'wrap': entry['def']['wrap']
+            meta.setdefault("source_ids", []).append(sid)
+            meta.setdefault("labels", {})[sid] = entry["def"]["label"]
+            if "low" in entry["def"]:
+                meta.setdefault("bin_bounds", {})[sid] = {
+                    "low": entry["def"]["low"],
+                    "high": entry["def"]["high"],
                 }
-            meta.setdefault('bin_method', {})[sid] = entry['def']['method']
+            else:
+                meta.setdefault("bin_bounds", {})[sid] = {
+                    "start": entry["def"]["start"],
+                    "end": entry["def"]["end"],
+                    "wrap": entry["def"]["wrap"],
+                }
+            meta.setdefault("bin_method", {})[sid] = entry["def"]["method"]
 
             codepiece = f"{sid}{entry['def']['id']}"
             if idx == len(order) - 1:
                 band_name = "topounit_" + "__".join(parent_code + [codepiece])
                 mask = _apply_min_patch(this_mask, min_patch_pixels)
-                combined.append({'band_name': band_name, 'mask': mask, 'meta': {**meta, 'topounit_schema': 'hierarchical'}})
+                combined.append(
+                    {
+                        "band_name": band_name,
+                        "mask": mask,
+                        "meta": {**meta, "topounit_schema": "hierarchical"},
+                    }
+                )
                 if max_topounits is not None and len(combined) >= max_topounits:
                     return
             else:
@@ -436,8 +554,9 @@ def _combine_hierarchical(order, bin_masks_by_source, max_topounits=None, min_pa
     _recurse(0, None, {}, [])
     return combined
 
+
 # -----------------------------------------
-# Topounit characteristics sampling 
+# Topounit characteristics sampling
 # -----------------------------------------
 def _attach_topounit_terrain_stats(
     polygons_fc,
@@ -468,32 +587,31 @@ def _attach_topounit_terrain_stats(
     """
     # Reuse the same DEM source as the 'elev' topounit source.
     dem_img, _native_scale, _meta = build_source(
-        source_id='elev',
+        source_id="elev",
         feature=feature_for_gee,
         desired_scale_hint=analysis_scale,
-        binning_spec={},      # not used for 'elev'
+        binning_spec={},  # not used for 'elev'
         dem_source=dem_source,
         verbose=verbose,
     )
 
     # Elevation band (meters)
-    dem = dem_img.rename('elev')
+    dem = dem_img.rename("elev")
 
     # Slope in degrees
-    slope_deg = ee.Terrain.slope(dem).rename('slope_deg')
+    slope_deg = ee.Terrain.slope(dem).rename("slope_deg")
 
     # Aspect in degrees (0–360, clockwise from north)
-    aspect_deg = ee.Terrain.aspect(dem).rename('aspect_deg')
+    aspect_deg = ee.Terrain.aspect(dem).rename("aspect_deg")
 
     # For a proper mean aspect, use circular mean of sin/cos
     aspect_rad = aspect_deg.multiply(math.pi / 180.0)
-    aspect_sin = aspect_rad.sin().rename('aspect_sin')
-    aspect_cos = aspect_rad.cos().rename('aspect_cos')
+    aspect_sin = aspect_rad.sin().rename("aspect_sin")
+    aspect_cos = aspect_rad.cos().rename("aspect_cos")
 
     # Multi-band image for one-shot reduceRegion
     stats_image = (
-        dem
-        .addBands(slope_deg)
+        dem.addBands(slope_deg)
         .addBands(aspect_deg)
         .addBands(aspect_sin)
         .addBands(aspect_cos)
@@ -510,47 +628,52 @@ def _attach_topounit_terrain_stats(
             tileScale=2,
         )
 
-        elev_mean      = stats.get('elev')         # m
-        slope_mean_deg = stats.get('slope_deg')    # deg
-        mean_sin       = stats.get('aspect_sin')
-        mean_cos       = stats.get('aspect_cos')
+        elev_mean = stats.get("elev")  # m
+        slope_mean_deg = stats.get("slope_deg")  # deg
+        mean_sin = stats.get("aspect_sin")
+        mean_cos = stats.get("aspect_cos")
 
         # Circular mean of aspect (degrees 0–360)
         aspect_mean_rad = ee.Number(mean_sin).atan2(ee.Number(mean_cos))
         aspect_mean_deg = aspect_mean_rad.multiply(180.0 / math.pi).mod(360.0)
 
-        return feat.set({
-            'TopounitAveElv': elev_mean,
-            'TopounitSlope':  slope_mean_deg,
-            'TopounitAspect': aspect_mean_deg,
-        })
+        return feat.set(
+            {
+                "TopounitAveElv": elev_mean,
+                "TopounitSlope": slope_mean_deg,
+                "TopounitAspect": aspect_mean_deg,
+            }
+        )
 
     fc_with_stats = polygons_fc.map(_add_stats)
 
     if verbose:
-        print("[topounits] Attached terrain stats: TopounitAveElv, TopounitSlope, TopounitAspect.")
+        print(
+            "[topounits] Attached terrain stats: TopounitAveElv, TopounitSlope, TopounitAspect."
+        )
 
     return fc_with_stats
 
+
 # -----------------------------------------
-# Main API 
+# Main API
 # -----------------------------------------
 def make_topounits(
     aoi,
-    sources=None,                 # if None, inferred from binning keys (insertion order)
-    binning=None,                 # dict: { sid: {...}, ... }
-    combine='cartesian',
+    sources=None,  # if None, inferred from binning keys (insertion order)
+    binning=None,  # dict: { sid: {...}, ... }
+    combine="cartesian",
     combine_order=None,
     max_topounits=256,
-    dem_source='arcticdem',
-    return_as='gdf',
-    export_scale='native',
-    asset_name='topounits',
-    asset_ftype='GeoJSON',
+    dem_source="arcticdem",
+    return_as="gdf",
+    export_scale="native",
+    asset_name="topounits",
+    asset_ftype="GeoJSON",
     min_patch_pixels=None,
     target_pixels_per_topounit=500,
     target_scale=None,
-    verbose=False
+    verbose=False,
 ):
     """
     SINGLE-AOI topounit builder.
@@ -573,7 +696,9 @@ def make_topounits(
     # Validate sources
     missing = [sid for sid in sources if sid not in binning]
     if missing:
-        raise KeyError(f"Sources missing from binning: {missing}. Provide binning['sid'] for each source.")
+        raise KeyError(
+            f"Sources missing from binning: {missing}. Provide binning['sid'] for each source."
+        )
 
     # Coerce AOI input to a single shapely/ee object, then to ee.Geometry
     if isinstance(aoi, Domain):
@@ -599,14 +724,14 @@ def make_topounits(
     # 1) Planned total bins (product across sources)
     def _planned_bins_for_source(sid):
         spec = binning[sid]
-        if sid == 'aspect' and spec.get('strategy') == 'fixed':
-            rngs = spec.get('ranges') or [(270, 90, 'N'), (90.01, 269.99, 'S')]
+        if sid == "aspect" and spec.get("strategy") == "fixed":
+            rngs = spec.get("ranges") or [(270, 90, "N"), (90.01, 269.99, "S")]
             return len(rngs)
-        st = spec.get('strategy')
-        if st in ('percentiles', 'equalwidth'):
-            return int(spec.get('n_bins', 5))
-        if st == 'fixed':
-            edges = spec.get('edges', [])
+        st = spec.get("strategy")
+        if st in ("percentiles", "equalwidth"):
+            return int(spec.get("n_bins", 5))
+        if st == "fixed":
+            edges = spec.get("edges", [])
             return max(0, len(edges) - 1)
         raise ValueError(f"Unknown/unsupported strategy for planned bin count: {st}")
 
@@ -629,7 +754,7 @@ def make_topounits(
             desired_scale_hint=desired_scale_hint,
             binning_spec=binning[sid],
             dem_source=dem_source,
-            verbose=verbose
+            verbose=verbose,
         )
         source_images[sid] = img
         native_scales[sid] = float(nat_scale)
@@ -641,13 +766,17 @@ def make_topounits(
         analysis_scale = max(float(target_scale), coarsest_native)
     else:
         aoi_area = region.area()  # m^2
-        required_pixel_area = aoi_area.divide(total_planned * target_pixels_per_topounit)
+        required_pixel_area = aoi_area.divide(
+            total_planned * target_pixels_per_topounit
+        )
         analysis_scale = float(required_pixel_area.sqrt().getInfo())
         analysis_scale = max(analysis_scale, coarsest_native)
 
     if verbose:
-        print(f"[Scale] planned bins={total_planned}, coarsest_native={coarsest_native:.1f} m, "
-              f"analysis_scale={analysis_scale:.1f} m")
+        print(
+            f"[Scale] planned bins={total_planned}, coarsest_native={coarsest_native:.1f} m, "
+            f"analysis_scale={analysis_scale:.1f} m"
+        )
 
     # 4) Build per-source bins and masks
     bin_defs_by_source = {}
@@ -661,38 +790,42 @@ def make_topounits(
             region=region,
             binning_spec=binning[sid],
             analysis_scale=analysis_scale,
-            aspect_ranges_default=binning.get('aspect', {}).get('ranges') if 'aspect' in binning else None
+            aspect_ranges_default=binning.get("aspect", {}).get("ranges")
+            if "aspect" in binning
+            else None,
         )
         bin_defs_by_source[sid] = bin_defs
 
         entries = []
-        if sid == 'aspect':
+        if sid == "aspect":
             for b in bin_defs:
-                mask = _aspect_bin_mask(img, b['start'], b['end'], b['wrap'])
-                entries.append({'def': b, 'mask': mask})
+                mask = _aspect_bin_mask(img, b["start"], b["end"], b["wrap"])
+                entries.append({"def": b, "mask": mask})
         else:
             for b in bin_defs:
-                mask = _numeric_bin_mask(img, b['low'], b['high'])
-                entries.append({'def': b, 'mask': mask})
+                mask = _numeric_bin_mask(img, b["low"], b["high"])
+                entries.append({"def": b, "mask": mask})
         bin_masks_by_source[sid] = entries
 
     # 5) Combine masks
-    if combine == 'cartesian':
+    if combine == "cartesian":
         combined_entries = _combine_cartesian(
             bin_masks_by_source,
             max_topounits=max_topounits,
-            min_patch_pixels=min_patch_pixels
+            min_patch_pixels=min_patch_pixels,
         )
         if len(combined_entries) == 0:
             raise RuntimeError("No combined topounit masks produced (cartesian).")
-    elif combine == 'hierarchical':
+    elif combine == "hierarchical":
         if not combine_order:
-            raise ValueError("combine='hierarchical' requires combine_order (e.g., ['elev','hand']).")
+            raise ValueError(
+                "combine='hierarchical' requires combine_order (e.g., ['elev','hand'])."
+            )
         combined_entries = _combine_hierarchical(
             combine_order,
             bin_masks_by_source,
             max_topounits=max_topounits,
-            min_patch_pixels=min_patch_pixels
+            min_patch_pixels=min_patch_pixels,
         )
         if len(combined_entries) == 0:
             raise RuntimeError("No combined topounit masks produced (hierarchical).")
@@ -700,18 +833,18 @@ def make_topounits(
         raise ValueError(f"Unknown combine strategy: {combine}")
 
     # 6) Export scale
-    if export_scale == 'native':
+    if export_scale == "native":
         export_scale = analysis_scale
 
     # 7) Attach reproducibility props
     extra_props = {
-        'analysis_scale_m': analysis_scale,
-        'sources': sources,
-        'planned_counts': planned_counts,
-        'combine': combine,
-        'max_topounits': max_topounits,
-        'target_pixels_per_topounit': target_pixels_per_topounit,
-        'target_scale': target_scale
+        "analysis_scale_m": analysis_scale,
+        "sources": sources,
+        "planned_counts": planned_counts,
+        "combine": combine,
+        "max_topounits": max_topounits,
+        "target_pixels_per_topounit": target_pixels_per_topounit,
+        "target_scale": target_scale,
     }
 
     # 8) Vectorize to polygons
@@ -719,7 +852,7 @@ def make_topounits(
         combined_entries,
         region=region,
         export_scale=export_scale,
-        extra_image_props=extra_props
+        extra_image_props=extra_props,
     )
 
     # Attach terrain stats (uses DEM; region is fine as "feature")
@@ -732,15 +865,25 @@ def make_topounits(
     )
 
     # 9) Return or export
-    if return_as == 'gdf':
+    if return_as == "gdf":
         gdf = gu.try_to_download_featurecollection(polygons_fc, verbose=verbose)
         if gdf is None:
-            print("Could not return as GeoDataFrame; exporting to Google Drive. Check Tasks in your GEE browser.")
-            gu.export_fc(polygons_fc, f'{asset_name}', asset_ftype, folder='topotest', verbose=True)
+            print(
+                "Could not return as GeoDataFrame; exporting to Google Drive. Check Tasks in your GEE browser."
+            )
+            gu.export_fc(
+                polygons_fc,
+                f"{asset_name}",
+                asset_ftype,
+                folder="topotest",
+                verbose=True,
+            )
             return None
         return gdf
     else:
-        gu.export_fc(polygons_fc, f'{asset_name}', asset_ftype, folder='topotest', verbose=True)
+        gu.export_fc(
+            polygons_fc, f"{asset_name}", asset_ftype, folder="topotest", verbose=True
+        )
         return None
 
 
@@ -842,10 +985,7 @@ def add_topounit_image_samples(
         attached_names.append(out_name)
 
     if verbose:
-        print(
-            "[topounits] Attached sampled properties: "
-            + ", ".join(attached_names)
-        )
+        print("[topounits] Attached sampled properties: " + ", ".join(attached_names))
 
     return gdf
 
@@ -880,8 +1020,8 @@ def make_topounits_for_domain(
     Domain
         domain with domain.topounits populated (expects Domain.with_topounits exists).
     """
-    import pandas as pd
     import geopandas as gpd
+    import pandas as pd
     from pyproj import Geod
 
     # Choose which geometry view to use for topounits (support is the right one)
@@ -912,13 +1052,13 @@ def make_topounits_for_domain(
             a, _p = geod.geometry_area_perimeter(geom)
             return float(abs(a))
         except Exception:
-            # fallback: 0 rather than crashing; user will see pct=nan
+            # Fall back to NaN rather than crashing; percentages become NaN.
             return float("nan")
 
     parts = []
     for row in gdf.itertuples(index=False):
-        gid = str(getattr(row, "gid"))
-        geom = getattr(row, "geometry")
+        gid = str(row.gid)
+        geom = row.geometry
 
         if verbose:
             print(f"[topounits] gid={gid}: building topounits...")
@@ -938,7 +1078,7 @@ def make_topounits_for_domain(
             target_scale=target_scale,
             verbose=verbose,
         )
-        
+
         if tu is None:
             raise RuntimeError(
                 f"make_topounits returned None for gid={gid} "
