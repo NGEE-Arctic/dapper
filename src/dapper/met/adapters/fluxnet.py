@@ -1,18 +1,17 @@
-"""dapper module: met.adapters.fluxnet."""
+"""FLUXNET (AmeriFlux ONEFlux) to ELM adapter."""
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 import pandas as pd
-import warnings
 
+from dapper.elm import utils as eu
 from dapper.met import temporal as dt
 from dapper.met.adapters.base import BaseAdapter
 from dapper.schemas.elm import elm_required_vars, is_nonnegative
-from dapper.elm import utils as eu
 
 
 class FluxnetAdapter(BaseAdapter):
@@ -27,16 +26,17 @@ class FluxnetAdapter(BaseAdapter):
     - Exporter supplies df_merged with ['gid','lat','lon','zone', ...] already
       merged in from df_loc.
     """
-    # These are just for netCDF metadata
+
+    # NetCDF provenance metadata
     SOURCE_NAME = "FLUXNET (AmeriFlux ONEFlux) tower data"
-    DRIVER_TAG  = "FLUXNET"
+    DRIVER_TAG = "FLUXNET"
 
     def __init__(self) -> None:
         # Native FLUXNET resolution (hours, e.g. 0.5, 1, 24, 168, …)
-        self.native_dt_hours: Optional[float] = None
+        self.native_dt_hours: float | None = None
 
         # Resolution code inferred from filename: HH, HR, DD, WW, MM, YY
-        self.resolution: Optional[str] = None
+        self.resolution: str | None = None
 
     # ------------------------------------------------------------------
     # discovery
@@ -153,14 +153,16 @@ class FluxnetAdapter(BaseAdapter):
 
         df["date"] = date
         if df["date"].isna().all():
-            raise ValueError("All parsed timestamps are NaT; check TIMESTAMP_* formatting.")
+            raise ValueError(
+                "All parsed timestamps are NaT; check TIMESTAMP_* formatting."
+            )
 
         df = df.sort_values("date")
 
         # Year filtering / calendar
         df = df[(df["date"].dt.year >= start_year) & (df["date"].dt.year <= end_year)]
         if dt.is_noleap_calendar(calendar):
-            df = df[~((df["date"].dt.month == 2) & (df["date"].dt.day == 29))]
+            df = df[~dt.is_feb29(df["date"])]
 
         # Ensure we have enough raw variables to build ELM vars
         self._check_required_raw_vars(df, dformat)
@@ -219,7 +221,9 @@ class FluxnetAdapter(BaseAdapter):
 
         # Basic NaN diagnostics for required vars
         coord_meta = {"LONGXY", "LATIXY", "time", "gid", "zone"}
-        required_data_vars = [v for v in elm_required_vars(dformat) if v not in coord_meta]
+        required_data_vars = [
+            v for v in elm_required_vars(dformat) if v not in coord_meta
+        ]
         nan_counts = {
             v: int(df[v].isna().sum())
             for v in required_data_vars
@@ -230,8 +234,7 @@ class FluxnetAdapter(BaseAdapter):
             print(f"FluxnetAdapter: variables with NaNs after conversion: {msg}")
 
         all_nan = [
-            v for v in required_data_vars
-            if v in df.columns and df[v].isna().all()
+            v for v in required_data_vars if v in df.columns and df[v].isna().all()
         ]
         if all_nan:
             raise ValueError(
@@ -250,7 +253,7 @@ class FluxnetAdapter(BaseAdapter):
     # ------------------------------------------------------------------
     # internals
     # ------------------------------------------------------------------
-    def _infer_resolution_from_filename(self, path: str) -> Optional[str]:
+    def _infer_resolution_from_filename(self, path: str) -> str | None:
         """
         Infer FLUXNET resolution flag (HH/HR/DD/WW/MM/YY) from filename:
 
@@ -268,7 +271,7 @@ class FluxnetAdapter(BaseAdapter):
         resolution = parts[idx + 2]
         return resolution.upper()
 
-    def _required_roots_for_dformat(self, dformat: str) -> List[str]:
+    def _required_roots_for_dformat(self, dformat: str) -> list[str]:
         """
         FLUXNET variable *roots* needed to construct the ELM-required vars.
         """
@@ -347,7 +350,9 @@ class FluxnetAdapter(BaseAdapter):
                 if i == 0:
                     contrib_mask = col_vals.notna()
                 else:
-                    contrib_mask = col_vals.notna() & stacked[cols[:i]].isna().all(axis=1)
+                    contrib_mask = col_vals.notna() & stacked[cols[:i]].isna().all(
+                        axis=1
+                    )
                 if contrib_mask.any():
                     used_counts[c] = int(contrib_mask.sum())
 
@@ -439,12 +444,9 @@ class FluxnetAdapter(BaseAdapter):
                 lines.append(f"{out_name}: " + ", ".join(parts))
             msg = (
                 "FluxnetAdapter coalesced the following variables "
-                "(source_column=number_of_values_used):\n  " +
-                "\n  ".join(lines)
+                "(source_column=number_of_values_used):\n  " + "\n  ".join(lines)
             )
             warnings.warn(msg, UserWarning)
-            # If you prefer stdout instead:
-            # print(msg)
 
         return out
 
@@ -469,8 +471,10 @@ def infer_fluxnet_dt_hours(df: pd.DataFrame) -> float:
     """
     # Case 1: (half-)hourly or weekly: START/END pair
     if "TIMESTAMP_START" in df.columns and "TIMESTAMP_END" in df.columns:
-        ts_start = pd.to_datetime(df["TIMESTAMP_START"].astype(str), format="%Y%m%d%H%M")
-        ts_end   = pd.to_datetime(df["TIMESTAMP_END"].astype(str),   format="%Y%m%d%H%M")
+        ts_start = pd.to_datetime(
+            df["TIMESTAMP_START"].astype(str), format="%Y%m%d%H%M"
+        )
+        ts_end = pd.to_datetime(df["TIMESTAMP_END"].astype(str), format="%Y%m%d%H%M")
 
         # Each record represents the interval [start, end); use average duration
         dt_seconds = (ts_end - ts_start).dt.total_seconds()
@@ -482,7 +486,9 @@ def infer_fluxnet_dt_hours(df: pd.DataFrame) -> float:
 
     # Case 2: daily / monthly / yearly: single TIMESTAMP
     if "TIMESTAMP" in df.columns:
-        ts = pd.to_datetime(df["TIMESTAMP"].astype(str), format="%Y%m%d", errors="coerce")
+        ts = pd.to_datetime(
+            df["TIMESTAMP"].astype(str), format="%Y%m%d", errors="coerce"
+        )
         if ts.isna().all():
             # fall back to more generic parse if needed
             ts = pd.to_datetime(df["TIMESTAMP"].astype(str), errors="coerce")

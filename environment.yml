@@ -3,6 +3,11 @@ channels:
   - conda-forge
 dependencies:
   - geopandas
+  - shapely
+  - pyproj
+  - pandas>=3
+  - python-dateutil
+  - matplotlib
   - earthengine-api
   - geemap
   - cdsapi>=0.7.7
@@ -14,7 +19,9 @@ dependencies:
   - jupyter
   - fastparquet
   - netcdf4
+  - intake
   - intake-esm # for Pangeo CMIP access
+  - fsspec
   - gcsfs # for Pangeo CMIP downloading
   - folium # interactive mapping
   - contextily # static mapping

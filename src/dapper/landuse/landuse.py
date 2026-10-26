@@ -1,20 +1,21 @@
-"""dapper module: landuse.landuse."""
+"""Sample land-use time-series NetCDFs onto Domain cells (nearest or zonal)."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal
 
-import pandas as pd
-import numpy as np
-import xarray as xr
 import geopandas as gpd
+import numpy as np
+import pandas as pd
+import xarray as xr
 
-from dapper.geo import sampling
 from dapper.domains.domain import Domain
+from dapper.geo import sampling
+from dapper.geo.lonwrap import normalize_lons
 from dapper.surf.fraction_closure import normalize_fraction_closure
 
-LonWrap = Literal["auto", "0_360", "-180_180"]
 
 def sample_landuse_timeseries(
     src_path: str | Path,
@@ -39,7 +40,7 @@ def sample_landuse_timeseries(
     vars_include: Sequence[str] | None = None,
     vars_drop: Sequence[str] | None = None,
     sampling_method: Literal["nearest", "zonal"] = "nearest",
-    targets: "gpd.GeoDataFrame | None" = None,
+    targets: gpd.GeoDataFrame | None = None,
     agg_policy: dict[str, str] | None = None,
     write_zonal_mapping: bool = True,
     append_attrs: dict | None = None,
@@ -52,11 +53,6 @@ def sample_landuse_timeseries(
       - nearest: df_summary is df_loc aligned to sampled cells (includes i_lat/i_lon if available)
       - zonal  : df_summary includes sample_ncells and sample_area_total_m2 per gid
     """
-    from pathlib import Path
-    import numpy as np
-    import pandas as pd
-    import xarray as xr
-
     src_path = Path(src_path)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -117,10 +113,12 @@ def sample_landuse_timeseries(
 
         if output_lon_wrap is not None and "LONGXY" in ds_out:
             lon_vals = ds_out["LONGXY"].values.reshape(-1)
-            lon_vals2 = np.array([sampling.normalize_lon(float(v), output_lon_wrap) for v in lon_vals], dtype=float)
+            lon_vals2 = normalize_lons(lon_vals, output_lon_wrap)
             spec = sampling.infer_latlon_spec(ds_out, lon_wrap=lon_wrap)
             ds_out["LONGXY"] = xr.DataArray(
-                lon_vals2.reshape((ds_out.sizes[spec.lat_dim], ds_out.sizes[spec.lon_dim])),
+                lon_vals2.reshape(
+                    (ds_out.sizes[spec.lat_dim], ds_out.sizes[spec.lon_dim])
+                ),
                 dims=(spec.lat_dim, spec.lon_dim),
                 attrs=dict(ds_out["LONGXY"].attrs),
             )
@@ -133,11 +131,12 @@ def sample_landuse_timeseries(
     if sampling_method != "zonal":
         raise ValueError(f"Unknown sampling_method={sampling_method!r}")
 
-    import geopandas as gpd
     from dapper.geo import zonal
 
     if targets is None:
-        raise ValueError("sampling_method='zonal' requires targets=GeoDataFrame with columns ['gid','geometry'].")
+        raise ValueError(
+            "sampling_method='zonal' requires targets=GeoDataFrame with columns ['gid','geometry']."
+        )
 
     if gid_col not in targets.columns or "geometry" not in targets.columns:
         raise KeyError(f"targets must include columns {gid_col!r} and 'geometry'")
@@ -218,7 +217,11 @@ def sample_landuse_timeseries(
     missing_ll = df0[lat_col].isna() | df0[lon_col].isna()
     if missing_ll.any():
         pts = tgt.geometry.apply(
-            lambda g: g if getattr(g, "geom_type", None) == "Point" else g.representative_point()
+            lambda g: (
+                g
+                if getattr(g, "geom_type", None) == "Point"
+                else g.representative_point()
+            )
         ).reset_index(drop=True)
 
         df0.loc[missing_ll, lon_col] = [float(p.x) for p in pts[missing_ll.to_numpy()]]
@@ -231,7 +234,12 @@ def sample_landuse_timeseries(
     n = len(order)
 
     if od_lat_dim not in out.dims or od_lon_dim not in out.dims:
-        out = out.expand_dims({od_lat_dim: np.arange(n, dtype=np.int32), od_lon_dim: np.arange(1, dtype=np.int32)})
+        out = out.expand_dims(
+            {
+                od_lat_dim: np.arange(n, dtype=np.int32),
+                od_lon_dim: np.arange(1, dtype=np.int32),
+            }
+        )
 
     if "LATIXY" in out:
         out["LATIXY"] = xr.DataArray(
@@ -242,7 +250,7 @@ def sample_landuse_timeseries(
     if "LONGXY" in out:
         lon_vals = df0[lon_col].to_numpy(dtype=np.float64)
         if output_lon_wrap is not None:
-            lon_vals = np.array([sampling.normalize_lon(float(v), output_lon_wrap) for v in lon_vals], dtype=np.float64)
+            lon_vals = normalize_lons(lon_vals, output_lon_wrap)
             out.attrs["output_lon_wrap"] = str(output_lon_wrap)
 
         out["LONGXY"] = xr.DataArray(
@@ -252,10 +260,16 @@ def sample_landuse_timeseries(
         )
 
     ncells = np.array([len(zw.by_gid[str(g)]) for g in order], dtype=np.int32)
-    area_m2 = np.array([zw.by_gid[str(g)]["intersect_area_m2"].sum() for g in order], dtype=np.float64)
+    area_m2 = np.array(
+        [zw.by_gid[str(g)]["intersect_area_m2"].sum() for g in order], dtype=np.float64
+    )
 
-    out["sample_ncells"] = xr.DataArray(ncells.reshape((n, 1)), dims=(od_lat_dim, od_lon_dim))
-    out["sample_area_total_m2"] = xr.DataArray(area_m2.reshape((n, 1)).astype(np.float32), dims=(od_lat_dim, od_lon_dim))
+    out["sample_ncells"] = xr.DataArray(
+        ncells.reshape((n, 1)), dims=(od_lat_dim, od_lon_dim)
+    )
+    out["sample_area_total_m2"] = xr.DataArray(
+        area_m2.reshape((n, 1)).astype(np.float32), dims=(od_lat_dim, od_lon_dim)
+    )
 
     out.attrs["dapper_sampling_method"] = "zonal"
     out.attrs["dapper_sampling_equal_area_crs"] = zw.equal_area_crs
@@ -274,7 +288,9 @@ def sample_landuse_timeseries(
     out = normalize_fraction_closure(out)
     _write_nc(out, out_path)
 
-    df_summary = pd.DataFrame({gid_col: order, "sample_ncells": ncells, "sample_area_total_m2": area_m2})
+    df_summary = pd.DataFrame(
+        {gid_col: order, "sample_ncells": ncells, "sample_area_total_m2": area_m2}
+    )
     return out_path, df_summary
 
 
@@ -317,15 +333,16 @@ def export_landuse_timeseries(
         if out_path.exists() and not overwrite:
             raise FileExistsError(f"{out_path} exists (overwrite=False).")
 
-        if kwargs.get("sampling_method", "nearest") == "zonal":
-            kwargs.setdefault("targets", run_dom.cells[["gid", "geometry"]].copy())
+        run_kwargs = dict(kwargs)
+        if run_kwargs.get("sampling_method", "nearest") == "zonal":
+            run_kwargs.setdefault("targets", run_dom.cells[["gid", "geometry"]].copy())
 
         path_written, _df_cells = sample_landuse_timeseries(
             src_path=src_path,
             df_loc=df_loc,
             out_path=out_path,
             append_attrs=append_attrs,
-            **kwargs,
+            **run_kwargs,
         )
         outputs[run_id] = Path(path_written)
 

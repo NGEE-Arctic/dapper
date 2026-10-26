@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 import xarray as xr
@@ -91,7 +91,9 @@ def _landunit_scalar_names(ds: xr.Dataset) -> list[str]:
 def _apply_landunit_total_closure(ds: xr.Dataset) -> None:
     """Enforce landunit totals to close to 100 (including urban aggregate)."""
     scalar_names = _landunit_scalar_names(ds)
-    landunit_terms: list[xr.DataArray] = [ds[name].astype(np.float64) for name in scalar_names]
+    landunit_terms: list[xr.DataArray] = [
+        ds[name].astype(np.float64) for name in scalar_names
+    ]
 
     urban_group = None
     if "PCT_URBAN" in ds:
@@ -146,7 +148,9 @@ def _apply_landunit_total_closure(ds: xr.Dataset) -> None:
             ds["PCT_URBAN"] = urb + resid
 
 
-def _full_like_from_partition(ds: xr.Dataset, *, var_name: str, dim: str, value: float) -> xr.DataArray | None:
+def _full_like_from_partition(
+    ds: xr.Dataset, *, var_name: str, dim: str, value: float
+) -> xr.DataArray | None:
     if var_name not in ds or dim not in ds[var_name].dims:
         return None
     return xr.full_like(ds[var_name].isel({dim: 0}, drop=True), value, dtype=np.float64)
@@ -159,7 +163,9 @@ def normalize_fraction_closure(ds: xr.Dataset) -> xr.Dataset:
     _apply_landunit_total_closure(ds2)
 
     # Natural-patch weights should sum to 100 for every non-natpft index tuple.
-    tgt_nat = _full_like_from_partition(ds2, var_name="PCT_NAT_PFT", dim="natpft", value=100.0)
+    tgt_nat = _full_like_from_partition(
+        ds2, var_name="PCT_NAT_PFT", dim="natpft", value=100.0
+    )
     if tgt_nat is not None:
         _close_partition(ds2, var_name="PCT_NAT_PFT", dim="natpft", target=tgt_nat)
 
@@ -171,7 +177,11 @@ def normalize_fraction_closure(ds: xr.Dataset) -> xr.Dataset:
             target=ds2["PCT_CROP"].astype(np.float64),
         )
 
-    if "PCT_GLC_MEC" in ds2 and "nglcec" in ds2["PCT_GLC_MEC"].dims and "PCT_GLACIER" in ds2:
+    if (
+        "PCT_GLC_MEC" in ds2
+        and "nglcec" in ds2["PCT_GLC_MEC"].dims
+        and "PCT_GLACIER" in ds2
+    ):
         _close_partition(
             ds2,
             var_name="PCT_GLC_MEC",
@@ -180,9 +190,13 @@ def normalize_fraction_closure(ds: xr.Dataset) -> xr.Dataset:
         )
 
     # TopounitFracArea is a decimal fraction (0-1) and should sum to 1.0 over topounit.
-    tgt_top = _full_like_from_partition(ds2, var_name="TopounitFracArea", dim="topounit", value=1.0)
+    tgt_top = _full_like_from_partition(
+        ds2, var_name="TopounitFracArea", dim="topounit", value=1.0
+    )
     if tgt_top is not None:
-        _close_partition(ds2, var_name="TopounitFracArea", dim="topounit", target=tgt_top)
+        _close_partition(
+            ds2, var_name="TopounitFracArea", dim="topounit", target=tgt_top
+        )
 
     _close_unit_partition(ds2, left="FSURF", right="FGRD")
 

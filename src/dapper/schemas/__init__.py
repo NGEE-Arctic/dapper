@@ -1,2 +1,1 @@
-"""dapper module: schemas.__init__."""
-
+"""Canonical ELM variable schemas."""

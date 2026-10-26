@@ -1,4 +1,3 @@
-# dapper/met/temporal.py
 """
 Temporal helpers used by Exporter and adapters.
 NetCDF I/O is handled in dapper.met.writers. This module is intentionally small.
@@ -6,7 +5,6 @@ NetCDF I/O is handled in dapper.met.writers. This module is intentionally small.
 
 import numpy as np
 import pandas as pd
-
 
 _CUMDAYS_NONLEAP = np.asarray(
     [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334], dtype=np.int64
@@ -18,6 +16,11 @@ _NOLEAP_CALENDAR_ALIASES = {
     "365_day",
     "365day",
 }
+
+# Instantaneous state variables: interpolated in time.
+_LINEAR_VARS = ["TBOT", "DTBOT", "RH", "QBOT", "PSRF", "ZBOT", "UWIND", "VWIND", "WIND"]
+# Rates/fluxes: forward-filled (non-interval alignment path only).
+_FFILL_VARS = ["FSDS", "FLDS", "PRECTmms"]
 
 
 def normalize_calendar(calendar: str = "standard") -> str:
@@ -36,11 +39,16 @@ def is_noleap_calendar(calendar: str = "standard") -> bool:
     return normalize_calendar(calendar) == "noleap"
 
 
+def is_feb29(times) -> np.ndarray:
+    """Boolean mask of Feb 29 entries in a 1D array-like of datetimes."""
+    tidx = pd.DatetimeIndex(times)
+    return np.asarray((tidx.month == 2) & (tidx.day == 29))
+
+
 def _drop_feb29(times):
     """Drop Feb 29 timestamps from a 1D array-like of datetimes."""
     tidx = pd.DatetimeIndex(times)
-    mask = ~((tidx.month == 2) & (tidx.day == 29))
-    return tidx[mask].to_numpy()
+    return tidx[~is_feb29(tidx)].to_numpy()
 
 
 def _noleap_offset(dtime_units: str, target_times, ref_date):
@@ -89,6 +97,8 @@ def _numeric_dtime(target_times, calendar: str, dtime_units: str):
     """Return numeric DTIME values and their CF units attribute."""
     ref_date = target_times[0]
     if is_noleap_calendar(calendar):
+        # DTIME must be computed in the declared calendar: Gregorian timedeltas
+        # would shift Mar 1 to Mar 2 in leap years when decoded as noleap.
         values = _noleap_offset(dtime_units, target_times, ref_date)
     elif dtime_units == "days":
         values = (target_times - ref_date) / np.timedelta64(1, "D")
@@ -97,7 +107,9 @@ def _numeric_dtime(target_times, calendar: str, dtime_units: str):
     else:
         raise ValueError("Unsupported dtime_units: choose 'days' or 'hours'")
 
-    units = f"{dtime_units} since {pd.Timestamp(ref_date).strftime('%Y-%m-%d %H:%M:%S')}"
+    units = (
+        f"{dtime_units} since {pd.Timestamp(ref_date).strftime('%Y-%m-%d %H:%M:%S')}"
+    )
     return np.asarray(values, dtype="float64"), units
 
 
@@ -131,12 +143,16 @@ def _create_interval_aligned_dtime(
     if interval_cols:
         valid_interval_rows = source[interval_cols].notna().all(axis=1)
         if not valid_interval_rows.any():
-            raise ValueError("End-labeled interval variables contain no complete source rows.")
+            raise ValueError(
+                "End-labeled interval variables contain no complete source rows."
+            )
         source_end = source.loc[valid_interval_rows, "time"].max()
     else:
         source_end = source["time"].max()
 
-    start = pd.Timestamp(target_start) if target_start is not None else source["time"].min()
+    start = (
+        pd.Timestamp(target_start) if target_start is not None else source["time"].min()
+    )
     end = pd.Timestamp(source_end) - target_step
     if end < start:
         raise ValueError(
@@ -157,17 +173,11 @@ def _create_interval_aligned_dtime(
     target_index = pd.DatetimeIndex(target_times, name="time")
     state_source = source.set_index("time").sort_index()
     if is_noleap_calendar(calendar):
-        state_source = state_source[
-            ~((state_source.index.month == 2) & (state_source.index.day == 29))
-        ]
+        state_source = state_source[~is_feb29(state_source.index)]
 
-    linear_vars = [
-        "TBOT", "DTBOT", "RH", "QBOT", "PSRF", "ZBOT",
-        "UWIND", "VWIND", "WIND",
-    ]
     df_out = pd.DataFrame(index=target_index)
 
-    state_cols = [name for name in linear_vars if name in state_source.columns]
+    state_cols = [name for name in _LINEAR_VARS if name in state_source.columns]
     if state_cols:
         states = state_source[state_cols]
         if target_minutes > source_minutes:
@@ -185,9 +195,7 @@ def _create_interval_aligned_dtime(
         intervals = source.set_index("time")[interval_cols].sort_index()
         intervals.index = intervals.index - source_step
         if is_noleap_calendar(calendar):
-            intervals = intervals[
-                ~((intervals.index.month == 2) & (intervals.index.day == 29))
-            ]
+            intervals = intervals[~is_feb29(intervals.index)]
         intervals = intervals[~intervals.index.duplicated(keep="last")]
 
         if target_minutes > source_minutes:
@@ -204,10 +212,12 @@ def _create_interval_aligned_dtime(
     other_cols = [
         name
         for name in state_source.columns
-        if name not in set(linear_vars).union(interval_end_vars)
+        if name not in set(_LINEAR_VARS).union(interval_end_vars)
     ]
     if other_cols:
-        df_out[other_cols] = state_source[other_cols].reindex(target_index).ffill().bfill()
+        df_out[other_cols] = (
+            state_source[other_cols].reindex(target_index).ffill().bfill()
+        )
 
     df_out = df_out.reset_index()
     dtime_vals, dtime_attr = _numeric_dtime(
@@ -244,7 +254,9 @@ def create_dtime(
 
     if interval_end_vars:
         if source_interval_hrs is None or source_interval_hrs <= 0:
-            raise ValueError("source_interval_hrs must be > 0 for end-labeled intervals.")
+            raise ValueError(
+                "source_interval_hrs must be > 0 for end-labeled intervals."
+            )
         return _create_interval_aligned_dtime(
             df,
             calendar=calendar,
@@ -260,12 +272,7 @@ def create_dtime(
     df = df.sort_values("time")
 
     if is_noleap_calendar(calendar):
-        df = df[~((df["time"].dt.month == 2) & (df["time"].dt.day == 29))]
-
-    # Variable categories (ELM-ish)
-    linear_vars = ['TBOT', 'DTBOT', 'RH', 'QBOT', 'PSRF', 'ZBOT', 'UWIND', 'VWIND', 'WIND']
-    ffill_vars  = ['FSDS', 'FLDS', 'PRECTmms']
-    accum_vars  = []  # put true accumulations here if needed
+        df = df[~is_feb29(df["time"])]
 
     # --- derive target step in minutes (rounded to nearest minute) ---
     step_minutes = int(round(float(dtime_resolution_hrs) * 60.0))
@@ -274,9 +281,12 @@ def create_dtime(
 
     # --- infer native cadence (median minute delta) ---
     if len(df) >= 2:
-        diffs_min = (df["time"].sort_values().diff().dropna()
-                     / np.timedelta64(1, "m")).to_numpy()
-        native_step_minutes = int(round(np.median(diffs_min))) if diffs_min.size else step_minutes
+        diffs_min = (
+            df["time"].sort_values().diff().dropna() / np.timedelta64(1, "m")
+        ).to_numpy()
+        native_step_minutes = (
+            int(round(np.median(diffs_min))) if diffs_min.size else step_minutes
+        )
         if native_step_minutes < 1:
             native_step_minutes = 1
     else:
@@ -304,60 +314,46 @@ def create_dtime(
     if len(target_times) == 0:
         raise ValueError("No timestamps remain after applying calendar filtering.")
 
-    ref_date = target_times[0]
+    dtime_vals, dtime_attr = _numeric_dtime(
+        target_times, calendar=calendar, dtime_units=dtime_units
+    )
 
-    # Numeric DTIME
-    if is_noleap_calendar(calendar):
-        # IMPORTANT: DTIME must be computed in the declared calendar.
-        # Using real (Gregorian) timedeltas in leap years will shift Mar 1 → Mar 2
-        # and push the end of year into the next year when interpreted as 'noleap'.
-        dtime_vals = _noleap_offset(dtime_units, target_times, ref_date)
-    else:
-        if dtime_units == "days":
-            dtime_vals = (target_times - ref_date) / np.timedelta64(1, "D")
-        elif dtime_units == "hours":
-            dtime_vals = (target_times - ref_date) / np.timedelta64(1, "h")
-        else:
-            raise ValueError("Unsupported dtime_units: choose 'days' or 'hours'")
-
-    dtime_attr = f"{dtime_units} since {pd.Timestamp(ref_date).strftime('%Y-%m-%d %H:%M:%S')}"
-
-    # Align to target axis with your existing rules
+    # Align to the target axis
     df = df.set_index("time").sort_index()
     target_index = pd.DatetimeIndex(target_times, name="time")
     df_out = pd.DataFrame(index=target_index)
 
     # (1) Interpolate state vars
-    cols = [c for c in linear_vars if c in df.columns]
+    cols = [c for c in _LINEAR_VARS if c in df.columns]
     if cols:
         df_out[cols] = (
-            df[cols].reindex(target_index)
-                    .interpolate(method="time", limit_direction="both")
-                    .ffill().bfill()
+            df[cols]
+            .reindex(target_index)
+            .interpolate(method="time", limit_direction="both")
+            .ffill()
+            .bfill()
         )
 
     # (2) Forward-fill rates/fluxes
-    cols = [c for c in ffill_vars if c in df.columns]
+    cols = [c for c in _FFILL_VARS if c in df.columns]
     if cols:
         df_out[cols] = df[cols].reindex(target_index).ffill().bfill()
 
-    # (3) True accumulations (none by default)
-    for v in accum_vars:
-        if v in df.columns:
-            df_out[v] = df[v].reindex(target_index).ffill().bfill()
-
-    # (4) Carry through other columns (meta), fill both ways
-    other_cols = [c for c in df.columns if c not in (linear_vars + ffill_vars + accum_vars)]
+    # (3) Carry through other columns (meta), fill both ways
+    other_cols = [c for c in df.columns if c not in (_LINEAR_VARS + _FFILL_VARS)]
     if other_cols:
         df_out[other_cols] = df[other_cols].reindex(target_index).ffill().bfill()
 
     df_out.index.name = "time"
-    df_out = (df_out.reset_index()
-                    .sort_values("time")
-                    .drop_duplicates(subset="time", keep="first"))
+    df_out = (
+        df_out.reset_index()
+        .sort_values("time")
+        .drop_duplicates(subset="time", keep="first")
+    )
 
-    assert np.array_equal(df_out["time"].to_numpy(), target_times), \
+    assert np.array_equal(df_out["time"].to_numpy(), target_times), (
         "df_out['time'] does not match generated target_times"
+    )
 
     return dtime_vals.astype("float64"), dtime_attr, df_out
 
@@ -383,9 +379,11 @@ def start_end_years_from_dates(
     dates.sort_values(by="date", inplace=True)
 
     if is_noleap_calendar(calendar):
-        dates = dates[~((dates["date"].dt.month == 2) & (dates["date"].dt.day == 29))]
+        dates = dates[~is_feb29(dates["date"])]
         if dates.empty:
-            raise ValueError("No dates remain after applying noleap calendar filtering.")
+            raise ValueError(
+                "No dates remain after applying noleap calendar filtering."
+            )
 
     dates["year"] = dates["date"].dt.year
     dates["month_day"] = dates["date"].dt.month * 100 + dates["date"].dt.day

@@ -1,179 +1,52 @@
 """Surface file construction, customization, and validation helpers."""
 
-from typing import Dict, Any, Optional, Tuple, Union, List, Literal
 import tempfile
+import warnings
 from pathlib import Path
+from typing import Any, Literal, Optional, Union
 
 import numpy as np
-import xarray as xr
 import pandas as pd
+import xarray as xr
 
+from dapper.geo import sampling
+from dapper.io.attrs import merge_global_attrs  # shared gridded sampler
 from dapper.surf import schema as SC
-from dapper.surf import sample as SP  # for from_halfdegree_point 
-from dapper.geo import sampling  # shared gridded sampler
+from dapper.surf.fraction_closure import (
+    closure_critical_variables,
+    normalize_fraction_closure,
+)
 from dapper.surf.surface_var_specs import SURFACE_VAR_SPECS
-from dapper.surf.fraction_closure import normalize_fraction_closure, closure_critical_variables
 
 ArrayLike = Union[np.ndarray, "xr.DataArray", float, int]
 
 
 _NETCDF4_ALLOWED = {
-    "blosc_shuffle","complevel","dtype","chunksizes","compression",
-    "significant_digits","least_significant_digit","endian","zlib",
-    "szip_pixels_per_block","contiguous","szip_coding","shuffle",
-    "_FillValue","fletcher32","quantize_mode"
+    "blosc_shuffle",
+    "complevel",
+    "dtype",
+    "chunksizes",
+    "compression",
+    "significant_digits",
+    "least_significant_digit",
+    "endian",
+    "zlib",
+    "szip_pixels_per_block",
+    "contiguous",
+    "szip_coding",
+    "shuffle",
+    "_FillValue",
+    "fletcher32",
+    "quantize_mode",
 }
 # Encodings we sometimes inherit from upstream files that netCDF4 can’t accept
-_NETCDF4_STRIP = {"zstd","bzip2","blosc","szip"}  # 'szip' here is the legacy flag, not the nc4 pair
+_NETCDF4_STRIP = {
+    "zstd",
+    "bzip2",
+    "blosc",
+    "szip",
+}  # 'szip' here is the legacy flag, not the nc4 pair
 
-def build_surface_dataset(
-    sampled: Dict[str, Any],
-    *,
-    include: Optional[set[str]] = None,
-    drop_non_spatial_arrays: bool = False,
-) -> xr.Dataset:
-    """
-    Turn a sampled dict (from sample_point_values) into a 1x1 ELM surface xarray.Dataset.
-    Adds spatial dims back as length-1 and preserves other dims in file order.
-    """
-    meta = sampled["__meta__"]
-    coords_src = sampled.get("__coords__", {})
-    lat_dim, lon_dim = meta["lat_dim"], meta["lon_dim"]
-
-    # Prepare coordinate arrays
-    coords = {
-        lat_dim: (lat_dim, np.array([0], dtype=np.int32)),  # length-1 dims; indices can be dummy
-        lon_dim: (lon_dim, np.array([0], dtype=np.int32)),
-    }
-    # Attach known small-dim coordinates (time, natpft, nlevsoi, etc.) if present
-    for dim, vals in coords_src.items():
-        if isinstance(vals, np.ndarray):
-            coords[dim] = (dim, vals)
-
-    data_vars = {}
-
-    def _is_int_dtype(dtype_str: str) -> bool:
-        return dtype_str.startswith(("int","uint"))
-
-    # Build each variable
-    for name, spec in sampled.items():
-        if name.startswith("__"):  # skip meta/coords
-            continue
-        if include and name not in include:
-            continue
-
-        dims_no_spatial = tuple(spec["dims"])
-        orig_dims = tuple(spec["orig_dims"])
-        data = spec["data"]
-        attrs = spec.get("attrs", {})
-        dtype_str = spec.get("dtype", "float32")
-
-        # Optionally skip truly non-spatial arrays
-        if drop_non_spatial_arrays and ((meta["lat_dim"] not in orig_dims) and (meta["lon_dim"] not in orig_dims)):
-            continue
-
-        # Reconstruct dims by appending spatial dims at the end (ELM convention: ... , lsmlat, lsmlon)
-        # Assumption holds for standard ELM files (time/other dims precede spatial).
-        target_dims = list(dims_no_spatial) + [lat_dim, lon_dim]
-
-        # Compute target shape: non-spatial shape + (1,1)
-        if data.shape == ():  # scalar -> (1,1)
-            arr = np.array([[data]], dtype=np.float32)
-        else:
-            arr = np.asarray(data)
-            arr = arr.reshape(list(arr.shape) + [1, 1])
-
-        data_vars[name] = (target_dims, arr.astype(arr.dtype, copy=False), attrs)
-
-    ds = xr.Dataset(data_vars=data_vars, coords=coords)
-
-    # Add convenience LATIXY/LONGXY variables if desired
-    lat_on_grid = sampled["__meta__"]["lat_on_grid"]
-    lon_on_grid = sampled["__meta__"]["lon_on_grid"]
-    ds["LATIXY"] = xr.DataArray(np.array([[lat_on_grid]], dtype=np.float32), dims=(lat_dim, lon_dim))
-    ds["LONGXY"] = xr.DataArray(np.array([[lon_on_grid]], dtype=np.float32), dims=(lat_dim, lon_dim))
-
-    # Global attrs
-    ds.attrs.update(sampled["__meta__"].get("global_attrs", {}))
-    ds.attrs["history"] = (ds.attrs.get("history","") +
-                           f" | dapper.surf.write: built from sampled point at "
-                           f"({sampled['__meta__']['lat_on_grid']:.6f}, {sampled['__meta__']['lon_on_grid']:.6f})").strip()
-
-    return ds
-
-def build_surface_dataset_cellset(
-    sampled_list: List[Dict[str, Any]],
-    *,
-    include: Optional[set[str]] = None,
-    drop_non_spatial_arrays: bool = False,
-) -> xr.Dataset:
-    """
-    Build an ELM surface xarray.Dataset for a cellset laid out as (nj=N, ni=1).
-    This mirrors your domain writer default of N×1, and keeps spatial dims last.
-
-    Each entry of sampled_list is the dict returned by SurfacePointSampler.sample().
-    """
-    if not sampled_list:
-        raise ValueError("build_surface_dataset_cellset(): sampled_list is empty.")
-
-    meta0 = sampled_list[0]["__meta__"]
-    coords_src = sampled_list[0].get("__coords__", {})
-    lat_dim, lon_dim = meta0["lat_dim"], meta0["lon_dim"]
-
-    nj = len(sampled_list)
-    ni = 1
-
-    coords = {
-        lat_dim: (lat_dim, np.arange(nj, dtype=np.int32)),
-        lon_dim: (lon_dim, np.arange(ni, dtype=np.int32)),
-    }
-    for dim, vals in coords_src.items():
-        if isinstance(vals, np.ndarray):
-            coords[dim] = (dim, vals)
-
-    # Use variable names from the first sample (assume consistent filtering across samples)
-    names = [n for n in sampled_list[0].keys() if not n.startswith("__")]
-    if include:
-        names = [n for n in names if n in include]
-
-    data_vars: Dict[str, Any] = {}
-
-    for name in names:
-        spec0 = sampled_list[0][name]
-        dims_no_spatial = tuple(spec0["dims"])
-        orig_dims = tuple(spec0["orig_dims"])
-        attrs = spec0.get("attrs", {})
-
-        if drop_non_spatial_arrays and ((lat_dim not in orig_dims) and (lon_dim not in orig_dims)):
-            continue
-
-        # Collect per-cell arrays (all should share the same non-spatial shape)
-        per_cell = []
-        for smp in sampled_list:
-            spec = smp[name]
-            data = np.asarray(spec["data"])
-            per_cell.append(data)
-
-        # Stack along new lat_dim (nj), then add lon_dim (ni=1)
-        stacked = np.stack(per_cell, axis=-1)   # shape: base_shape + (nj,)
-        stacked = np.expand_dims(stacked, axis=-1)  # -> base_shape + (nj,1)
-
-        target_dims = list(dims_no_spatial) + [lat_dim, lon_dim]
-        data_vars[name] = (target_dims, stacked.astype(stacked.dtype, copy=False), attrs)
-
-    ds = xr.Dataset(data_vars=data_vars, coords=coords)
-
-    # LATIXY/LONGXY: (nj,1)
-    lat_on_grid = np.array([s["__meta__"]["lat_on_grid"] for s in sampled_list], dtype=np.float32).reshape(nj, 1)
-    lon_on_grid = np.array([s["__meta__"]["lon_on_grid"] for s in sampled_list], dtype=np.float32).reshape(nj, 1)
-    ds["LATIXY"] = xr.DataArray(lat_on_grid, dims=(lat_dim, lon_dim))
-    ds["LONGXY"] = xr.DataArray(lon_on_grid, dims=(lat_dim, lon_dim))
-
-    # Global attrs: use first sample
-    ds.attrs.update(meta0.get("global_attrs", {}))
-    ds.attrs["history"] = (ds.attrs.get("history", "") +
-                           f" | dapper.surf.write: built from {nj} sampled points").strip()
-    return ds
 
 def write_surface_nc(
     ds: xr.Dataset,
@@ -184,27 +57,16 @@ def write_surface_nc(
     add_created_utc: bool = True,
 ) -> str:
     """Write a surface Dataset to NetCDF with ELM-friendly defaults and merged attributes."""
-    
-    import datetime as _dt
-
-    # ---- global attrs ----
     ds2 = normalize_fraction_closure(ds)
-    merged = dict(ds2.attrs)
-
-    if dapper_attrs:
-        for k, v in dict(dapper_attrs).items():
-            merged.setdefault(k, v)
-
-    if add_created_utc:
-        merged.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
-
-    if append_attrs:
-        merged.update(dict(append_attrs))
-
-    ds2.attrs = merged
+    ds2.attrs = merge_global_attrs(
+        ds2.attrs,
+        dapper_attrs=dapper_attrs,
+        append_attrs=append_attrs,
+        add_created_utc=add_created_utc,
+    )
 
     closure_critical = closure_critical_variables(ds2.data_vars)
-    enc: Dict[str, dict] = {}
+    enc: dict[str, dict] = {}
     for v in ds2.data_vars:
         # Fill values must match dtype. Most float vars are written as float32,
         # while closure-critical fractions stay float64 to preserve exact sums.
@@ -221,25 +83,22 @@ def write_surface_nc(
 class CustomizeError(ValueError):
     """Raised when a customization fails schema/formatting validation."""
 
+
 # --------- helpers reused across update/add ---------
 
-def _latlon_dim_names(ds: xr.Dataset) -> Tuple[Optional[str], Optional[str]]:
-    lat_candidates = ("lsmlat","lat","latitude","y")
-    lon_candidates = ("lsmlon","lon","longitude","x")
-    lat = next((d for d in ds.dims if d in lat_candidates), None)
-    lon = next((d for d in ds.dims if d in lon_candidates), None)
-    return lat, lon
 
 _DIM_ALIASES = {
-    "lsmlat": ("lsmlat","lat","latitude","y"),
-    "lsmlon": ("lsmlon","lon","longitude","x"),
-    "natpft": ("natpft","lsmpft"),
+    "lsmlat": ("lsmlat", "lat", "latitude", "y"),
+    "lsmlon": ("lsmlon", "lon", "longitude", "x"),
+    "natpft": ("natpft", "lsmpft"),
 }
 
-def _resolve_dim_name(ds: xr.Dataset, reg_dim: str) -> Optional[str]:
+
+def _resolve_dim_name(ds: xr.Dataset, reg_dim: str) -> str | None:
     """Map a registry dim to the actual name used in ds (handles common aliases)."""
     candidates = _DIM_ALIASES.get(reg_dim, (reg_dim,))
     return next((d for d in ds.dims if d in candidates), None)
+
 
 def _ensure_dataarray(value: ArrayLike, like: xr.DataArray) -> xr.DataArray:
     """
@@ -252,7 +111,9 @@ def _ensure_dataarray(value: ArrayLike, like: xr.DataArray) -> xr.DataArray:
         try:
             return value.broadcast_like(like)
         except Exception as e:
-            raise CustomizeError(f"value for {like.name!r} not broadcastable to dims {like.dims}: {e}") from e
+            raise CustomizeError(
+                f"value for {like.name!r} not broadcastable to dims {like.dims}: {e}"
+            ) from e
     if np.isscalar(value):
         return xr.full_like(like, np.asarray(value), dtype=like.dtype)
     if isinstance(value, np.ndarray):
@@ -265,25 +126,35 @@ def _ensure_dataarray(value: ArrayLike, like: xr.DataArray) -> xr.DataArray:
                 try:
                     return tmp.broadcast_like(like)
                 except Exception as e:
-                    raise CustomizeError(f"1D override cannot broadcast to {like.dims}: {e}") from e
-        raise CustomizeError(f"ndarray shape {value.shape} not broadcastable to {like.shape}")
+                    raise CustomizeError(
+                        f"1D override cannot broadcast to {like.dims}: {e}"
+                    ) from e
+        raise CustomizeError(
+            f"ndarray shape {value.shape} not broadcastable to {like.shape}"
+        )
     raise CustomizeError(f"Unsupported customization type: {type(value).__name__}")
 
-def _coerce_dtype(da: xr.DataArray, reg_dtype: Optional[str]) -> xr.DataArray:
+
+def _coerce_dtype(da: xr.DataArray, reg_dtype: str | None) -> xr.DataArray:
     """Cast to registry dtype when provided; disallow float↔int switches."""
     if not reg_dtype:
         return da
     actual, want = str(da.dtype), reg_dtype
     if actual == want:
         return da
-    a_is_int = actual.startswith(("int","uint"))
-    w_is_int = want.startswith(("int","uint"))
+    a_is_int = actual.startswith(("int", "uint"))
+    w_is_int = want.startswith(("int", "uint"))
     if a_is_int != w_is_int:
-        raise CustomizeError(f"dtype mismatch for {da.name!r}: cannot cast {actual} to {want} (int/float switch).")
+        raise CustomizeError(
+            f"dtype mismatch for {da.name!r}: cannot cast {actual} to {want} (int/float switch)."
+        )
     try:
         return da.astype(want)
     except Exception as e:
-        raise CustomizeError(f"failed dtype cast for {da.name!r}: {actual} -> {want}: {e}") from e
+        raise CustomizeError(
+            f"failed dtype cast for {da.name!r}: {actual} -> {want}: {e}"
+        ) from e
+
 
 def _preserve_encoding(old: xr.DataArray, new: xr.DataArray) -> xr.DataArray:
     """Carry over attrs+encoding from old var (including _FillValue)."""
@@ -291,13 +162,16 @@ def _preserve_encoding(old: xr.DataArray, new: xr.DataArray) -> xr.DataArray:
     new.encoding = dict(old.encoding)
     return new
 
+
 def _build_template_da_for_new_var(ds: xr.Dataset, var: str) -> xr.DataArray:
     """
     Create a zero-valued template DataArray for a NEW variable using REGISTRY dims/dtype/units,
     aligned to the dataset's actual dim names and sizes. All required dims must already exist.
     """
     if var not in SC.REGISTRY:
-        raise CustomizeError(f"unknown variable {var!r}; not found in registry (set strict_registry=False to bypass).")
+        raise CustomizeError(
+            f"unknown variable {var!r}; not found in registry (set strict_registry=False to bypass)."
+        )
     spec: SC.ParDef = SC.REGISTRY[var]  # dims, dtype, units, attrs
     reg_dims = list(spec.dims)
 
@@ -309,8 +183,6 @@ def _build_template_da_for_new_var(ds: xr.Dataset, var: str) -> xr.DataArray:
             raise CustomizeError(f"dataset is missing required dim for {var!r}: {d!r}")
         actual_dims.append(resolved)
 
-    # Build coords and shape from ds
-    coords = {d: ds.coords[d] if d in ds.coords else (d, np.arange(ds.sizes[d])) for d in actual_dims}
     shape = tuple(ds.sizes[d] for d in actual_dims)
 
     # Create template
@@ -322,9 +194,10 @@ def _build_template_da_for_new_var(ds: xr.Dataset, var: str) -> xr.DataArray:
     if spec.units:
         da.attrs["units"] = spec.units
     # sensible default fill for new float vars
-    if not str(da.dtype).startswith(("int","uint")):
+    if not str(da.dtype).startswith(("int", "uint")):
         da.encoding["_FillValue"] = np.float32(np.nan)
     return da
+
 
 def _sanitize_netcdf4_encoding(var_enc: dict, dtype) -> dict:
     """Remove unsupported keys/values for netCDF4 engine and normalize compression flags."""
@@ -340,7 +213,7 @@ def _sanitize_netcdf4_encoding(var_enc: dict, dtype) -> dict:
     # Normalize generic 'compression' to netCDF4's 'zlib' flag when appropriate
     if "compression" in enc:
         comp = str(enc["compression"]).lower()
-        if comp in ("zlib","deflate","gzip","true","1"):
+        if comp in ("zlib", "deflate", "gzip", "true", "1"):
             enc["zlib"] = True
         enc.pop("compression", None)
 
@@ -359,24 +232,27 @@ def _sanitize_netcdf4_encoding(var_enc: dict, dtype) -> dict:
         else:
             # int vars: ensure integer fill (no NaN)
             try:
-                enc["_FillValue"] = np.asarray(0 if fv is None or np.isnan(fv) else fv, dtype=dtype).item()
+                enc["_FillValue"] = np.asarray(
+                    0 if fv is None or np.isnan(fv) else fv, dtype=dtype
+                ).item()
             except Exception:
                 enc.pop("_FillValue", None)
 
     return enc
 
+
 def customize_surface(
     src_path: str | Path,
-    customizations: Dict[str, Any],
-    nc_out: Optional[str | Path] = None,
+    customizations: dict[str, Any],
+    nc_out: str | Path | None = None,
     *,
     strict_registry: bool = True,
     allow_add: bool = True,
     run_validation: bool = False,
-    validator_kwargs: Optional[Dict[str, Any]] = None,
-    units_policy: str = "enforce",      # <— default enforce
-    engine: str = "netcdf4",            # future-proof, we sanitize netcdf4 above
-) -> Tuple[str, Optional["pd.DataFrame"]]:
+    validator_kwargs: dict[str, Any] | None = None,
+    units_policy: str = "enforce",
+    engine: str | None = None,
+) -> tuple[str, Optional["pd.DataFrame"]]:
     """
     Update or add parameters in an existing ELM surface NetCDF (path-only API).
 
@@ -405,14 +281,18 @@ def customize_surface(
         Output path; default is '<stem>_custom.nc' next to input.
     strict_registry : bool
         Require variables to exist in schema.REGISTRY. True recommended.
-    validate_units : bool
-        Ensure file units match registry units (registry ''/'varies' are skipped).
     allow_add : bool
         Permit adding new variables; otherwise only overwrite existing ones.
     run_validation : bool
         If True, run dapper.surf.validate.SurfaceValidator on the written file and return the report.
     validator_kwargs : dict
         Passed to SurfaceValidator(...).
+    units_policy : {"enforce", "warn", "ignore"}
+        What to do when an existing variable's units differ from the registry
+        (registry units ``''``/``'varies'`` are skipped): raise ``CustomizeError``,
+        emit a ``UserWarning``, or proceed silently.
+    engine : str, optional
+        Deprecated and ignored; passing it emits a ``DeprecationWarning``.
 
     Returns
     -------
@@ -422,21 +302,25 @@ def customize_surface(
     ------
     CustomizeError on shape/dtype/units/dim mismatches.
     """
-    import pandas as pd  # only used in return type
+
+    if engine is not None:
+        warnings.warn(
+            "customize_surface(engine=...) is ignored and will be removed.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     src_path = str(src_path)
     ds = xr.open_dataset(src_path)
     ds_edit = ds.copy()
 
-    lat_dim, lon_dim = _latlon_dim_names(ds)  # detected, not strictly required here
-
-    def _parse_spec(var: str, spec: Any) -> Tuple[Any, Optional[str], Optional[str]]:
+    def _parse_spec(spec: Any) -> tuple[Any, str | None, str | None]:
         """Return (value, dtype_override, units_override)."""
         if isinstance(spec, dict) and "value" in spec:
             return spec["value"], spec.get("dtype"), spec.get("units")
         return spec, None, None
 
     for var, spec in customizations.items():
-        value, dtype_override, units_override = _parse_spec(var, spec)
+        value, dtype_override, units_override = _parse_spec(spec)
         in_file = var in ds_edit
 
         # ---- Overwrite existing variable ----
@@ -449,18 +333,19 @@ def customize_surface(
                 file_units = str((targ.attrs or {}).get("units", "")).strip()
                 enforce = reg_units and reg_units.lower() not in ("varies",)
                 if enforce and file_units and (file_units != reg_units):
+                    msg = f"units mismatch for {var}: file={file_units!r}, registry={reg_units!r}"
                     if units_policy == "enforce":
-                        raise CustomizeError(
-                            f"units mismatch for {var}: file={file_units!r}, registry={reg_units!r}"
-                        )
+                        raise CustomizeError(msg)
+                    if units_policy == "warn":
+                        warnings.warn(msg, UserWarning, stacklevel=2)
                     # 'warn' / 'ignore': proceed without mutating attrs
 
             # Value → DataArray broadcastable to targ
             new_da = _ensure_dataarray(value, like=targ)
 
-            # Dtype coercion (registry or override)
-            reg_dtype = dtype_override or (SC.REGISTRY[var].dtype if var in SC.REGISTRY else None)
-            new_da = _coerce_dtype(new_da, reg_dtype)
+            # Existing variables keep their file dtype unless overridden; registry
+            # dtypes are only the "float32" default (specs carry no dtype).
+            new_da = _coerce_dtype(new_da, dtype_override)
             new_da.name = var
             new_da = _preserve_encoding(targ, new_da)
 
@@ -469,31 +354,46 @@ def customize_surface(
 
         # ---- Add new variable ----
         if not allow_add:
-            raise CustomizeError(f"{var!r} not in file; set allow_add=True to add new variables.")
+            raise CustomizeError(
+                f"{var!r} not in file; set allow_add=True to add new variables."
+            )
 
         if strict_registry:
             # Use registry dims/dtype/units and dataset dims/coords
             template = _build_template_da_for_new_var(ds_edit, var)
         else:
             # Require user-provided dims/dtype/units (minimal)
-            if not (isinstance(spec, dict) and "value" in spec and "dims" in spec and "dtype" in spec and "units" in spec):
-                raise CustomizeError(f"adding {var!r} without registry requires spec dict with 'value','dims','dtype','units'")
+            if not (
+                isinstance(spec, dict)
+                and "value" in spec
+                and "dims" in spec
+                and "dtype" in spec
+                and "units" in spec
+            ):
+                raise CustomizeError(
+                    f"adding {var!r} without registry requires spec dict with 'value','dims','dtype','units'"
+                )
             dims = tuple(spec["dims"])
             for d in dims:
                 if d not in ds_edit.dims:
-                    raise CustomizeError(f"dataset missing requested dim {d!r} for new var {var!r}")
-            coords = {d: ds_edit.coords[d] if d in ds_edit.coords else (d, np.arange(ds_edit.sizes[d])) for d in dims}
-            arr = np.zeros(tuple(ds_edit.sizes[d] for d in dims), dtype=np.dtype(spec["dtype"]))
+                    raise CustomizeError(
+                        f"dataset missing requested dim {d!r} for new var {var!r}"
+                    )
+            arr = np.zeros(
+                tuple(ds_edit.sizes[d] for d in dims), dtype=np.dtype(spec["dtype"])
+            )
             template = xr.DataArray(arr, dims=dims, attrs={"units": spec["units"]})
             template.name = var
-            if not str(template.dtype).startswith(("int","uint")):
+            if not str(template.dtype).startswith(("int", "uint")):
                 template.encoding["_FillValue"] = np.float32(np.nan)
 
         # Value → DataArray broadcastable to template
         new_da = _ensure_dataarray(value, like=template)
 
         # Dtype coercion
-        reg_dtype = dtype_override or (SC.REGISTRY[var].dtype if var in SC.REGISTRY else str(template.dtype))
+        reg_dtype = dtype_override or (
+            SC.REGISTRY[var].dtype if var in SC.REGISTRY else str(template.dtype)
+        )
         new_da = _coerce_dtype(new_da, reg_dtype)
         new_da.name = var
 
@@ -520,23 +420,27 @@ def customize_surface(
     # Write with per-var encodings preserved
     enc = {}
     for name in ds_edit.data_vars:
-        enc[name] = _sanitize_netcdf4_encoding(dict(ds_edit[name].encoding), ds_edit[name].dtype)
+        enc[name] = _sanitize_netcdf4_encoding(
+            dict(ds_edit[name].encoding), ds_edit[name].dtype
+        )
     ds_edit.to_netcdf(nc_out, encoding=enc)
 
     # Optional: run validation
     report = None
     if run_validation:
         from dapper.surf.validate import SurfaceValidator  # lazy import to avoid cycles
+
         v = SurfaceValidator(**(validator_kwargs or {}))
         report = v.validate(str(nc_out))
 
     return str(nc_out), report
 
+
 def _surface_zonal_agg_policy_from_registry(
     ds_src: xr.Dataset,
     *,
-    include: Optional[set[str]],
-    exclude: Optional[set[str]],
+    include: set[str] | None,
+    exclude: set[str] | None,
 ) -> tuple[dict[str, str], set[str]]:
     """
     Returns:
@@ -547,7 +451,9 @@ def _surface_zonal_agg_policy_from_registry(
     drop = set(exclude or [])
 
     # Find registry-derived vars (we will not sample these; we compute them from Domain)
-    derived_vars = {v for v, spec in SURFACE_VAR_SPECS.items() if spec.get("agg") == "derived"}
+    derived_vars = {
+        v for v, spec in SURFACE_VAR_SPECS.items() if spec.get("agg") == "derived"
+    }
 
     agg_policy: dict[str, str] = {}
 
@@ -604,11 +510,11 @@ class SurfaceFile:
     def __init__(
         self,
         ds: xr.Dataset,
-        registry: Optional[Dict[str, SC.ParDef]] = None,
+        registry: dict[str, SC.ParDef] | None = None,
     ) -> None:
         self.ds: xr.Dataset = ds
         # Fall back to global REGISTRY
-        self.registry: Dict[str, SC.ParDef] = registry or SC.REGISTRY
+        self.registry: dict[str, SC.ParDef] = registry or SC.REGISTRY
 
     # ------------------------------------------------------------------
     # Constructors
@@ -616,8 +522,8 @@ class SurfaceFile:
     @classmethod
     def from_netcdf(
         cls,
-        path: Union[str, Path],
-        registry: Optional[Dict[str, SC.ParDef]] = None,
+        path: str | Path,
+        registry: dict[str, SC.ParDef] | None = None,
         decode_times: bool = True,
     ) -> "SurfaceFile":
         """
@@ -634,10 +540,10 @@ class SurfaceFile:
         *,
         src_path: str | Path,
         decode_times: bool = True,
-        chunks: Optional[Dict[str, int]] = None,
-        include: Optional[set[str]] = None,
-        exclude: Optional[set[str]] = None,
-        registry: Optional[Dict[str, SC.ParDef]] = None,
+        chunks: dict[str, int] | None = None,
+        include: set[str] | None = None,
+        exclude: set[str] | None = None,
+        registry: dict[str, SC.ParDef] | None = None,
     ) -> "SurfaceFile":
         """
         Sample the global half-degree surface at (lat, lon) and return a 1x1 SurfaceFile.
@@ -645,7 +551,9 @@ class SurfaceFile:
         """
         ds_src = xr.open_dataset(src_path, decode_times=decode_times, chunks=chunks)
 
-        df_loc = pd.DataFrame({"lat": [float(lat)], "lon": [float(lon)], "weight": [1.0]})
+        df_loc = pd.DataFrame(
+            {"lat": [float(lat)], "lon": [float(lon)], "weight": [1.0]}
+        )
 
         ds_out = sampling.sample_gridded_dataset_points(
             ds_src,
@@ -666,17 +574,17 @@ class SurfaceFile:
         src_path: str | Path,
         *,
         decode_times: bool = True,
-        chunks: Optional[Dict[str, int]] = None,
-        include: Optional[set[str]] = None,
-        exclude: Optional[set[str]] = None,
-        registry: Optional[Dict[str, SC.ParDef]] = None,
+        chunks: dict[str, int] | None = None,
+        include: set[str] | None = None,
+        exclude: set[str] | None = None,
+        registry: dict[str, SC.ParDef] | None = None,
         attach_topounits: bool = True,
         sampling_method: Literal["nearest", "zonal"] = "nearest",
         lon_wrap: sampling.LonWrap = "auto",
         agg_policy: dict[str, str] | None = None,
     ) -> "SurfaceFile":
         """Sample a global surface Dataset for a single-run Domain and return a SurfaceFile."""
-        
+
         if getattr(domain, "mode", None) == "sites":
             raise ValueError(
                 "SurfaceFile.from_domain expects a single-run Domain (mode='cellset'). "
@@ -728,7 +636,9 @@ class SurfaceFile:
                 base_policy.pop(dv, None)
 
             vars_drop = set(exclude or []) | set(derived_vars)
-            vars_include = None if include is None else sorted(set(include) - set(derived_vars))
+            vars_include = (
+                None if include is None else sorted(set(include) - set(derived_vars))
+            )
 
             zw = zonal.intersect_weights_rectilinear(
                 ds_src,
@@ -747,7 +657,11 @@ class SurfaceFile:
             )
             # Inject derived vars if requested
             include_set = set(include) if include else None
-            want_derived = set(derived_vars) if include_set is None else (set(derived_vars) & include_set)
+            want_derived = (
+                set(derived_vars)
+                if include_set is None
+                else (set(derived_vars) & include_set)
+            )
             want_derived -= set(exclude or [])
 
             if want_derived:
@@ -758,33 +672,72 @@ class SurfaceFile:
                 # Ensure dims exist even if only derived requested
                 if lat_dim not in ds_out.dims or lon_dim not in ds_out.dims:
                     ds_out = ds_out.expand_dims(
-                        {lat_dim: np.arange(n, dtype=np.int32), lon_dim: np.arange(1, dtype=np.int32)}
+                        {
+                            lat_dim: np.arange(n, dtype=np.int32),
+                            lon_dim: np.arange(1, dtype=np.int32),
+                        }
                     )
 
                 if "LATIXY" in want_derived:
-                    arr = dom.cells["lat"].to_numpy(dtype=np.float64).reshape(n, 1).astype(np.float32)
-                    attrs = dict(ds_src["LATIXY"].attrs) if "LATIXY" in ds_src else {"units": "degrees_north"}
-                    ds_out["LATIXY"] = xr.DataArray(arr, dims=(lat_dim, lon_dim), attrs=attrs)
+                    arr = (
+                        dom.cells["lat"]
+                        .to_numpy(dtype=np.float64)
+                        .reshape(n, 1)
+                        .astype(np.float32)
+                    )
+                    attrs = (
+                        dict(ds_src["LATIXY"].attrs)
+                        if "LATIXY" in ds_src
+                        else {"units": "degrees_north"}
+                    )
+                    ds_out["LATIXY"] = xr.DataArray(
+                        arr, dims=(lat_dim, lon_dim), attrs=attrs
+                    )
 
                 if "LONGXY" in want_derived:
-                    arr = dom.cells["lon"].to_numpy(dtype=np.float64).reshape(n, 1).astype(np.float32)
-                    attrs = dict(ds_src["LONGXY"].attrs) if "LONGXY" in ds_src else {"units": "degrees_east"}
-                    ds_out["LONGXY"] = xr.DataArray(arr, dims=(lat_dim, lon_dim), attrs=attrs)
+                    arr = (
+                        dom.cells["lon"]
+                        .to_numpy(dtype=np.float64)
+                        .reshape(n, 1)
+                        .astype(np.float32)
+                    )
+                    attrs = (
+                        dict(ds_src["LONGXY"].attrs)
+                        if "LONGXY" in ds_src
+                        else {"units": "degrees_east"}
+                    )
+                    ds_out["LONGXY"] = xr.DataArray(
+                        arr, dims=(lat_dim, lon_dim), attrs=attrs
+                    )
 
                 if "AREA" in want_derived:
                     ea = zw.equal_area_crs
-                    area_m2 = targets.to_crs(ea).geometry.area.to_numpy(dtype=np.float64)
+                    area_m2 = targets.to_crs(ea).geometry.area.to_numpy(
+                        dtype=np.float64
+                    )
 
                     # Preserve upstream AREA units if present
-                    units = (ds_src["AREA"].attrs.get("units") if "AREA" in ds_src else None) or "km^2"
+                    units = (
+                        ds_src["AREA"].attrs.get("units") if "AREA" in ds_src else None
+                    ) or "km^2"
                     if "km" in units:
                         arr = (area_m2 / 1e6).reshape(n, 1).astype(np.float32)
-                        attrs = dict(ds_src["AREA"].attrs) if "AREA" in ds_src else {"units": "km^2", "long_name": "area"}
+                        attrs = (
+                            dict(ds_src["AREA"].attrs)
+                            if "AREA" in ds_src
+                            else {"units": "km^2", "long_name": "area"}
+                        )
                     else:
                         arr = area_m2.reshape(n, 1).astype(np.float32)
-                        attrs = dict(ds_src["AREA"].attrs) if "AREA" in ds_src else {"units": "m2", "long_name": "area"}
+                        attrs = (
+                            dict(ds_src["AREA"].attrs)
+                            if "AREA" in ds_src
+                            else {"units": "m2", "long_name": "area"}
+                        )
 
-                    ds_out["AREA"] = xr.DataArray(arr, dims=(lat_dim, lon_dim), attrs=attrs)
+                    ds_out["AREA"] = xr.DataArray(
+                        arr, dims=(lat_dim, lon_dim), attrs=attrs
+                    )
 
             ds_out.attrs["dapper_surface_sampling_method"] = "zonal"
 
@@ -839,17 +792,17 @@ class SurfaceFile:
         overwrite: bool = False,
         append_attrs=None,
         decode_times: bool = True,
-        chunks: Optional[Dict[str, int]] = None,
-        include: Optional[set[str]] = None,
-        exclude: Optional[set[str]] = None,
-        registry: Optional[Dict[str, SC.ParDef]] = None,
+        chunks: dict[str, int] | None = None,
+        include: set[str] | None = None,
+        exclude: set[str] | None = None,
+        registry: dict[str, SC.ParDef] | None = None,
         attach_topounits: bool = True,
         sampling_method: Literal["nearest", "zonal"] = "nearest",
         lon_wrap: sampling.LonWrap = "auto",
         agg_policy: dict[str, str] | None = None,
         validate: bool = False,
-        validator_kwargs: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Path]:
+        validator_kwargs: dict[str, Any] | None = None,
+    ) -> dict[str, Path]:
         """
         Export surface file(s) for a Domain.
 
@@ -861,12 +814,14 @@ class SurfaceFile:
         from dapper.domains.domain import Domain  # local import to avoid circular deps
 
         if not isinstance(domain, Domain):
-            raise TypeError("SurfaceFile.export() expects a dapper.domains.Domain instance.")
+            raise TypeError(
+                "SurfaceFile.export() expects a dapper.domains.Domain instance."
+            )
 
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        outputs: Dict[str, Path] = {}
+        outputs: dict[str, Path] = {}
 
         for run_id, run_dom in domain.iter_runs():
             run_id = str(run_id)
@@ -893,7 +848,7 @@ class SurfaceFile:
             )
 
             # Attach topounit parameters (and TopounitFracArea) exactly once
-            if attach_topounits and getattr(run_dom, "topounits", None) is not None and run_dom.topounits is not None:
+            if attach_topounits and run_dom.topounits is not None:
                 sf.add_topounits_from_domain(run_dom)
 
             if append_attrs:
@@ -903,6 +858,7 @@ class SurfaceFile:
 
             if validate:
                 from dapper.surf.validate import SurfaceValidator
+
                 vkw = dict(validator_kwargs or {})
 
                 # Allow N×1 (cellset) surfaces without forcing len==1
@@ -921,10 +877,10 @@ class SurfaceFile:
     def add_params_from_df(
         self,
         dim_name: str,
-        df,
+        df: pd.DataFrame,
         id_col: str,
         *,
-        drop_cols: Optional[List[str]] = None,
+        drop_cols: list[str] | None = None,
     ) -> None:
         """
         Attach / update 1D parameters along `dim_name` using a DataFrame.
@@ -942,13 +898,11 @@ class SurfaceFile:
         drop_cols : list[str], optional
             Columns to ignore as parameters (e.g. "geometry").
         """
-        import pandas as pd  # local to avoid a hard dependency at import time
 
         if id_col not in df.columns:
             raise KeyError(f"id_col '{id_col}' not found in DataFrame.")
 
-        drop_cols = set(drop_cols or [])
-        drop_cols.add(id_col)
+        skip_cols = {*(drop_cols or []), id_col}
 
         # Normalize ids to string for robust alignment
         df = df.copy()
@@ -974,7 +928,7 @@ class SurfaceFile:
 
         # For each parameter column, align to dim coord and write
         for col in df.columns:
-            if col in drop_cols:
+            if col in skip_cols:
                 continue
 
             # Map id -> value (one per id)
@@ -1045,11 +999,8 @@ class SurfaceFile:
         - id_col  (unique id per topounit across the whole run)
         - pct_col (percent of the parent cell; sums to ~100 per gid)
         """
-        import pandas as pd
-        import numpy as np
-        import xarray as xr
 
-        if getattr(domain, "topounits", None) is None or domain.topounits is None:
+        if getattr(domain, "topounits", None) is None:
             raise ValueError("Domain has no topounits attached.")
 
         topos = domain.topounits.copy()
@@ -1066,31 +1017,43 @@ class SurfaceFile:
         lat_dim = "lsmlat" if "lsmlat" in ds.dims else None
         lon_dim = "lsmlon" if "lsmlon" in ds.dims else None
         if lat_dim is None or lon_dim is None:
-            raise ValueError("Surface dataset is missing expected spatial dims (lsmlat/lsmlon).")
+            raise ValueError(
+                "Surface dataset is missing expected spatial dims (lsmlat/lsmlon)."
+            )
 
         nj = int(ds.sizes[lat_dim])
         ni = int(ds.sizes[lon_dim])
         if ni != 1:
-            raise NotImplementedError("Topounit mapping currently assumes (nj=N, ni=1) layout for cellsets.")
+            raise NotImplementedError(
+                "Topounit mapping currently assumes (nj=N, ni=1) layout for cellsets."
+            )
 
         # Domain cell order must match surf layout order
         df_loc = domain.to_df_loc()
         if len(df_loc) != nj:
-            raise ValueError(f"Domain has {len(df_loc)} cells but surf dataset has {nj} {lat_dim} entries.")
+            raise ValueError(
+                f"Domain has {len(df_loc)} cells but surf dataset has {nj} {lat_dim} entries."
+            )
 
         gid_order = df_loc["gid"].astype(str).tolist()
         gid_to_j = {gid: j for j, gid in enumerate(gid_order)}
 
         # Create / align the topounit dimension
-        top_ids = pd.unique(topos[id_col]).astype(str)
-        top_ids = list(top_ids)
+        top_ids = list(pd.unique(topos[id_col]).astype(str))
 
         # Add 1D topounit parameters (all non-geometry, non-(gid/id/pct) columns)
         drop = {"geometry", gid_col, id_col, pct_col}
         param_cols = [c for c in topos.columns if c not in drop]
         if param_cols:
-            df_params = topos[[id_col] + param_cols].drop_duplicates(subset=[id_col]).copy()
-            self.add_params_from_df(dim_name=dim_name, df=df_params, id_col=id_col, drop_cols=["geometry"] if "geometry" in df_params.columns else None)
+            df_params = (
+                topos[[id_col] + param_cols].drop_duplicates(subset=[id_col]).copy()
+            )
+            self.add_params_from_df(
+                dim_name=dim_name,
+                df=df_params,
+                id_col=id_col,
+                drop_cols=["geometry"] if "geometry" in df_params.columns else None,
+            )
 
         # Build pct mapping array: (topounit, nj, ni)
         pct = np.zeros((len(top_ids), nj, ni), dtype=np.float32)
@@ -1098,31 +1061,44 @@ class SurfaceFile:
 
         for gid, grp in topos.groupby(gid_col):
             if gid not in gid_to_j:
-                raise ValueError(f"topounits contains gid={gid!r} not present in domain cells.")
+                raise ValueError(
+                    f"topounits contains gid={gid!r} not present in domain cells."
+                )
             j = gid_to_j[gid]
 
             vals = grp[pct_col].to_numpy(dtype=np.float64)
             s = float(np.nansum(vals))
             if not np.isfinite(s) or s <= 0:
-                raise ValueError(f"Topounit pct weights for gid={gid} are invalid (sum={s}).")
+                raise ValueError(
+                    f"Topounit pct weights for gid={gid} are invalid (sum={s})."
+                )
             # normalize to 1.0 (decimal fraction) just in case
             vals = 1.0 * (vals / s)
 
-            for tid, v in zip(grp[id_col].astype(str).tolist(), vals):
+            for tid, v in zip(grp[id_col].astype(str).tolist(), vals, strict=False):
                 k = id_to_k[tid]
                 pct[k, j, 0] = float(v)
 
         # Install the topounit coord if needed
         if dim_name not in ds.dims:
-            ds = ds.assign_coords({dim_name: (dim_name, np.asarray(top_ids, dtype=object))})
+            ds = ds.assign_coords(
+                {dim_name: (dim_name, np.asarray(top_ids, dtype=object))}
+            )
         else:
             # If already exists, ensure ids match exactly
             existing = [str(x) for x in ds[dim_name].values.tolist()]
             if existing != top_ids:
-                raise ValueError(f"Existing {dim_name} coord does not match topounit ids from domain.")
+                raise ValueError(
+                    f"Existing {dim_name} coord does not match topounit ids from domain."
+                )
 
         ds[pct_var_name] = xr.DataArray(pct, dims=(dim_name, lat_dim, lon_dim))
-        ds[pct_var_name].attrs.update({"long_name": "fraction of gridcell area in each topounit", "units": "unitless"})
+        ds[pct_var_name].attrs.update(
+            {
+                "long_name": "fraction of gridcell area in each topounit",
+                "units": "unitless",
+            }
+        )
 
         # Expand topounit-indexed variables that exist in ds but currently lack the
         # topounit dimension.  All topounits in a grid cell inherit the parent cell's
@@ -1139,8 +1115,10 @@ class SurfaceFile:
             if dim_name in _da.dims:
                 continue  # already has the topounit dim
             # Repeat identical values across all topounits
-            _expanded = xr.concat([_da] * n_top,
-                                   dim=xr.DataArray(top_coord.values, dims=[dim_name], name=dim_name))
+            _expanded = xr.concat(
+                [_da] * n_top,
+                dim=xr.DataArray(top_coord.values, dims=[dim_name], name=dim_name),
+            )
             _expanded[dim_name] = top_coord
             # Reorder dims to match spec order (class dims before topounit, spatial last)
             _existing = set(_expanded.dims)
@@ -1150,7 +1128,7 @@ class SurfaceFile:
 
         self.ds = ds
 
-    def drop_params(self, names: Union[str, List[str]]) -> None:
+    def drop_params(self, names: str | list[str]) -> None:
         """
         Drop one or more data variables from the surface dataset.
         """
@@ -1188,45 +1166,41 @@ class SurfaceFile:
         if dim_name not in ds.dims:
             raise KeyError(f"dimension {dim_name!r} not found in dataset.")
 
-        old_size = ds.dims[dim_name]
+        old_size = ds.sizes[dim_name]
         if new_size == old_size:
             return
 
-        # Coords: if missing, synthesize an index
+        if new_size < old_size:
+            self.ds = ds.isel({dim_name: slice(0, new_size)})
+            return
+
+        # Pad: build the padded variables first, then install the longer coordinate
+        # (assigning the coordinate first conflicts with the old variable sizes).
         coord = ds.coords.get(
             dim_name,
             xr.DataArray(np.arange(old_size), dims=(dim_name,)),
         )
+        new_coord = np.concatenate([coord.values, np.arange(old_size, new_size)])
 
-        if new_size < old_size:
-            new_coord = coord.isel({dim_name: slice(0, new_size)})
-        else:
-            extra = xr.DataArray(
-                np.arange(old_size, new_size),
-                dims=(dim_name,),
-            )
-            new_coord = xr.concat([coord, extra], dim=dim_name)
-
-        ds = ds.assign_coords({dim_name: new_coord})
-
-        # Adjust all vars that use this dim
-        for v in list(ds.data_vars):
+        padded = {}
+        for v in ds.data_vars:
             if dim_name not in ds[v].dims:
                 continue
-            da = ds[v]
-            axis = da.dims.index(dim_name)
-            if new_size < old_size:
-                ds[v] = da.isel({dim_name: slice(0, new_size)})
-            else:
-                pad_shape = list(da.shape)
-                pad_shape[axis] = new_size - old_size
-                pad = xr.DataArray(
-                    np.full(pad_shape, fill_value, dtype=da.dtype),
-                    dims=da.dims,
-                )
-                ds[v] = xr.concat([da, pad], dim=dim_name)
+            da = ds[v].drop_vars(dim_name, errors="ignore")
+            pad_shape = list(da.shape)
+            pad_shape[da.dims.index(dim_name)] = new_size - old_size
+            pad = xr.DataArray(
+                np.full(pad_shape, fill_value, dtype=da.dtype), dims=da.dims
+            )
+            padded[v] = xr.concat([da, pad], dim=dim_name)
 
-        self.ds = ds
+        ds = ds.drop_vars(list(padded))
+        ds = ds.drop_vars(dim_name, errors="ignore").assign_coords(
+            {dim_name: (dim_name, new_coord, coord.attrs)}
+        )
+        for v, da in padded.items():
+            ds[v] = da
+        self.ds = ds[list(self.ds.data_vars)]  # keep original variable order
 
     def set_scalar(self, name: str, value: ArrayLike) -> None:
         """
@@ -1237,7 +1211,7 @@ class SurfaceFile:
     # ------------------------------------------------------------------
     # Validation and writing
     # ------------------------------------------------------------------
-    def basic_registry_check(self) -> Dict[str, set[str]]:
+    def basic_registry_check(self) -> dict[str, set[str]]:
         """
         Quick registry sanity check.
 
@@ -1259,7 +1233,7 @@ class SurfaceFile:
         self,
         strict: bool = False,
         use_external_validator: bool = False,
-        validator_kwargs: Optional[Dict[str, Any]] = None,
+        validator_kwargs: dict[str, Any] | None = None,
     ):
         """
         Validate the surface Dataset.
@@ -1289,6 +1263,7 @@ class SurfaceFile:
             tmp_path = Path(tmpdir) / "tmp_surface.nc"
             self.ds.to_netcdf(tmp_path)
             from dapper.surf.validate import SurfaceValidator
+
             v = SurfaceValidator(**(validator_kwargs or {}))
             report = v.validate(str(tmp_path))
 
@@ -1296,15 +1271,15 @@ class SurfaceFile:
 
     def to_netcdf(
         self,
-        path: Union[str, Path],
+        path: str | Path,
         overwrite: bool = False,
-        encoding: Optional[Dict[str, Dict[str, Any]]] = None,
+        encoding: dict[str, dict[str, Any]] | None = None,
         append_attrs: dict | None = None,
         dapper_attrs: dict | None = None,
         add_created_utc: bool = True,
     ) -> str:
         """Write this SurfaceFile to disk as NetCDF."""
-        
+
         path = Path(path)
 
         if path.exists() and not overwrite:
@@ -1321,20 +1296,12 @@ class SurfaceFile:
             )
 
         # If caller supplied encoding, still merge attrs in a non-destructive way.
-        import datetime as _dt
         ds2 = self.ds.copy(deep=False)
-        merged = dict(ds2.attrs)
-
-        if dapper_attrs:
-            for k, v in dict(dapper_attrs).items():
-                merged.setdefault(k, v)
-
-        if add_created_utc:
-            merged.setdefault("dapper_created_utc", _dt.datetime.utcnow().isoformat() + "Z")
-
-        if append_attrs:
-            merged.update(dict(append_attrs))
-
-        ds2.attrs = merged
+        ds2.attrs = merge_global_attrs(
+            ds2.attrs,
+            dapper_attrs=dapper_attrs,
+            append_attrs=append_attrs,
+            add_created_utc=add_created_utc,
+        )
         ds2.to_netcdf(path, encoding=encoding)
         return str(path)
